@@ -1,0 +1,8 @@
+{
+  "name": "Ammal Farm",
+  "description": "Amazon-style livestock marketplace for goats featuring verified farms, multi-role access (Super Admin, Farm Admin, Customer), reservations, and real-time listings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

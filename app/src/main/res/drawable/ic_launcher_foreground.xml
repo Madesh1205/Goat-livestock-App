@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Goat Silhouette & Horns with Farm Shield within 66dp safe zone (21 to 87) -->
+    <!-- Outer Shield / Emblem Outline -->
+    <path
+        android:fillColor="#E2B13C"
+        android:pathData="M54,24 C64,24 74,27 78,32 C78,48 72,66 54,82 C36,66 30,48 30,32 C34,27 44,24 54,24 Z" />
+    <path
+        android:fillColor="#0D3320"
+        android:pathData="M54,26.5 C62.5,26.5 71.5,29.2 75.5,33.5 C75.5,47.5 70,63.5 54,78 C38,63.5 32.5,47.5 32.5,33.5 C36.5,29.2 45.5,26.5 54,26.5 Z" />
+    <!-- Goat Horn Left -->
+    <path
+        android:fillColor="#F6C343"
+        android:pathData="M49,38 C43,33 37,34 38,40 C39,44 45,43 47,43 Z" />
+    <!-- Goat Horn Right -->
+    <path
+        android:fillColor="#F6C343"
+        android:pathData="M59,38 C65,33 71,34 70,40 C69,44 63,43 61,43 Z" />
+    <!-- Goat Head Silhouette & Muzzle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,36 C48,36 45,40 45,46 C45,51 47,56 49,63 C50.5,68 57.5,68 59,63 C61,56 63,51 63,46 C63,40 60,36 54,36 Z" />
+    <!-- Goat Ears -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,43 C39,44 38,48 41,50 C44,50 45.5,46 45.5,44 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M63,43 C69,44 70,48 67,50 C64,50 62.5,46 62.5,44 Z" />
+    <!-- Beard / Chin Tuft -->
+    <path
+        android:fillColor="#F6C343"
+        android:pathData="M51.5,64 L56.5,64 L54,72 Z" />
+    <!-- Eyes -->
+    <path
+        android:fillColor="#0D3320"
+        android:pathData="M48,46 A1.5,1.5 0 1,0 48,49 A1.5,1.5 0 1,0 48,46 Z" />
+    <path
+        android:fillColor="#0D3320"
+        android:pathData="M60,46 A1.5,1.5 0 1,0 60,49 A1.5,1.5 0 1,0 60,46 Z" />
+    <!-- Star accent -->
+    <path
+        android:fillColor="#F6C343"
+        android:pathData="M54,28 L55.2,30.8 L58.2,31.1 L55.9,33.1 L56.6,36 L54,34.4 L51.4,36 L52.1,33.1 L49.8,31.1 L52.8,30.8 Z" />
+</vector>

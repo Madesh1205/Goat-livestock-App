@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="farm_primary">#006D3B</color>
+    <color name="farm_primary_dark">#7DDA9B</color>
+    <color name="farm_primary_container">#99F7B5</color>
+    <color name="farm_background_light">#F7FAF4</color>
+    <color name="farm_background_dark">#101411</color>
+    <color name="farm_surface_light">#FFFFFF</color>
+    <color name="farm_surface_dark">#181C19</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
