@@ -101,7 +101,7 @@ class Stage11HApprovalAndBookingTest {
             "ERROR: record \"old\" has no field \"listing_fee_amount\" in trigger tr_enforce_goat_listing_fee",
             "ERROR: duplicate key value violates unique constraint \"idx_single_active_goat_booking\" (SQLSTATE 23505)",
             "PostgrestException(message=relation \"public.bookings\" does not exist, code=42P01, details=null, hint=null)",
-            "https://xrkhmfedwsbbbfordrrz.supabase.co/rest/v1/bookings?select=*"
+            "https://wphgctwmjcvrblpybktd.supabase.co/rest/v1/bookings?select=*"
         )
 
         for (rawError in testCases) {

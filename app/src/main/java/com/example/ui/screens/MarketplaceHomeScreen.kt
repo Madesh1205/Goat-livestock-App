@@ -167,27 +167,17 @@ fun MarketplaceHomeScreen(
                             .weight(1f)
                             .clickable { onClearAllFilters() }
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Pets,
-                                    contentDescription = "Logo",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
+                        com.example.ui.components.AduSanthaiLogoBadge(
+                            size = 38.dp,
+                            elevation = 2.dp
+                        )
 
                         Spacer(modifier = Modifier.width(8.dp))
 
                         Column(modifier = Modifier.weight(1f, fill = false)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = "AMMAL",
+                                    text = "ADU",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 0.5.sp,
@@ -196,7 +186,7 @@ fun MarketplaceHomeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Text(
-                                    text = "FARM",
+                                    text = "SANTHAI",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Black,
                                     letterSpacing = 0.5.sp,
@@ -205,7 +195,7 @@ fun MarketplaceHomeScreen(
                                 )
                             }
                             Text(
-                                text = "LIVESTOCK MARKETPLACE",
+                                text = "AMMAL FARM • LIVESTOCK",
                                 fontSize = 8.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.8.sp,

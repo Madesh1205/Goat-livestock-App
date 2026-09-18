@@ -82,7 +82,7 @@ fun ForgotPasswordScreen(
                 text = if (step == 1)
                     "Enter your registered account email address and we'll send you recovery instructions."
                 else
-                    "Enter your new password below to regain secure access to your Ammal Farm account.",
+                    "Enter your new password below to regain secure access to your Adu Santhai account.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

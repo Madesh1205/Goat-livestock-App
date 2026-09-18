@@ -82,30 +82,20 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // App Brand Logo & Title
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Pets,
-                    contentDescription = "Ammal Farm Logo",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(40.dp)
-                )
-            }
+            com.example.ui.components.AduSanthaiLogoBadge(
+                size = 88.dp,
+                elevation = 6.dp
+            )
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "Ammal Farm",
+                    text = "Adu Santhai",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Black,
                     color = MaterialTheme.colorScheme.onBackground
                 )
                 Text(
-                    text = "Tamil Nadu's Premier Pedigreed Goat Marketplace",
+                    text = "Tamil Nadu's Premier Pedigreed Livestock & Goat Marketplace",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center

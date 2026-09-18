@@ -54,6 +54,9 @@ class SupabaseAuthInterceptor(
  * Primary Supabase Client initialization & DI Provider.
  * Reads SUPABASE_URL and SUPABASE_ANON_KEY from BuildConfig and provides initialized
  * instances of Auth, Postgrest, Storage, and Realtime.
+ * 
+ * Strict configuration: Fails explicitly with an IllegalStateException if credentials are missing
+ * rather than falling back to an obsolete project.
  */
 class SupabaseClient(
     val customUrl: String? = null,
@@ -67,6 +70,12 @@ class SupabaseClient(
      * Lazily initialized Supabase SDK Client with Auth, Postgrest, Storage, and Realtime plugins.
      */
     override val client: SdkSupabaseClient by lazy {
+        check(url.isNotBlank()) {
+            "Supabase URL is not configured. Please provide SUPABASE_URL in AI Studio Secrets / .env."
+        }
+        check(anonKey.isNotBlank()) {
+            "Supabase Anon Key is not configured. Please provide SUPABASE_ANON_KEY in AI Studio Secrets / .env."
+        }
         createSupabaseClient(
             supabaseUrl = url,
             supabaseKey = anonKey
@@ -113,9 +122,6 @@ class SupabaseClient(
     val authUrl: String get() = "$url/auth/v1"
 
     companion object : SupabaseProvider {
-        private const val FALLBACK_URL = "https://xrkhmfedwsbbbfordrrz.supabase.co"
-        private const val FALLBACK_ANON_KEY = "sb_publishable_8xl5qoICatxfzFAz9HUqxQ_RxePkq8X"
-
         /**
          * Resolves Supabase URL from SupabaseConfig.
          */

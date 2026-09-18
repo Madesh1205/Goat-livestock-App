@@ -2794,7 +2794,7 @@ private fun FarmListingPaymentsTab(
                         if (!payment.razorpayPaymentId.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Payment ID: ${payment.razorpayPaymentId}",
+                                "Payment Ref: ${payment.razorpayPaymentId}",
                                 fontSize = 11.sp,
                                 color = Color.Gray
                             )

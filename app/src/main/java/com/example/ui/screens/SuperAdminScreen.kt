@@ -138,7 +138,7 @@ fun SuperAdminScreen(
                                 }
                             }
                             Text(
-                                "Ammal Farm Livestock Platform Control",
+                                "Adu Santhai Platform Control",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -3594,7 +3594,7 @@ private fun SuperAdminListingFeesTab(
                         if (!payment.razorpayPaymentId.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Payment ID: ${payment.razorpayPaymentId}",
+                                "Payment Ref: ${payment.razorpayPaymentId}",
                                 fontSize = 11.sp,
                                 color = Color.Gray
                             )

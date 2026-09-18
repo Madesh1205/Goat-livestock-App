@@ -666,7 +666,7 @@ class AuthRepositoryImpl(
                     isLoading = false,
                     isAuthenticated = true,
                     userProfile = profile,
-                    successMessage = "Account created successfully! Welcome to Ammal Farm.",
+                    successMessage = "Account created successfully! Welcome to Adu Santhai.",
                     emailConfirmationRequired = false
                 )
             }
@@ -711,7 +711,7 @@ class AuthRepositoryImpl(
                         isAuthenticated = true,
                         userProfile = syncedProfile,
                         userFarm = null,
-                        successMessage = "Account created successfully! Welcome to Ammal Farm.",
+                        successMessage = "Account created successfully! Welcome to Adu Santhai.",
                         emailConfirmationRequired = false
                     )
                 }

@@ -4,18 +4,21 @@ import com.example.BuildConfig
 
 /**
  * Configuration for Supabase Backend integration.
- * Reads URL and Key from environment variables (injected via BuildConfig / Secrets).
- * Automatically normalizes API URLs (e.g. converting database hostnames to PostgREST API endpoints).
+ * Reads URL and Key strictly from environment variables / BuildConfig.
+ * Intended target: Mumbai (ap-south-1) - wphgctwmjcvrblpybktd.supabase.co
+ * 
+ * IMPORTANT: Fails cleanly with clear errors when configuration is missing.
+ * No silent fallbacks to obsolete Tokyo environments.
  */
 object SupabaseConfig {
-    private const val FALLBACK_SUPABASE_URL = "https://xrkhmfedwsbbbfordrrz.supabase.co"
-    private const val FALLBACK_SUPABASE_ANON_KEY = "sb_publishable_8xl5qoICatxfzFAz9HUqxQ_RxePkq8X"
+    const val MUMBAI_PROJECT_REF = "wphgctwmjcvrblpybktd"
+    const val MUMBAI_SUPABASE_URL = "https://wphgctwmjcvrblpybktd.supabase.co"
 
     fun sanitizeUrl(rawUrl: String?): String {
-        if (rawUrl.isNullOrBlank()) return FALLBACK_SUPABASE_URL
+        if (rawUrl.isNullOrBlank()) return ""
         var url = rawUrl.trim().removeSurrounding("\"").removeSurrounding("'")
 
-        // If user passed a full PostgreSQL connection URI like postgresql://...
+        // If passed a full PostgreSQL connection URI like postgresql://...
         if (url.startsWith("postgres://") || url.startsWith("postgresql://")) {
             val atIndex = url.indexOf('@')
             if (atIndex != -1) {
@@ -38,13 +41,13 @@ object SupabaseConfig {
             url = url.substringBefore(":")
         }
 
-        // If host starts with db., e.g. db.xrkhmfedwsbbbfordrrz.supabase.co
+        // If host starts with db., e.g. db.wphgctwmjcvrblpybktd.supabase.co
         // Convert to standard Supabase API Gateway domain
         if (url.startsWith("db.")) {
             url = url.removePrefix("db.")
         }
 
-        // If user only entered the project ref, e.g. "xrkhmfedwsbbbfordrrz"
+        // If user only entered the project ref, e.g. "wphgctwmjcvrblpybktd"
         if (!url.contains(".")) {
             url = "$url.supabase.co"
         }
@@ -53,36 +56,36 @@ object SupabaseConfig {
     }
 
     fun sanitizeKey(rawKey: String?): String {
-        if (rawKey.isNullOrBlank()) return FALLBACK_SUPABASE_ANON_KEY
+        if (rawKey.isNullOrBlank()) return ""
         val key = rawKey.trim().removeSurrounding("\"").removeSurrounding("'")
-        return if (key.isNotBlank()) key else FALLBACK_SUPABASE_ANON_KEY
+        return key
     }
 
     val supabaseUrl: String
         get() = try {
             val direct = BuildConfig.SUPABASE_URL
-            if (!direct.isNullOrBlank()) sanitizeUrl(direct) else FALLBACK_SUPABASE_URL
+            if (!direct.isNullOrBlank()) sanitizeUrl(direct) else ""
         } catch (_: Throwable) {
             try {
                 val configField = BuildConfig::class.java.getField("SUPABASE_URL")
                 val value = configField.get(null) as? String
                 sanitizeUrl(value)
             } catch (_: Throwable) {
-                FALLBACK_SUPABASE_URL
+                ""
             }
         }
 
     val supabaseAnonKey: String
         get() = try {
             val direct = BuildConfig.SUPABASE_ANON_KEY
-            if (!direct.isNullOrBlank()) sanitizeKey(direct) else FALLBACK_SUPABASE_ANON_KEY
+            if (!direct.isNullOrBlank()) sanitizeKey(direct) else ""
         } catch (_: Throwable) {
             try {
                 val configField = BuildConfig::class.java.getField("SUPABASE_ANON_KEY")
                 val value = configField.get(null) as? String
                 sanitizeKey(value)
             } catch (_: Throwable) {
-                FALLBACK_SUPABASE_ANON_KEY
+                ""
             }
         }
 
@@ -130,8 +133,9 @@ object SupabaseConfig {
             trimmed.startsWith("android.resource://")) {
             return trimmed
         }
+        val baseUrl = supabaseUrl.ifBlank { MUMBAI_SUPABASE_URL }
         val cleanPath = trimmed.removePrefix("/")
-        return "$supabaseUrl/storage/v1/object/public/$bucket/$cleanPath"
+        return "$baseUrl/storage/v1/object/public/$bucket/$cleanPath"
     }
 
     /**
@@ -155,5 +159,3 @@ object SupabaseConfig {
         }
     }
 }
-
-
