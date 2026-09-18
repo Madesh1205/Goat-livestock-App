@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.repository.AuthRepository
 import com.example.model.*
+import com.example.util.PhoneValidator
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -86,6 +87,11 @@ class AuthViewModel(
             _uiState.update { it.copy(errorMessage = "Please fill in all required fields.") }
             return
         }
+        val phoneErr = PhoneValidator.getValidationErrorMessage(phone)
+        if (phoneErr != null) {
+            _uiState.update { it.copy(errorMessage = phoneErr) }
+            return
+        }
         if (password != confirmPass) {
             _uiState.update { it.copy(errorMessage = "Passwords do not match.") }
             return
@@ -134,6 +140,11 @@ class AuthViewModel(
             _uiState.update { it.copy(errorMessage = "Please fill in all farm application fields.") }
             return
         }
+        val phoneErr = PhoneValidator.getValidationErrorMessage(phone)
+        if (phoneErr != null) {
+            _uiState.update { it.copy(errorMessage = phoneErr) }
+            return
+        }
         if (password != confirmPass) {
             _uiState.update { it.copy(errorMessage = "Passwords do not match.") }
             return
@@ -159,7 +170,7 @@ class AuthViewModel(
                 val requiresVerification = authRepository.authState.value.emailConfirmationRequired
                 onSuccess(requiresVerification)
             }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = err.message ?: "Farm registration failed.") }
+                _uiState.update { it.copy(errorMessage = err.message ?: "Farm application registration failed.") }
             }
         }
     }
@@ -175,67 +186,71 @@ class AuthViewModel(
         farmDescription: String,
         onSuccess: () -> Unit
     ) {
-        registerFarmAdmin(name, email, password, confirmPass, phone, farmName, farmDistrict, farmDescription) { _ -> onSuccess() }
-    }
-
-    fun resendEmailVerification(email: String) {
-        if (email.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Please enter your registered email.") }
-            return
-        }
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = authRepository.resendEmailVerification(email)
-            _uiState.update { it.copy(isLoading = false) }
-            result.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = err.message ?: "Failed to resend verification email.") }
-            }
-        }
+        registerFarmAdmin(
+            name, email, password, confirmPass, phone, farmName, farmDistrict, farmDescription
+        ) { _ -> onSuccess() }
     }
 
     fun sendPasswordReset(email: String) {
         if (email.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Please enter your registered email.") }
+            _uiState.update { it.copy(errorMessage = "Please enter your registered email address.") }
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = authRepository.sendPasswordResetOtp(email)
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    resetEmailSent = result.isSuccess
-                )
+            _uiState.update { it.copy(isLoading = false) }
+            result.onSuccess {
+                _uiState.update { it.copy(resetEmailSent = true, successMessage = "Password reset link sent to $email. Please check your inbox.") }
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = err.message ?: "Failed to send reset link.") }
             }
         }
     }
 
-    fun resetPassword(newPass: String, confirmPass: String, onSuccess: () -> Unit) {
-        if (newPass.length < 6) {
+    fun resendEmailVerification(email: String) {
+        if (email.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Please enter your registered email address.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            val result = authRepository.resendEmailVerification(email)
+            _uiState.update { it.copy(isLoading = false) }
+            result.onSuccess {
+                _uiState.update {
+                    it.copy(successMessage = "Verification email resent to $email. Please check your inbox.")
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(errorMessage = err.message ?: "Failed to resend email verification link.")
+                }
+            }
+        }
+    }
+
+    fun resetPassword(newPassword: String, confirmPass: String, onSuccess: () -> Unit) {
+        if (newPassword.isBlank() || newPassword.length < 6) {
             _uiState.update { it.copy(errorMessage = "Password must be at least 6 characters.") }
             return
         }
-        if (newPass != confirmPass) {
+        if (newPassword != confirmPass) {
             _uiState.update { it.copy(errorMessage = "Passwords do not match.") }
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = authRepository.resetPassword(newPass)
+            val result = authRepository.resetPassword(newPassword)
             _uiState.update { it.copy(isLoading = false) }
             result.onSuccess {
+                _uiState.update { it.copy(successMessage = "Password reset successfully. Please log in.") }
                 onSuccess()
             }.onFailure { err ->
                 _uiState.update { it.copy(errorMessage = err.message ?: "Failed to reset password.") }
             }
-        }
-    }
-
-    fun refreshUserProfile() {
-        viewModelScope.launch {
-            authRepository.fetchAndSyncUserProfile()
         }
     }
 
@@ -247,6 +262,14 @@ class AuthViewModel(
     }
 
     fun updateProfile(name: String, phone: String) {
+        val cleanPhone = phone.trim()
+        if (cleanPhone.isNotBlank()) {
+            val phoneErr = PhoneValidator.getValidationErrorMessage(cleanPhone)
+            if (phoneErr != null) {
+                _uiState.update { it.copy(errorMessage = phoneErr) }
+                return
+            }
+        }
         viewModelScope.launch {
             authRepository.updateProfile(name, phone)
         }
@@ -262,6 +285,12 @@ class AuthViewModel(
 
     fun clearPrefilledEmail() {
         _uiState.update { it.copy(prefilledEmail = null) }
+    }
+
+    fun refreshUserProfile() {
+        viewModelScope.launch {
+            authRepository.checkExistingSession()
+        }
     }
 
     companion object {

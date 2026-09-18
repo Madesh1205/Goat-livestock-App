@@ -95,6 +95,8 @@ data class ProfileDto(
     val email: String? = null,
     @SerialName("full_name") val fullName: String? = null,
     val phone: String? = null,
+    @SerialName("is_phone_verified") val isPhoneVerified: Boolean? = null,
+    @SerialName("phone_verified") val phoneVerified: Boolean? = null,
     val role: String? = "CUSTOMER",
     @Transient val farmId: String? = null,
     @SerialName("avatar_url") val avatarUrl: String? = null,
@@ -104,12 +106,14 @@ data class ProfileDto(
     fun toDomain(): UserProfile {
         val effectiveName = fullName?.takeIf { it.isNotBlank() } ?: "User"
         val effectivePhone = phone?.takeIf { it.isNotBlank() } ?: ""
+        val effectiveVerified = (isPhoneVerified == true) || (phoneVerified == true)
         val effectiveRole = UserRole.fromString(role)
         return UserProfile(
             id = id,
             email = email ?: "",
             name = effectiveName,
             phone = effectivePhone,
+            isPhoneVerified = effectiveVerified,
             role = effectiveRole,
             farmId = farmId,
             isSuspended = isSuspended ?: false
@@ -123,6 +127,7 @@ data class ProfileDto(
                 email = domain.email.ifBlank { null },
                 fullName = domain.name,
                 phone = domain.phone.ifBlank { null },
+                isPhoneVerified = domain.isPhoneVerified,
                 role = domain.role.name,
                 farmId = domain.farmId?.takeIf { it.isNotBlank() }?.let { ensureValidUuid(it) },
                 isSuspended = domain.isSuspended,

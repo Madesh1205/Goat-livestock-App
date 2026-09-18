@@ -74,6 +74,7 @@ data class UserProfile(
     val name: String,
     val phone: String = "",
     val role: UserRole = UserRole.CUSTOMER,
+    val isPhoneVerified: Boolean = false,
     val farmId: String? = null,
     val isSuspended: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()

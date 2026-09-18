@@ -122,14 +122,13 @@ class MainActivity : ComponentActivity() {
                         val result = snackbarHostState.showSnackbar(
                             message = error,
                             actionLabel = "Retry",
-                            duration = SnackbarDuration.Indefinite,
+                            duration = SnackbarDuration.Short,
                             withDismissAction = true
                         )
                         if (result == SnackbarResult.ActionPerformed) {
                             marketplaceViewModel.retryNetworkCall()
-                        } else {
-                            marketplaceViewModel.clearNetworkError()
                         }
+                        marketplaceViewModel.clearNetworkError()
                     }
                 }
 

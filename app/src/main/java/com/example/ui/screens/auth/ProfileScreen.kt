@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,6 +21,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.UserRole
@@ -27,6 +30,7 @@ import com.example.model.VerificationStatus
 import com.example.ui.theme.ThemeMode
 import com.example.ui.viewmodel.AuthUiState
 import com.example.ui.viewmodel.AuthViewModel
+import com.example.util.PhoneValidator
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,8 +77,11 @@ fun ProfileScreen(
                         }
                         IconButton(onClick = {
                             if (isEditing) {
-                                authViewModel.updateProfile(editName, editPhone)
-                                isEditing = false
+                                val phoneErr = if (editPhone.isNotBlank()) PhoneValidator.getValidationErrorMessage(editPhone) else null
+                                if (phoneErr == null) {
+                                    authViewModel.updateProfile(editName, editPhone)
+                                    isEditing = false
+                                }
                             } else {
                                 isEditing = true
                             }
@@ -442,23 +449,66 @@ fun ProfileScreen(
                                 value = editName,
                                 onValueChange = { editName = it },
                                 label = { Text("Full Name") },
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
+                            val phoneError = if (editPhone.isNotBlank()) PhoneValidator.getValidationErrorMessage(editPhone) else null
                             OutlinedTextField(
                                 value = editPhone,
                                 onValueChange = { editPhone = it },
                                 label = { Text("Phone Number") },
+                                placeholder = { Text("e.g. 9876543210") },
+                                isError = phoneError != null,
+                                supportingText = {
+                                    if (phoneError != null) {
+                                        Text(phoneError, color = MaterialTheme.colorScheme.error)
+                                    } else {
+                                        Text("10-digit Indian mobile number (starts with 6, 7, 8, or 9)", fontSize = 11.sp)
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
                         } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.Phone, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text("Phone", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text(if (user.phone.isNotBlank()) user.phone else "Not provided", fontWeight = FontWeight.SemiBold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Phone,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text("Phone", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            text = if (user.phone.isNotBlank()) PhoneValidator.formatDisplay(user.phone) else "Not provided",
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                if (user.phone.isBlank()) {
+                                    TextButton(
+                                        onClick = { isEditing = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Add Phone", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Outlined.Email, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                                 Spacer(modifier = Modifier.width(12.dp))

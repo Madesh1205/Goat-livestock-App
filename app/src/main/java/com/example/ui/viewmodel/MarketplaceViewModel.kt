@@ -253,32 +253,10 @@ class MarketplaceViewModel(
         val message = e.message ?: ""
         if (!SupabaseConfig.isConfigured || message.contains("Database not connected", ignoreCase = true)) {
             Log.w("MarketplaceVM", "Notice: database not connected or unconfigured for $tag: $message")
-            _uiState.update { current ->
-                if (current.networkError == null) {
-                    current.copy(networkError = "Database not connected: Supabase configuration is missing or unconfigured.")
-                } else current
-            }
             return
         }
 
-        Log.e("MarketplaceVM", "Data sync error in $tag: ${e.message}", e)
-        _uiState.update { current ->
-            if (current.networkError == null) {
-                val msg = if (isRealNetworkOrServerError(e)) {
-                    val messageText = e.message ?: ""
-                    if (messageText.contains("500") || messageText.contains("502") ||
-                        messageText.contains("503") || messageText.contains("504") ||
-                        messageText.contains("server", ignoreCase = true)) {
-                        "Server is currently unreachable. Tap retry to reconnect."
-                    } else {
-                        "Network connection error. Check your internet connection."
-                    }
-                } else {
-                    "Failed to sync with server. Tap retry to reconnect."
-                }
-                current.copy(networkError = msg)
-            } else current
-        }
+        Log.w("MarketplaceVM", "Background data sync notice for $tag: ${e.message}")
     }
 
     fun loadPublicMarketplaceData() {
@@ -465,12 +443,14 @@ class MarketplaceViewModel(
                     } else {
                         Log.e("MarketplaceVM", "Error in searchAndFilterGoats: ${e.message}", e)
                     }
-                    _uiState.update {
-                        it.copy(
-                            goats = emptyList(),
+                    _uiState.update { current ->
+                        current.copy(
+                            goats = if (current.goats.isNotEmpty()) current.goats else emptyList(),
                             isLoading = false,
                             isRefreshing = false,
-                            networkError = if (!SupabaseConfig.isConfigured) "Database not connected: Supabase configuration is missing or unconfigured." else UserFriendlyErrorMapper.toUserMessage(e, "Unable to load goats. Tap retry to reconnect.")
+                            networkError = if (current.goats.isEmpty() && SupabaseConfig.isConfigured) {
+                                UserFriendlyErrorMapper.toUserMessage(e, "Unable to load goats. Tap retry to reconnect.")
+                            } else null
                         )
                     }
                 }
@@ -497,29 +477,8 @@ class MarketplaceViewModel(
             val currentUser = _uiState.value.currentUser
             if (currentUser != null) {
                 loadRoleScopedData(currentUser)
-                if (currentUser.role == UserRole.CUSTOMER) {
-                    launch {
-                        repository.getCustomerBookings(currentUser.id)
-                            .catch { e -> handleNetworkOrSyncError(e, "getCustomerBookings") }
-                            .collect { bookings ->
-                                _uiState.update { it.copy(customerBookings = bookings) }
-                            }
-                    }
-                    launch {
-                        repository.getWishlistForUser(currentUser.id)
-                            .catch { e -> handleNetworkOrSyncError(e, "getWishlistForUser") }
-                            .collect { items ->
-                                _uiState.update {
-                                    it.copy(
-                                        wishlistItems = items,
-                                        wishlistGoatIds = items.map { item -> item.goatId }.toSet()
-                                    )
-                                }
-                            }
-                    }
-                }
             }
-            // 3. Trigger goat search/filter query once
+            // 3. Trigger goat search/filter query
             _refreshTrigger.tryEmit(Unit)
             delay(300)
             _uiState.update { it.copy(isRefreshing = false) }
@@ -1583,7 +1542,7 @@ class MarketplaceViewModel(
                             s.copy(
                                 wishlistGoatIds = previousWishlistGoatIds,
                                 wishlistItems = previousWishlistItems,
-                                networkError = "Failed to update wishlist. Rolled back."
+                                errorMessage = "Failed to update wishlist. Rolled back."
                             )
                         }
                     }
@@ -1594,7 +1553,7 @@ class MarketplaceViewModel(
                         s.copy(
                             wishlistGoatIds = previousWishlistGoatIds,
                             wishlistItems = previousWishlistItems,
-                            networkError = "Failed to update wishlist. Rolled back."
+                            errorMessage = "Failed to update wishlist. Rolled back."
                         )
                     }
                 }
@@ -1628,7 +1587,7 @@ class MarketplaceViewModel(
                             s.copy(
                                 wishlistGoatIds = previousWishlistGoatIds,
                                 wishlistItems = previousWishlistItems,
-                                networkError = "Failed to remove item from wishlist."
+                                errorMessage = "Failed to remove item from wishlist."
                             )
                         }
                     }
@@ -1639,7 +1598,7 @@ class MarketplaceViewModel(
                         s.copy(
                             wishlistGoatIds = previousWishlistGoatIds,
                             wishlistItems = previousWishlistItems,
-                            networkError = "Failed to remove item from wishlist."
+                            errorMessage = "Failed to remove item from wishlist."
                         )
                     }
                 }

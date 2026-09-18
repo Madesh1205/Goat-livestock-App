@@ -12,6 +12,7 @@ import com.example.data.dto.SEED_AMMAL_FARM_UUID
 import com.example.data.dto.currentIsoTimestamp
 import com.example.data.dto.ensureValidUuid
 import com.example.model.*
+import com.example.util.PhoneValidator
 import com.example.util.UserFriendlyErrorMapper
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -112,6 +113,7 @@ class AuthRepositoryImpl(
         val email = p.getString("cached_user_email", "") ?: ""
         val name = p.getString("cached_user_name", "User") ?: "User"
         val phone = p.getString("cached_user_phone", "") ?: ""
+        val isPhoneVerified = p.getBoolean("cached_user_phone_verified", false)
         val roleStr = p.getString("cached_user_role", UserRole.CUSTOMER.name) ?: UserRole.CUSTOMER.name
         val role = UserRole.fromString(roleStr)
         val rawFarmId = p.getString("cached_user_farm_id", null)
@@ -122,6 +124,7 @@ class AuthRepositoryImpl(
             email = email,
             name = name,
             phone = phone,
+            isPhoneVerified = isPhoneVerified,
             role = role,
             farmId = validFarmId
         )
@@ -143,6 +146,7 @@ class AuthRepositoryImpl(
             ?.putString("cached_user_email", profile.email)
             ?.putString("cached_user_name", profile.name)
             ?.putString("cached_user_phone", profile.phone)
+            ?.putBoolean("cached_user_phone_verified", profile.isPhoneVerified)
             ?.putString("cached_user_role", profile.role.name)
             ?.putString("cached_user_farm_id", profile.farmId)
             ?.apply()
@@ -373,6 +377,13 @@ class AuthRepositoryImpl(
                 ?: metadataPhone?.takeIf { it.isNotBlank() }
                 ?: _currentUser.value?.phone ?: ""
 
+            val metadataPhoneVerified = authUser?.userMetadata?.get("phone_verified")?.toString()?.replace("\"", "")?.toBooleanStrictOrNull()
+                ?: authUser?.userMetadata?.get("is_phone_verified")?.toString()?.replace("\"", "")?.toBooleanStrictOrNull()
+
+            val finalIsPhoneVerified = profileDto?.isPhoneVerified == true ||
+                metadataPhoneVerified == true ||
+                (_currentUser.value?.isPhoneVerified == true && _currentUser.value?.phone == finalPhone)
+
             val finalEmail = profileDto?.email?.takeIf { it.isNotBlank() }
                 ?: targetEmail
 
@@ -381,6 +392,7 @@ class AuthRepositoryImpl(
                 email = finalEmail,
                 name = finalFullName,
                 phone = finalPhone,
+                isPhoneVerified = finalIsPhoneVerified,
                 role = detectedRole,
                 farmId = effectiveFarmId,
                 isSuspended = profileDto?.isSuspended ?: false
@@ -1246,28 +1258,66 @@ class AuthRepositoryImpl(
 
     override suspend fun updateProfile(name: String, phone: String): Result<UserProfile> {
         val current = _currentUser.value ?: return Result.failure(Exception("No user logged in"))
+        val cleanName = name.trim().ifBlank { current.name }
         val cleanPhone = phone.trim()
+
+        if (cleanPhone.isNotBlank()) {
+            val phoneErr = PhoneValidator.getValidationErrorMessage(cleanPhone)
+            if (phoneErr != null) {
+                _authState.update { it.copy(errorMessage = phoneErr) }
+                return Result.failure(IllegalArgumentException(phoneErr))
+            }
+        }
+
+        val normalizedPhone = if (cleanPhone.isNotBlank()) PhoneValidator.normalize(cleanPhone) else ""
         val validFarmId = if (current.role == UserRole.CUSTOMER) null else current.farmId?.takeIf { FarmLocalCache.isValidUuid(it) }
-        val updated = current.copy(name = name.trim(), phone = cleanPhone, farmId = validFarmId)
+
+        val updated = current.copy(
+            name = cleanName,
+            phone = normalizedPhone,
+            farmId = validFarmId
+        )
         _currentUser.value = updated
         saveCachedProfile(updated)
 
         if (SupabaseConfig.isConfigured) {
             try {
                 SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].upsert(
-                    ProfileDto(
-                        id = ensureValidUuid(updated.id),
-                        email = updated.email.ifBlank { null },
-                        fullName = updated.name,
-                        phone = cleanPhone.ifBlank { null },
-                        role = updated.role.name,
-                        farmId = updated.farmId
-                    )
+                    ProfileDto.fromDomain(updated)
                 )
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w("AuthRepository", "Failed to sync updated profile to database: ${e.message}")
+            }
+
+            try {
+                SupabaseModule.auth.updateUser {
+                    this.data = buildJsonObject {
+                        put("full_name", updated.name)
+                        put("phone", normalizedPhone)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("AuthRepository", "Failed to update auth metadata: ${e.message}")
+            }
+
+            if (updated.role == UserRole.FARM_ADMIN && updated.farmId != null) {
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .update({
+                            set("contact_phone", normalizedPhone)
+                        }) {
+                            filter {
+                                eq("id", ensureValidUuid(updated.farmId))
+                                eq("owner_id", ensureValidUuid(updated.id))
+                            }
+                        }
+                } catch (e: Exception) {
+                    Log.w("AuthRepository", "Failed to sync farm contact phone: ${e.message}")
+                }
+            }
         }
 
-        _authState.update { it.copy(userProfile = updated, successMessage = "Profile updated!") }
+        _authState.update { it.copy(userProfile = updated, successMessage = "Profile updated successfully!") }
         return Result.success(updated)
     }
 }
