@@ -16,7 +16,6 @@ object DefaultPlatformData {
 
     val SEED_FARMS: List<Farm> = emptyList()
     val SEED_GOATS: List<Goat> = emptyList()
-    val SEED_REVIEWS: List<Review> = emptyList()
     val SEED_NOTIFICATIONS: List<AppNotification> = emptyList()
     val SEED_BREEDS: List<String> = emptyList()
 }

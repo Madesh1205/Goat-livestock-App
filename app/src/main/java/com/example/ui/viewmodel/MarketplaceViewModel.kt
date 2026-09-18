@@ -36,7 +36,6 @@ data class MarketplaceUiState(
     val allBookings: List<Booking> = emptyList(),
     val allCustomers: List<UserProfile> = emptyList(),
     val allReports: List<PlatformReport> = emptyList(),
-    val allReviews: List<Review> = emptyList(),
     val listingPayments: List<ListingPayment> = emptyList(),
     val wishlistItems: List<WishlistItem> = emptyList(),
     val wishlistGoatIds: Set<String> = emptySet(),
@@ -265,14 +264,6 @@ class MarketplaceViewModel(
                 .catch { e -> handleNetworkOrSyncError(e, "getAllFarms") }
                 .collect { list ->
                     _uiState.update { it.copy(farms = list) }
-                }
-        }
-
-        viewModelScope.launch {
-            repository.getAllReviews()
-                .catch { e -> handleNetworkOrSyncError(e, "getAllReviews") }
-                .collect { list ->
-                    _uiState.update { it.copy(allReviews = list) }
                 }
         }
 
@@ -1297,112 +1288,6 @@ class MarketplaceViewModel(
                 loadAllPlatformData()
             }.onFailure { err ->
                 _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to resolve report.")) }
-            }
-        }
-    }
-
-    fun addReview(
-        bookingId: String,
-        goatId: String,
-        rating: Int,
-        comment: String,
-        photos: List<String> = emptyList(),
-        onSuccess: () -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-            val result = repository.addReview(bookingId, goatId, rating, comment, photos)
-            _uiState.update { it.copy(isLoading = false) }
-            result.onSuccess { review ->
-                _uiState.update { state ->
-                    state.copy(
-                        allReviews = listOf(review) + state.allReviews,
-                        successMessage = "Thank you! Your verified purchase review has been published."
-                    )
-                }
-                loadAllPlatformData()
-                onSuccess()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to submit review. Please try again.")) }
-            }
-        }
-    }
-
-    fun reportReview(reviewId: String, reason: String) {
-        viewModelScope.launch {
-            val result = repository.reportReview(reviewId, reason)
-            result.onSuccess {
-                _uiState.update { it.copy(successMessage = "Review reported to Super Admin moderation team.") }
-                loadAllPlatformData()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to report review.")) }
-            }
-        }
-    }
-
-    fun dismissReviewReport(reviewId: String) {
-        viewModelScope.launch {
-            val result = repository.dismissReviewReport(reviewId)
-            result.onSuccess {
-                _uiState.update { it.copy(successMessage = "Report dismissed. Review marked in good standing.") }
-                loadAllPlatformData()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to dismiss report.")) }
-            }
-        }
-    }
-
-    fun deleteReview(reviewId: String) {
-        viewModelScope.launch {
-            val result = repository.deleteReview(reviewId)
-            result.onSuccess {
-                _uiState.update { state ->
-                    state.copy(
-                        allReviews = state.allReviews.filterNot { it.id == reviewId },
-                        successMessage = "Inappropriate review deleted successfully."
-                    )
-                }
-                loadAllPlatformData()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to delete review.")) }
-            }
-        }
-    }
-
-    fun hideReview(reviewId: String) {
-        viewModelScope.launch {
-            val result = repository.hideReview(reviewId)
-            result.onSuccess {
-                _uiState.update { state ->
-                    state.copy(
-                        allReviews = state.allReviews.map {
-                            if (it.id == reviewId) it.copy(isReported = true) else it
-                        },
-                        successMessage = "Review hidden by Super Admin."
-                    )
-                }
-                loadAllPlatformData()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to hide review.")) }
-            }
-        }
-    }
-
-    fun restoreReview(reviewId: String) {
-        viewModelScope.launch {
-            val result = repository.restoreReview(reviewId)
-            result.onSuccess {
-                _uiState.update { state ->
-                    state.copy(
-                        allReviews = state.allReviews.map {
-                            if (it.id == reviewId) it.copy(isReported = false) else it
-                        },
-                        successMessage = "Review restored and published."
-                    )
-                }
-                loadAllPlatformData()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to restore review.")) }
             }
         }
     }

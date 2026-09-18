@@ -59,7 +59,6 @@ fun SuperAdminScreen(
     onUpdateUserSuspension: (String, Boolean) -> Unit = { _, _ -> },
     onUpdateReportStatus: (String, ReportStatus, String?) -> Unit = { _, _, _ -> },
     onResolveReportWithAction: (String, String?, String?, String) -> Unit = { _, _, _, _ -> },
-    onDeleteReview: (String) -> Unit = {},
     onUpdateBookingStatus: (String, AvailabilityStatus) -> Unit = { _, _ -> },
     onNavigateBack: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {},
@@ -285,12 +284,6 @@ fun SuperAdminScreen(
                 Tab(
                     selected = selectedTab == 6,
                     onClick = { selectedTab = 6 },
-                    text = { Text("Reviews (${uiState.allReviews.size})") },
-                    icon = { Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                )
-                Tab(
-                    selected = selectedTab == 7,
-                    onClick = { selectedTab = 7 },
                     text = { Text("Listing Fees (${uiState.listingPayments.size})") },
                     icon = { Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 )
@@ -338,13 +331,7 @@ fun SuperAdminScreen(
                         onInvestigateReport = { reportToInvestigate = it },
                         onUpdateReportStatus = onUpdateReportStatus
                     )
-                    6 -> SuperAdminReviewsTab(
-                        reviews = uiState.allReviews,
-                        onDeleteReview = { rid ->
-                            itemToDeleteConfirm = "Delete this review permanently?" to { onDeleteReview(rid) }
-                        }
-                    )
-                    7 -> SuperAdminListingFeesTab(
+                    6 -> SuperAdminListingFeesTab(
                         payments = uiState.listingPayments,
                         goats = uiState.allAdminGoats,
                         stats = uiState.platformStats
@@ -573,7 +560,7 @@ private fun SuperAdminOverviewTab(
                     ) {
                         MetricMiniItem("Gross Volume", "₹${stats.totalRevenue.toInt()}", Color(0xFF81C784))
                         MetricMiniItem("Active Goats", "${stats.totalGoats}", Color(0xFFFFD54F))
-                        MetricMiniItem("Satisfaction", "★ ${stats.averageRating}", Color(0xFF4FC3F7))
+                        MetricMiniItem("Farms", "${uiState.farms.size}", Color(0xFF4FC3F7))
                     }
                 }
             }
@@ -638,35 +625,13 @@ private fun SuperAdminOverviewTab(
                         onClick = { onNavigateToTab(5) }
                     )
                     KpiStatCard(
-                        title = "Reviews",
-                        value = "${stats.totalReviews}",
-                        subtitle = "Avg score: ${stats.averageRating}/5",
-                        icon = Icons.Default.Star,
-                        color = Color(0xFFF57F17),
-                        modifier = Modifier.weight(1f),
-                        onClick = { onNavigateToTab(6) }
-                    )
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    val ammalCount = uiState.allAdminGoats.count { it.farmId == SEED_AMMAL_FARM_UUID || it.farmName.contains("Ammal", ignoreCase = true) }
-                    KpiStatCard(
                         title = "Listing Fees (₹100)",
                         value = "₹${stats.totalListingFeesCollected.toInt()}",
                         subtitle = "${uiState.listingPayments.count { it.status == com.example.model.PaymentStatus.PAID }} Partner Fees Paid",
                         icon = Icons.Default.Payments,
                         color = Color(0xFF00796B),
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateToTab(7) }
-                    )
-                    KpiStatCard(
-                        title = "Ammal Farm Waivers",
-                        value = "₹0 Free",
-                        subtitle = "$ammalCount Seed Farm Goats",
-                        icon = Icons.Default.Verified,
-                        color = Color(0xFF2E7D32),
-                        modifier = Modifier.weight(1f),
-                        onClick = { onNavigateToTab(2) }
+                        onClick = { onNavigateToTab(6) }
                     )
                 }
             }
@@ -2053,159 +2018,6 @@ private fun SuperAdminReportsTab(
 }
 
 // ==========================================
-// TAB 6: REVIEWS MODERATION
-// ==========================================
-
-@Composable
-private fun SuperAdminReviewsTab(
-    reviews: List<Review>,
-    onDeleteReview: (String) -> Unit
-) {
-    var selectedRatingFilter by remember { mutableStateOf<Int?>(null) }
-    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy", Locale.getDefault()) }
-
-    val filteredReviews = remember(reviews, selectedRatingFilter) {
-        reviews.filter { r ->
-            selectedRatingFilter == null || r.rating == selectedRatingFilter
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedRatingFilter == null,
-                        onClick = { selectedRatingFilter = null },
-                        label = { Text("All (${reviews.size})", fontSize = 12.sp) }
-                    )
-                }
-                (5 downTo 1).forEach { stars ->
-                    val count = reviews.count { it.rating == stars }
-                    item {
-                        FilterChip(
-                            selected = selectedRatingFilter == stars,
-                            onClick = { selectedRatingFilter = stars },
-                            label = { Text("★ $stars ($count)", fontSize = 12.sp) }
-                        )
-                    }
-                }
-            }
-        }
-
-        Divider()
-
-        if (filteredReviews.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("No customer reviews in this rating bracket.", color = Color.Gray)
-                }
-            }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(filteredReviews, key = { it.id }) { review ->
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, if (review.rating <= 2) Color(0xFFFFCDD2) else MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                review.customerName.take(1).uppercase(),
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Column {
-                                        Text(review.customerName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                        Text("Target Goat: #${review.goatId}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    repeat(5) { i ->
-                                        Icon(
-                                            Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = if (i < review.rating) Color(0xFFFFB300) else Color(0xFFE0E0E0),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = review.comment,
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    dateFormat.format(Date(review.createdAt)),
-                                    fontSize = 10.sp,
-                                    color = Color.Gray
-                                )
-
-                                OutlinedButton(
-                                    onClick = { onDeleteReview(review.id) },
-                                    modifier = Modifier.height(30.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Remove Review", fontSize = 11.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ==========================================
 // MODAL DIALOGS
 // ==========================================
 
@@ -2846,12 +2658,6 @@ private fun SuperAdminInvestigateReportDialog(
         } else null
     }
 
-    val relatedReview = remember(report, uiState.allReviews) {
-        if (report.targetType == "REVIEW") {
-            uiState.allReviews.find { it.id == report.targetId }
-        } else null
-    }
-
     val relatedCustomer = remember(report, uiState.allCustomers) {
         if (report.targetType == "CUSTOMER") {
             uiState.allCustomers.find { it.id == report.targetId }
@@ -3049,26 +2855,6 @@ private fun SuperAdminInvestigateReportDialog(
                             Text(relatedFarm.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             Text("Location: ${relatedFarm.location} • Phone: ${relatedFarm.contactNumber}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("Farm Status: ${relatedFarm.verificationStatus} • Verified: ${if (relatedFarm.verificationStatus == VerificationStatus.APPROVED) "YES" else "NO"}", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        }
-                    }
-                }
-
-                if (relatedReview != null) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text("Related Review Content:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Card(
-                        shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(relatedReview.customerName, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("★".repeat(relatedReview.rating), color = Color(0xFFE67E22), fontSize = 12.sp)
-                            }
-                            Text("\"${relatedReview.comment}\"", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

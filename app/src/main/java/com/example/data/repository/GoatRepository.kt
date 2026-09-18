@@ -91,7 +91,6 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             SortOption.WEIGHT_HEAVIEST -> filtered.sortedByDescending { it.weightKg }
             SortOption.WEIGHT_LIGHTEST -> filtered.sortedBy { it.weightKg }
             SortOption.NEWEST -> filtered.sortedByDescending { it.createdAt }
-            SortOption.RATING -> filtered.sortedByDescending { it.rating }
         }
 
         emit(filtered)

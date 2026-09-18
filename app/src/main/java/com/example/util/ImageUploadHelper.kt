@@ -518,56 +518,6 @@ object ImageUploadHelper {
     }
 
     /**
-     * Uploads compressed image bytes for a customer verified review to Supabase Storage with local fallback.
-     */
-    suspend fun uploadReviewImage(
-        context: Context,
-        bytes: ByteArray,
-        bookingId: String,
-        photoIndex: Int? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            if (bytes.isEmpty() || bytes.size > MAX_FILE_SIZE_BYTES) {
-                return@withContext Result.failure(IllegalArgumentException("Image payload is empty or exceeds size limit."))
-            }
-
-            val sanitizedBookingId = bookingId.replace(Regex("[^a-zA-Z0-9_-]"), "").ifBlank { "booking-${UUID.randomUUID().toString().take(6)}" }
-            val fileName = generateProperFileName(
-                prefix = "review_photo",
-                index = photoIndex
-            )
-
-            val storagePath = "reviews/$sanitizedBookingId/$fileName"
-
-            if (SupabaseConfig.isConfigured) {
-                try {
-                    val bucket = SupabaseModule.storage[SupabaseConfig.BUCKET_GOAT_IMAGES]
-                    bucket.upload(storagePath, bytes) {
-                        upsert = true
-                    }
-                    val publicUrl = resolvePublicUrl(storagePath)
-                    Log.i(TAG, "Uploaded review image to Supabase Storage: $publicUrl")
-                    return@withContext Result.success(publicUrl)
-                } catch (storageErr: Exception) {
-                    Log.w(TAG, "SDK Review upload failed: ${storageErr.message}")
-                }
-
-                val restUrl = uploadViaRestApi(bytes, SupabaseConfig.BUCKET_GOAT_IMAGES, storagePath)
-                if (restUrl != null) {
-                    return@withContext Result.success(restUrl)
-                }
-            }
-
-            val localUrl = saveImageLocally(context, bytes, "review_$sanitizedBookingId", fileName)
-            Result.success(localUrl)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to upload review image: ${e.message}", e)
-            val localUrl = saveImageLocally(context, bytes, "review")
-            Result.success(localUrl)
-        }
-    }
-
-    /**
      * Deletes a file from Supabase Storage bucket goat-images.
      */
     suspend fun deleteStorageFile(storagePath: String): Result<Unit> = withContext(Dispatchers.IO) {

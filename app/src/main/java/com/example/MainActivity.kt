@@ -600,15 +600,6 @@ class MainActivity : ComponentActivity() {
                                             navController.navigate(Screen.Login.route)
                                         }
                                     },
-                                    onAddReview = { bookingId, goatId, rating, comment, photos ->
-                                        marketplaceViewModel.addReview(bookingId, goatId, rating, comment, photos)
-                                    },
-                                    onReportReview = { reviewId, reason ->
-                                        marketplaceViewModel.reportReview(reviewId, reason)
-                                    },
-                                    onDeleteReview = { reviewId ->
-                                        marketplaceViewModel.deleteReview(reviewId)
-                                    },
                                     onSubmitReport = { targetType, targetId, targetTitle, reason, description, evidencePhotoUrl ->
                                         marketplaceViewModel.submitReport(
                                             targetType = targetType,
@@ -627,12 +618,8 @@ class MainActivity : ComponentActivity() {
                             BookingsScreen(
                                 bookings = uiState.customerBookings,
                                 goats = uiState.goats,
-                                reviews = uiState.allReviews,
                                 onCancelBooking = { bookingId ->
                                     marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED)
-                                },
-                                onAddReview = { bookingId, goatId, rating, comment, photos ->
-                                    marketplaceViewModel.addReview(bookingId, goatId, rating, comment, photos)
                                 }
                             )
                         }
@@ -800,10 +787,6 @@ class MainActivity : ComponentActivity() {
                                 onResolveReportWithAction = { reportId, removeGid, suspFid, notes ->
                                     marketplaceViewModel.resolveReportWithAction(reportId, removeGid, suspFid, notes)
                                     Toast.makeText(context, "Report resolved with administrative actions.", Toast.LENGTH_SHORT).show()
-                                },
-                                onDeleteReview = { reviewId ->
-                                    marketplaceViewModel.deleteReview(reviewId)
-                                    Toast.makeText(context, "Inappropriate review deleted.", Toast.LENGTH_SHORT).show()
                                 },
                                 onUpdateBookingStatus = { bookingId, status ->
                                     marketplaceViewModel.updateBookingStatus(bookingId, status)

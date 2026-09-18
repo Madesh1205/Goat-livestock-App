@@ -39,18 +39,6 @@ interface MarketplaceRepository {
     suspend fun updateFarmVerification(farmId: String, status: VerificationStatus): Result<Unit>
     suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit>
 
-    // Reviews & Moderation
-    fun getGoatReviews(goatId: String): Flow<List<Review>>
-    fun getFarmReviews(farmId: String): Flow<List<Review>>
-    fun getAllReviews(): Flow<List<Review>>
-    suspend fun addReview(bookingId: String, goatId: String, rating: Int, comment: String, photos: List<String> = emptyList()): Result<Review>
-    suspend fun addReview(goatId: String, rating: Int, comment: String): Result<Review>
-    suspend fun deleteReview(reviewId: String): Result<Unit>
-    suspend fun reportReview(reviewId: String, reason: String): Result<Unit>
-    suspend fun dismissReviewReport(reviewId: String): Result<Unit>
-    suspend fun hideReview(reviewId: String): Result<Unit>
-    suspend fun restoreReview(reviewId: String): Result<Unit>
-
     // Reports & Moderation
     fun getAllReports(): Flow<List<PlatformReport>>
     suspend fun submitReport(report: PlatformReport): Result<PlatformReport>

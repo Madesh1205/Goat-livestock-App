@@ -914,18 +914,10 @@ fun FarmAdminScreen(
                                             ProfileInfoRow(Icons.Default.Phone, "Contact Phone", myFarm.contactNumber)
                                             ProfileInfoRow(Icons.Default.Email, "Email", myFarm.email)
                                             ProfileInfoRow(Icons.Default.Verified, "Verification", farmVerificationStatus.name)
-                                            val farmReviews = uiState.allReviews.filter { it.farmId == myFarmId || (myFarm != null && it.farmId == myFarm.id) }
-                                            val liveRating = if (farmReviews.isNotEmpty()) {
-                                                val sum = farmReviews.sumOf { it.rating.toDouble() }
-                                                Math.round((sum / farmReviews.size) * 10.0) / 10.0
+                                            val ratingText = if (myFarm.rating > 0.0) {
+                                                "${String.format("%.1f", myFarm.rating)} ★ Verified Breeder"
                                             } else {
-                                                myFarm.rating
-                                            }
-                                            val liveReviewCount = if (farmReviews.isNotEmpty()) farmReviews.size else myFarm.totalReviews
-                                            val ratingText = if (liveReviewCount > 0 && liveRating > 0.0) {
-                                                "${String.format("%.1f", liveRating)} ★ ($liveReviewCount customer ${if (liveReviewCount == 1) "review" else "reviews"})"
-                                            } else {
-                                                "No customer reviewed"
+                                                "Verified Breeder"
                                             }
                                             ProfileInfoRow(Icons.Default.Star, "Rating", ratingText)
 

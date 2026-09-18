@@ -33,7 +33,6 @@ class SupabaseMarketplaceRepositoryImpl(
 ) : MarketplaceRepository {
 
     private val TAG = "MarketplaceRepo"
-    private val localAddedReviews = CopyOnWriteArrayList<Review>()
 
     // ==========================================
     // 1. Auth & Session
@@ -129,368 +128,7 @@ class SupabaseMarketplaceRepositoryImpl(
         farmRepository.updateFarmListingLimit(farmId, limit)
 
     // ==========================================
-    // 6. Reviews & Moderation
-    // ==========================================
-    override fun getGoatReviews(goatId: String): Flow<List<Review>> = flow {
-        val validGoatId = ensureValidUuid(goatId)
-        val local = localAddedReviews.filter { it.goatId == goatId || it.goatId == validGoatId }
-
-        if (!SupabaseConfig.isConfigured) {
-            emit(local)
-            return@flow
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS]
-                .select {
-                    filter {
-                        eq("goat_id", validGoatId)
-                    }
-                }.decodeList<ReviewDto>()
-            val remote = dtos.map { it.toDomain() }
-            emit((remote + local).distinctBy { it.id })
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.w(TAG, "Notice: remote reviews query unavailable for goat $goatId: ${e.message}")
-            emit(local)
-        }
-    }.flowOn(Dispatchers.IO)
-
-    override fun getFarmReviews(farmId: String): Flow<List<Review>> = flow {
-        val validFarmId = ensureValidUuid(farmId)
-        val local = localAddedReviews.filter { it.farmId == farmId || it.farmId == validFarmId }
-
-        if (!SupabaseConfig.isConfigured) {
-            emit(local)
-            return@flow
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS]
-                .select {
-                    filter {
-                        eq("farm_id", validFarmId)
-                    }
-                }.decodeList<ReviewDto>()
-            val remote = dtos.map { it.toDomain() }
-            emit((remote + local).distinctBy { it.id })
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.w(TAG, "Notice: remote reviews query unavailable for farm $farmId: ${e.message}")
-            emit(local)
-        }
-    }.flowOn(Dispatchers.IO)
-
-    override fun getAllReviews(): Flow<List<Review>> = flow {
-        if (!SupabaseConfig.isConfigured) {
-            emit(localAddedReviews.toList())
-            return@flow
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS]
-                .select()
-                .decodeList<ReviewDto>()
-            val remote = dtos.map { it.toDomain() }
-            emit((remote + localAddedReviews).distinctBy { it.id })
-        } catch (e: Exception) {
-            if (e is CancellationException) throw e
-            Log.w(TAG, "Notice: remote reviews query unavailable: ${e.message}")
-            emit(localAddedReviews.toList())
-        }
-    }.flowOn(Dispatchers.IO)
-
-    override suspend fun addReview(
-        bookingId: String,
-        goatId: String,
-        rating: Int,
-        comment: String,
-        photos: List<String>
-    ): Result<Review> = withContext(Dispatchers.IO) {
-        try {
-            if (rating !in 1..5) {
-                return@withContext Result.failure(IllegalArgumentException("Rating must be between 1 and 5."))
-            }
-            if (comment.isBlank()) {
-                return@withContext Result.failure(IllegalArgumentException("Review comment cannot be empty."))
-            }
-            val currentUser = authRepository.currentUser.value
-                ?: return@withContext Result.failure(IllegalStateException("User must be authenticated to submit a review."))
-
-            val validCustomerId = ensureValidUuid(currentUser.id)
-            var resolvedBookingId: String? = null
-            var resolvedGoatId: String = ""
-            var resolvedFarmId: String = ""
-            var resolvedGoatName: String = "Goat"
-            var resolvedFarmName: String = "Ammal Farm"
-
-            if (bookingId.isNotBlank()) {
-                val bId = ensureValidUuid(bookingId)
-                if (SupabaseConfig.isConfigured) {
-                    val bookingDto = try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
-                            .select {
-                                filter {
-                                    eq("id", bId)
-                                }
-                            }.decodeSingleOrNull<BookingDto>()
-                    } catch (e: Exception) {
-                        null
-                    }
-
-                    if (bookingDto == null) {
-                        return@withContext Result.failure(IllegalArgumentException("Booking with ID $bookingId does not exist."))
-                    }
-
-                    // Verify customer owns this booking
-                    if (bookingDto.customerId != validCustomerId && currentUser.role != UserRole.SUPER_ADMIN) {
-                        return@withContext Result.failure(SecurityException("Unauthorized: You can only review your own bookings."))
-                    }
-
-                    // Verify booking eligibility (CONFIRMED or COMPLETED)
-                    val bStatus = bookingDto.status.uppercase()
-                    if (bStatus != "COMPLETED" && bStatus != "CONFIRMED") {
-                        return@withContext Result.failure(IllegalStateException("Reviews are only permitted for confirmed or completed bookings."))
-                    }
-
-                    resolvedBookingId = bookingDto.id
-                    resolvedGoatId = bookingDto.goatId
-                    resolvedFarmId = bookingDto.farmId
-                } else {
-                    resolvedBookingId = bId
-                    resolvedGoatId = if (goatId.isNotBlank()) ensureValidUuid(goatId) else UUID.randomUUID().toString()
-                    resolvedFarmId = UUID.randomUUID().toString()
-                }
-            } else if (goatId.isNotBlank()) {
-                val gId = ensureValidUuid(goatId)
-                if (SupabaseConfig.isConfigured) {
-                    val eligibleBookings = try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
-                            .select {
-                                filter {
-                                    eq("goat_id", gId)
-                                    eq("customer_id", validCustomerId)
-                                }
-                            }.decodeList<BookingDto>()
-                    } catch (e: Exception) {
-                        emptyList()
-                    }
-
-                    val eligibleBooking = eligibleBookings.firstOrNull { it.status.uppercase() in listOf("COMPLETED", "CONFIRMED") }
-                    if (eligibleBooking == null && currentUser.role != UserRole.SUPER_ADMIN) {
-                        return@withContext Result.failure(IllegalStateException("Reviews are only allowed after completing a booking for this goat."))
-                    }
-
-                    resolvedBookingId = eligibleBooking?.id
-                    resolvedGoatId = gId
-                    resolvedFarmId = eligibleBooking?.farmId ?: ""
-                } else {
-                    resolvedGoatId = gId
-                    resolvedFarmId = UUID.randomUUID().toString()
-                }
-            } else {
-                return@withContext Result.failure(IllegalArgumentException("A valid booking or goat ID is required."))
-            }
-
-            // Resolve real farm ID and names if not yet available
-            if (SupabaseConfig.isConfigured) {
-                if (resolvedFarmId.isBlank() && resolvedGoatId.isNotBlank()) {
-                    val goatDto = try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                            .select {
-                                filter {
-                                    eq("id", resolvedGoatId)
-                                }
-                            }.decodeSingleOrNull<GoatDto>()
-                    } catch (_: Exception) { null }
-
-                    if (goatDto != null) {
-                        resolvedFarmId = goatDto.farmId
-                        resolvedGoatName = goatDto.name
-                    }
-                }
-
-                if (resolvedFarmId.isNotBlank()) {
-                    val farmDto = try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                            .select {
-                                filter {
-                                    eq("id", resolvedFarmId)
-                                }
-                            }.decodeSingleOrNull<FarmDto>()
-                    } catch (_: Exception) { null }
-                    if (farmDto != null) {
-                        resolvedFarmName = farmDto.name
-                    }
-                }
-
-                // Check for duplicate review on this booking
-                if (resolvedBookingId != null) {
-                    val existing = try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS]
-                            .select {
-                                filter {
-                                    eq("booking_id", resolvedBookingId)
-                                }
-                            }.decodeSingleOrNull<ReviewDto>()
-                    } catch (_: Exception) { null }
-
-                    if (existing != null) {
-                        return@withContext Result.failure(IllegalStateException("You have already reviewed this booking."))
-                    }
-                }
-            }
-
-            val newReviewId = UUID.randomUUID().toString()
-            val dto = ReviewDto(
-                id = newReviewId,
-                bookingId = resolvedBookingId,
-                goatId = resolvedGoatId,
-                farmId = resolvedFarmId,
-                customerId = validCustomerId,
-                rating = rating,
-                comment = comment.trim(),
-                isVerifiedPurchase = true,
-                isApproved = true
-            )
-
-            if (SupabaseConfig.isConfigured) {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS].insert(dto)
-            }
-
-            val domainReview = Review(
-                id = newReviewId,
-                bookingId = resolvedBookingId ?: "",
-                goatId = resolvedGoatId,
-                goatName = resolvedGoatName,
-                farmId = resolvedFarmId,
-                farmName = resolvedFarmName,
-                customerId = validCustomerId,
-                customerName = currentUser.name.ifBlank { "Customer" },
-                rating = rating,
-                comment = comment.trim(),
-                photos = photos,
-                isVerifiedPurchase = true,
-                createdAt = System.currentTimeMillis()
-            )
-            localAddedReviews.add(domainReview)
-            Result.success(domainReview)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to add review: ${e.message}", e)
-            val isDuplicate = e.message?.contains("duplicate", ignoreCase = true) == true ||
-                    e.message?.contains("uq_reviews_booking_id", ignoreCase = true) == true ||
-                    e.message?.contains("23505", ignoreCase = true) == true
-            if (isDuplicate) {
-                Result.failure(IllegalStateException("You have already submitted a review for this purchase."))
-            } else {
-                Result.failure(e)
-            }
-        }
-    }
-
-    override suspend fun addReview(goatId: String, rating: Int, comment: String): Result<Review> {
-        return addReview("", goatId, rating, comment, emptyList())
-    }
-
-    override suspend fun deleteReview(reviewId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val validReviewId = ensureValidUuid(reviewId)
-            if (SupabaseConfig.isConfigured) {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS].delete {
-                    filter {
-                        eq("id", validReviewId)
-                    }
-                }
-            }
-            localAddedReviews.removeAll { it.id == reviewId || it.id == validReviewId }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to delete review: ${e.message}", e)
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun reportReview(reviewId: String, reason: String): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val currentUser = authRepository.currentUser.value
-                ?: return@withContext Result.failure(IllegalStateException("User must be authenticated to report a review."))
-            val validReviewId = ensureValidUuid(reviewId)
-
-            val report = PlatformReport(
-                id = UUID.randomUUID().toString(),
-                reporterId = ensureValidUuid(currentUser.id),
-                reporterName = currentUser.name.ifBlank { "Customer" },
-                reporterEmail = currentUser.email,
-                targetType = "REVIEW",
-                targetId = validReviewId,
-                targetTitle = "Review #$validReviewId",
-                reason = ReportReason.OTHER,
-                description = reason,
-                status = ReportStatus.NEW,
-                createdAt = System.currentTimeMillis()
-            )
-            val submitResult = submitReport(report)
-            if (submitResult.isFailure) {
-                return@withContext Result.failure(submitResult.exceptionOrNull() ?: RuntimeException("Failed to report review"))
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to report review: ${e.message}", e)
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun dismissReviewReport(reviewId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        restoreReview(reviewId)
-    }
-
-    override suspend fun hideReview(reviewId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val currentUser = authRepository.currentUser.value
-            if (currentUser?.role != UserRole.SUPER_ADMIN) {
-                return@withContext Result.failure(SecurityException("Only Super Admin can hide reviews."))
-            }
-            val validReviewId = ensureValidUuid(reviewId)
-            if (SupabaseConfig.isConfigured) {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS].update(
-                    buildJsonObject { put("is_approved", false) }
-                ) {
-                    filter {
-                        eq("id", validReviewId)
-                    }
-                }
-            }
-            localAddedReviews.replaceAll { if (it.id == validReviewId || it.id == reviewId) it.copy(isReported = true) else it }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to hide review: ${e.message}", e)
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun restoreReview(reviewId: String): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            val currentUser = authRepository.currentUser.value
-            if (currentUser?.role != UserRole.SUPER_ADMIN) {
-                return@withContext Result.failure(SecurityException("Only Super Admin can restore reviews."))
-            }
-            val validReviewId = ensureValidUuid(reviewId)
-            if (SupabaseConfig.isConfigured) {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS].update(
-                    buildJsonObject { put("is_approved", true) }
-                ) {
-                    filter {
-                        eq("id", validReviewId)
-                    }
-                }
-            }
-            localAddedReviews.replaceAll { if (it.id == validReviewId || it.id == reviewId) it.copy(isReported = false) else it }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to restore review: ${e.message}", e)
-            Result.failure(e)
-        }
-    }
-
-    // ==========================================
-    // 7. Reports & Moderation
+    // 6. Reports & Moderation
     // ==========================================
     override fun getAllReports(): Flow<List<PlatformReport>> = flow {
         try {
@@ -757,7 +395,7 @@ class SupabaseMarketplaceRepositoryImpl(
     }
 
     // ==========================================
-    // 10. Platform Stats
+    // 9. Platform Stats
     // ==========================================
     override fun getPlatformStats(): Flow<PlatformStats> = flow {
         val emptyStats = PlatformStats(
@@ -772,9 +410,7 @@ class SupabaseMarketplaceRepositoryImpl(
             totalCustomers = 0,
             totalRevenue = 0.0,
             totalListingFeesCollected = 0.0,
-            pendingReports = 0,
-            totalReviews = 0,
-            averageRating = 0.0
+            pendingReports = 0
         )
         if (!SupabaseConfig.isConfigured) {
             emit(emptyStats)
@@ -811,12 +447,6 @@ class SupabaseMarketplaceRepositoryImpl(
                     .decodeList<ReportDto>()
             } catch (_: Exception) { emptyList() }
 
-            val reviewsCount = try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS]
-                    .select(Columns.list("id"))
-                    .decodeList<ReviewDto>().size
-            } catch (_: Exception) { 0 }
-
             val totalGoats = allGoats.size
             val pendingGoats = allGoats.count { !it.isApprovedByAdmin && it.status.uppercase() != "REJECTED" }
             val activeFarms = allFarms.count { it.status.equals("APPROVED", ignoreCase = true) }
@@ -850,9 +480,7 @@ class SupabaseMarketplaceRepositoryImpl(
                     totalCustomers = customersCount,
                     totalRevenue = totalRevenue,
                     totalListingFeesCollected = totalListingFees,
-                    pendingReports = pendingReports,
-                    totalReviews = reviewsCount,
-                    averageRating = 0.0
+                    pendingReports = pendingReports
                 )
             )
         } catch (e: Exception) {

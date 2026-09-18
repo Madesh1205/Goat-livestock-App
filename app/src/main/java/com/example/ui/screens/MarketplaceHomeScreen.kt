@@ -873,19 +873,10 @@ fun MarketplaceHomeScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Spacer(modifier = Modifier.height(3.dp))
-                                            val farmRev = uiState.allReviews.filter { it.farmId == farm.id }
-                                            val farmAvg = if (farmRev.isNotEmpty()) {
-                                                val sum = farmRev.sumOf { it.rating.toDouble() }
-                                                Math.round((sum / farmRev.size) * 10.0) / 10.0
-                                            } else {
-                                                farm.rating
-                                            }
-                                            val farmCount = if (farmRev.isNotEmpty()) farmRev.size else farm.totalReviews
-
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                if (farmCount > 0 && farmAvg > 0.0) {
+                                                if (farm.rating > 0.0) {
                                                     Surface(
                                                         shape = RoundedCornerShape(4.dp),
                                                         color = Color(0xFFFFF8E1).copy(alpha = 0.15f)
@@ -902,20 +893,13 @@ fun MarketplaceHomeScreen(
                                                             )
                                                             Spacer(modifier = Modifier.width(2.dp))
                                                             Text(
-                                                                text = String.format("%.1f", farmAvg),
+                                                                text = String.format("%.1f", farm.rating),
                                                                 fontSize = 11.5.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = MaterialTheme.colorScheme.onSurface
                                                             )
                                                         }
                                                     }
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                } else {
-                                                    Text(
-                                                        text = "No reviews",
-                                                        fontSize = 11.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
                                                     Spacer(modifier = Modifier.width(6.dp))
                                                 }
                                                 Text(

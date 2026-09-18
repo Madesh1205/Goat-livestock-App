@@ -505,62 +505,6 @@ data class NotificationDto(
 }
 
 @Serializable
-data class ReviewDto(
-    val id: String = "",
-    @SerialName("booking_id") val bookingId: String? = null,
-    @SerialName("goat_id") val goatId: String = "",
-    @SerialName("farm_id") val farmId: String = "",
-    @SerialName("customer_id") val customerId: String = "",
-    val rating: Int = 5,
-    val comment: String = "",
-    @SerialName("is_verified_purchase") val isVerifiedPurchase: Boolean = true,
-    @SerialName("is_approved") val isApproved: Boolean = true,
-    @SerialName("created_at") val createdAt: String? = null
-) {
-    fun toDomain(
-        resolvedGoatName: String? = null,
-        resolvedFarmName: String? = null,
-        resolvedCustomerName: String? = null
-    ): Review {
-        return Review(
-            id = id,
-            bookingId = bookingId ?: "",
-            goatId = goatId,
-            goatName = resolvedGoatName ?: "Goat #$goatId",
-            farmId = farmId,
-            farmName = resolvedFarmName ?: "Partner Farm",
-            customerId = customerId,
-            customerName = resolvedCustomerName ?: "Verified Buyer",
-            rating = rating.coerceIn(1, 5),
-            comment = comment,
-            photos = emptyList(),
-            isVerifiedPurchase = isVerifiedPurchase,
-            isReported = !isApproved,
-            reportReason = null,
-            createdAt = System.currentTimeMillis()
-        )
-    }
-
-    companion object {
-        fun fromDomain(domain: Review): ReviewDto {
-            val nowIso = currentIsoTimestamp()
-            return ReviewDto(
-                id = ensureValidUuid(domain.id),
-                bookingId = domain.bookingId.takeIf { it.isNotBlank() }?.let { ensureValidUuid(it) },
-                goatId = ensureValidUuid(domain.goatId),
-                farmId = ensureValidUuid(domain.farmId),
-                customerId = ensureValidUuid(domain.customerId),
-                rating = domain.rating,
-                comment = domain.comment,
-                isVerifiedPurchase = domain.isVerifiedPurchase,
-                isApproved = !domain.isReported,
-                createdAt = nowIso
-            )
-        }
-    }
-}
-
-@Serializable
 data class ReportDto(
     val id: String = "",
     @SerialName("reporter_id") val reporterId: String = "",

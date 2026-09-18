@@ -39,12 +39,6 @@ import com.example.core.util.GoatImageResolver
 import com.example.model.AvailabilityStatus
 import com.example.model.Booking
 import com.example.model.Goat
-import com.example.model.Review
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.PickVisualMediaRequest
-import android.graphics.Bitmap
-import com.example.util.ImageUploadHelper
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -62,9 +56,7 @@ enum class BookingFilterTab(val label: String) {
 fun BookingsScreen(
     bookings: List<Booking>,
     goats: List<Goat> = emptyList(),
-    reviews: List<Review> = emptyList(),
     onCancelBooking: (String) -> Unit,
-    onAddReview: (bookingId: String, goatId: String, rating: Int, comment: String, photos: List<String>) -> Unit = { _, _, _, _, _ -> },
     onNavigateToMarketplace: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -85,67 +77,6 @@ fun BookingsScreen(
     var selectedFilter by remember { mutableStateOf(BookingFilterTab.ALL) }
     var selectedBookingForDetail by remember { mutableStateOf<Booking?>(null) }
     var bookingToCancel by remember { mutableStateOf<Booking?>(null) }
-    var bookingToReview by remember { mutableStateOf<Booking?>(null) }
-
-    // Review dialog inputs
-    val coroutineScope = rememberCoroutineScope()
-    var reviewRating by remember { mutableIntStateOf(5) }
-    var reviewComment by remember { mutableStateOf("") }
-    var reviewPhotos by remember { mutableStateOf<List<String>>(emptyList()) }
-    var isUploadingReviewPhoto by remember { mutableStateOf(false) }
-
-    val pickReviewPhotosLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia()
-    ) { uris: List<Uri> ->
-        if (uris.isNotEmpty() && bookingToReview != null) {
-            val bId = bookingToReview?.id ?: ""
-            isUploadingReviewPhoto = true
-            coroutineScope.launch {
-                var count = 0
-                val initialCount = reviewPhotos.size
-                for ((idx, uri) in uris.withIndex()) {
-                    val compressed = ImageUploadHelper.compressAndResizeImage(context, uri)
-                    if (compressed != null) {
-                        val uploadResult = ImageUploadHelper.uploadReviewImage(context, compressed, bId, initialCount + idx + 1)
-                        uploadResult.onSuccess { url ->
-                            reviewPhotos = reviewPhotos + url
-                            count++
-                        }.onFailure {
-                            val local = ImageUploadHelper.saveImageLocally(context, compressed, "review_$bId")
-                            reviewPhotos = reviewPhotos + local
-                            count++
-                        }
-                    }
-                }
-                isUploadingReviewPhoto = false
-                if (count > 0) {
-                    Toast.makeText(context, "$count photo(s) added to review!", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    val takeReviewCameraLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicturePreview()
-    ) { bitmap: Bitmap? ->
-        if (bitmap != null && bookingToReview != null) {
-            val bId = bookingToReview?.id ?: ""
-            isUploadingReviewPhoto = true
-            coroutineScope.launch {
-                val compressed = ImageUploadHelper.compressAndResizeBitmap(bitmap)
-                val uploadResult = ImageUploadHelper.uploadReviewImage(context, compressed, bId, reviewPhotos.size + 1)
-                uploadResult.onSuccess { url ->
-                    reviewPhotos = reviewPhotos + url
-                    Toast.makeText(context, "Photo added to review!", Toast.LENGTH_SHORT).show()
-                }.onFailure {
-                    val local = ImageUploadHelper.saveImageLocally(context, compressed, "review_$bId")
-                    reviewPhotos = reviewPhotos + local
-                    Toast.makeText(context, "Photo added to review!", Toast.LENGTH_SHORT).show()
-                }
-                isUploadingReviewPhoto = false
-            }
-        }
-    }
 
     // Filter list based on active tab
     val filteredBookings = remember(bookings, selectedFilter) {
@@ -325,209 +256,15 @@ fun BookingsScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(filteredBookings, key = { it.id }) { booking ->
-                        val hasReviewed = reviews.any { it.bookingId == booking.id }
                         BookingCard(
                             booking = booking,
-                            hasReviewed = hasReviewed,
                             onCardClick = { selectedBookingForDetail = booking },
-                            onCancelClick = { bookingToCancel = booking },
-                            onReviewClick = {
-                                reviewRating = 5
-                                reviewComment = ""
-                                reviewPhotos = emptyList()
-                                bookingToReview = booking
-                            }
+                            onCancelClick = { bookingToCancel = booking }
                         )
                     }
                 }
             }
         }
-    }
-
-    // --- WRITE REVIEW DIALOG ---
-    if (bookingToReview != null) {
-        val b = bookingToReview!!
-        AlertDialog(
-            onDismissRequest = { bookingToReview = null },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .padding(vertical = 16.dp),
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(20.dp),
-            icon = {
-                Icon(
-                    Icons.Default.RateReview,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp)
-                )
-            },
-            title = {
-                Text(
-                    text = "Review Your Purchase",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = "Verified purchase for ${b.goatName} (${b.goatBreed}) from ${b.farmName}.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text("Rating:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        (1..5).forEach { star ->
-                            IconButton(
-                                onClick = { reviewRating = star },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = "$star stars",
-                                    tint = if (star <= reviewRating) Color(0xFFF39C12) else Color(0xFFD6D6D6),
-                                    modifier = Modifier.size(32.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    OutlinedTextField(
-                        value = reviewComment,
-                        onValueChange = { reviewComment = it },
-                        label = { Text("Written review *") },
-                        placeholder = { Text("Describe the goat's condition, vaccination cards, farm breeder...") },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        maxLines = 5
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Add Photos from Gallery or Camera
-                    Text("Add Photos (Optional):", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                pickReviewPhotosLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            enabled = !isUploadingReviewPhoto,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            if (isUploadingReviewPhoto) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Uploading...", fontSize = 11.sp)
-                            } else {
-                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Gallery", fontSize = 12.sp)
-                            }
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                try {
-                                    takeReviewCameraLauncher.launch(null)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Camera not available: ${e.message}", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            enabled = !isUploadingReviewPhoto,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Camera", fontSize = 12.sp)
-                        }
-                    }
-
-                    if (reviewPhotos.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(reviewPhotos.size) { pIdx ->
-                                val pUrl = reviewPhotos[pIdx]
-                                Box(modifier = Modifier.size(48.dp)) {
-                                    SubcomposeAsyncImage(
-                                        model = pUrl,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(6.dp))
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            reviewPhotos = reviewPhotos.toMutableList().also { it.removeAt(pIdx) }
-                                        },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(18.dp)
-                                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                                    ) {
-                                        Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.White, modifier = Modifier.size(12.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (reviewComment.isBlank()) {
-                            Toast.makeText(context, "Please write a review comment", Toast.LENGTH_SHORT).show()
-                        } else {
-                            onAddReview(
-                                b.id,
-                                b.goatId,
-                                reviewRating,
-                                reviewComment.trim(),
-                                reviewPhotos
-                            )
-                            bookingToReview = null
-                            Toast.makeText(context, "Review submitted successfully! Thank you.", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Text("Submit Review", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { bookingToReview = null }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 
     // --- CANCEL RESERVATION CONFIRMATION DIALOG ---
@@ -607,10 +344,8 @@ fun BookingsScreen(
 @Composable
 fun BookingCard(
     booking: Booking,
-    hasReviewed: Boolean = false,
     onCardClick: () -> Unit,
-    onCancelClick: () -> Unit,
-    onReviewClick: () -> Unit = {}
+    onCancelClick: () -> Unit
 ) {
     val context = LocalContext.current
     val isCancellable = booking.status == AvailabilityStatus.BOOKING_PENDING || booking.status == AvailabilityStatus.RESERVED
@@ -860,38 +595,6 @@ fun BookingCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Review button for completed bookings
-                    if (isCompleted) {
-                        if (hasReviewed) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = Color(0xFFE8F5E9),
-                                border = BorderStroke(1.dp, Color(0xFFA5D6A7))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2E7D32), modifier = Modifier.size(13.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Reviewed", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2E7D32))
-                                }
-                            }
-                        } else {
-                            Button(
-                                onClick = onReviewClick,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Icon(Icons.Default.RateReview, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Write Review", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-
                     // Contact Farm Breeder Button (for active/confirmed bookings)
                     val farmContact = FarmLocalCache.getCachedFarm(booking.farmId)?.contactNumber?.trim()?.takeIf { it.isNotBlank() }
                     if ((booking.status == AvailabilityStatus.CONFIRMED || booking.status == AvailabilityStatus.BOOKING_PENDING || booking.status == AvailabilityStatus.RESERVED) && !farmContact.isNullOrBlank()) {

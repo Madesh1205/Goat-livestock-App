@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -36,7 +37,7 @@ import com.example.R
 fun AduSanthaiLogoBadge(
     modifier: Modifier = Modifier,
     size: Dp = 64.dp,
-    showBorder: Boolean = true,
+    showBorder: Boolean = false,
     elevation: Dp = 4.dp
 ) {
     val shape = RoundedCornerShape((size.value * 0.22f).dp)
@@ -45,7 +46,6 @@ fun AduSanthaiLogoBadge(
             .size(size)
             .shadow(elevation, shape = shape, clip = false)
             .clip(shape)
-            .background(Color(0xFF0D3D22))
             .then(
                 if (showBorder) {
                     Modifier.border(1.5.dp, Color(0xFFC5A059), shape)
@@ -55,7 +55,7 @@ fun AduSanthaiLogoBadge(
         contentAlignment = Alignment.Center
     ) {
         Image(
-            painter = painterResource(id = R.drawable.ic_adu_santhai_logo),
+            painter = painterResource(id = R.drawable.img_adu_santhai_logo),
             contentDescription = "Adu Santhai Logo",
             modifier = Modifier.size(size)
         )

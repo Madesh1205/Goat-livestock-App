@@ -173,24 +173,6 @@ data class Booking(
         get() = PriceUtils.formatCurrency(amount)
 }
 
-data class Review(
-    val id: String,
-    val bookingId: String = "",
-    val goatId: String,
-    val goatName: String = "",
-    val farmId: String,
-    val farmName: String = "",
-    val customerId: String,
-    val customerName: String,
-    val rating: Int, // 1 to 5
-    val comment: String,
-    val photos: List<String> = emptyList(),
-    val isVerifiedPurchase: Boolean = true,
-    val isReported: Boolean = false,
-    val reportReason: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
-)
-
 enum class NotificationType {
     // Customer
     BOOKING_CREATED,
@@ -287,9 +269,7 @@ data class PlatformStats(
     val totalCustomers: Int = 0,
     val totalRevenue: Double = 0.0,
     val totalListingFeesCollected: Double = 0.0,
-    val pendingReports: Int = 0,
-    val totalReviews: Int = 0,
-    val averageRating: Double = 4.8
+    val pendingReports: Int = 0
 )
 
 enum class ReportReason(val displayName: String) {
@@ -326,7 +306,6 @@ typealias ReportType = ReportReason
 enum class ReportTargetType(val displayName: String) {
     GOAT_LISTING("Goat Listing"),
     FARM("Farm"),
-    REVIEW("Review"),
     OTHER("Other Content")
 }
 
@@ -359,7 +338,7 @@ data class PlatformReport(
     val reporterId: String,
     val reporterName: String,
     val reporterEmail: String = "",
-    val targetType: String, // "GOAT_LISTING" / "GOAT", "FARM", "REVIEW", "OTHER"
+    val targetType: String, // "GOAT_LISTING" / "GOAT", "FARM", "OTHER"
     val targetId: String,
     val targetTitle: String,
     val reason: ReportReason,
@@ -378,7 +357,6 @@ enum class SortOption(val displayName: String) {
     PRICE_LOW_HIGH("Price: Low to High"),
     PRICE_HIGH_LOW("Price: High to Low"),
     NEWEST("Newest First"),
-    RATING("Highest Rated"),
     AGE_YOUNGEST("Age: Youngest"),
     AGE_OLDEST("Age: Oldest"),
     WEIGHT_HEAVIEST("Weight: Heaviest"),

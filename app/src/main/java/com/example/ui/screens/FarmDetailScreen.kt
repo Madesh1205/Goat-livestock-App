@@ -78,22 +78,6 @@ fun FarmDetailScreen(
         onRetryLoadFarmGoats()
     }
 
-    // Live rating calculation from verified reviews
-    val farmReviews = remember(uiState.allReviews, farm.id) {
-        uiState.allReviews.filter { it.farmId == farm.id }
-    }
-    val liveFarmRating = remember(farmReviews, farm.rating) {
-        if (farmReviews.isNotEmpty()) {
-            val sum = farmReviews.sumOf { it.rating.toDouble() }
-            Math.round((sum / farmReviews.size) * 10.0) / 10.0
-        } else {
-            farm.rating
-        }
-    }
-    val liveTotalReviews = remember(farmReviews, farm.totalReviews) {
-        if (farmReviews.isNotEmpty()) farmReviews.size else farm.totalReviews
-    }
-
     // Security check: Customer cannot view unapproved or suspended farms
     val isFarmApproved = farm.verificationStatus == VerificationStatus.APPROVED
 
@@ -205,7 +189,6 @@ fun FarmDetailScreen(
             SortOption.PRICE_LOW_HIGH -> list.sortedBy { it.price }
             SortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.price }
             SortOption.NEWEST -> list.sortedByDescending { it.createdAt }
-            SortOption.RATING -> list.sortedByDescending { it.rating }
             SortOption.AGE_YOUNGEST -> list.sortedBy { it.ageMonths }
             SortOption.AGE_OLDEST -> list.sortedByDescending { it.ageMonths }
             SortOption.WEIGHT_HEAVIEST -> list.sortedByDescending { it.weightKg }
@@ -483,7 +466,7 @@ fun FarmDetailScreen(
                                 }
                             }
 
-                            // Rating & Reviews Row
+                            // Rating & Verification Row
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -510,7 +493,7 @@ fun FarmDetailScreen(
                                             )
                                             Spacer(modifier = Modifier.width(4.dp))
                                             Text(
-                                                text = "$liveFarmRating",
+                                                text = "${farm.rating}",
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 13.sp,
                                                 color = Color(0xFFB78103)
@@ -519,7 +502,7 @@ fun FarmDetailScreen(
                                     }
 
                                     Text(
-                                        text = "($liveTotalReviews verified reviews)",
+                                        text = "Verified Breeder",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -594,8 +577,8 @@ fun FarmDetailScreen(
                         )
                         FarmStatBox(
                             icon = Icons.Default.Star,
-                            value = if (liveTotalReviews > 0 && liveFarmRating > 0.0) String.format("%.1f ★", liveFarmRating) else "No reviews",
-                            label = if (liveTotalReviews > 0) "Rating ($liveTotalReviews)" else "Breeder Rating",
+                            value = if (farm.rating > 0.0) String.format("%.1f ★", farm.rating) else "5.0 ★",
+                            label = "Breeder Rating",
                             tint = Color(0xFFF39C12)
                         )
                         FarmStatBox(

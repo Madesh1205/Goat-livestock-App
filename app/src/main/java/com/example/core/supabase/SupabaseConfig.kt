@@ -107,7 +107,6 @@ object SupabaseConfig {
     const val TABLE_BREEDS = "breeds"
     const val TABLE_BOOKINGS = "bookings"
     const val TABLE_PAYMENTS = "listing_payments"
-    const val TABLE_REVIEWS = "reviews"
     const val TABLE_NOTIFICATIONS = "notifications"
     const val TABLE_REPORTS = "reports"
     const val TABLE_WISHLIST = "wishlist"
