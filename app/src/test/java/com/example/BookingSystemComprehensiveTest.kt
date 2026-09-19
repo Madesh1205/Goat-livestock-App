@@ -46,7 +46,7 @@ class BookingSystemComprehensiveTest {
      * Test booking engine implementing the exact Stage 7 database trigger and repository invariants:
      * - Price snapshot strictly computed from goat price and discount at booking time
      * - Double booking prevention via active booking uniqueness
-     * - 48-hour reservation hold
+     * - 24-hour reservation hold
      * - Automatic release on cancellation or expiration
      * - Role-isolated query scoping
      */
@@ -113,7 +113,7 @@ class BookingSystemComprehensiveTest {
 
             val bookingId = UUID.randomUUID().toString()
             val bookingDate = currentTimeMillis
-            val expiryDate = bookingDate + (48 * 3600 * 1000L) // Exactly 48 hours
+            val expiryDate = bookingDate + (24 * 3600 * 1000L) // Exactly 24 hours
 
             val newBooking = Booking(
                 id = bookingId,
@@ -282,9 +282,9 @@ class BookingSystemComprehensiveTest {
                 result2.exceptionOrNull()?.message?.contains("no longer available") == true)
     }
 
-    // --- SCENARIO 5: 48-hour reservation expiration behavior ---
+    // --- SCENARIO 5: 24-hour reservation expiration behavior ---
     @Test
-    fun `Scenario 5 - 48-hour reservation expiration window is exactly 48 hours`() {
+    fun `Scenario 5 - 24-hour reservation expiration window is exactly 24 hours`() {
         val engine = TestBookingEngine()
         val goat = createTestGoat()
         engine.addGoat(goat)
@@ -292,7 +292,7 @@ class BookingSystemComprehensiveTest {
         val booking = engine.createBooking(goat.id, "cust-5").getOrThrow()
         val diffMillis = booking.reservationExpiryDate - booking.bookingDate
         val diffHours = diffMillis / (1000 * 3600)
-        assertEquals(48L, diffHours)
+        assertEquals(24L, diffHours)
     }
 
     // --- SCENARIO 6: Expired booking allows new customer to book ---
@@ -306,8 +306,8 @@ class BookingSystemComprehensiveTest {
         val booking1 = engine.createBooking(goat.id, "cust-1").getOrThrow()
         assertEquals(AvailabilityStatus.BOOKING_PENDING, booking1.status)
 
-        // Advance simulated time past 48 hours (e.g. 49 hours)
-        engine.currentTimeMillis += (49 * 3600 * 1000L)
+        // Advance simulated time past 24 hours (e.g. 25 hours)
+        engine.currentTimeMillis += (25 * 3600 * 1000L)
 
         // Customer 2 attempts to book the same goat now that hold has expired
         val result2 = engine.createBooking(goat.id, "cust-2")

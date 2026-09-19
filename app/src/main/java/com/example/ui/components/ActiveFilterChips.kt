@@ -39,7 +39,6 @@ fun ActiveFilterChips(
     onRemoveAge: () -> Unit,
     onRemoveWeight: () -> Unit,
     onRemovePrice: () -> Unit,
-    onRemovePurpose: () -> Unit,
     onRemoveLocation: () -> Unit,
     onRemoveAvailability: () -> Unit,
     onRemoveSearchQuery: () -> Unit,
@@ -128,17 +127,6 @@ fun ActiveFilterChips(
                 label = "Price",
                 valueText = "₹$minP - ₹$maxP",
                 onRemove = onRemovePrice
-            )
-        )
-    }
-
-    if (criteria.purpose != null) {
-        chips.add(
-            ActiveFilterChipModel(
-                key = "purpose",
-                label = "Purpose",
-                valueText = criteria.purpose.name.lowercase().replaceFirstChar { it.uppercase() },
-                onRemove = onRemovePurpose
             )
         )
     }

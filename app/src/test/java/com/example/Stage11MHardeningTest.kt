@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 2. Double booking prevention (race conditions & concurrent reservation holds)
  * 3. Price manipulation rejection (client-supplied arbitrary prices are strictly discarded)
  * 4. Booking status manipulation rejection (customers cannot self-confirm or modify terminal states)
- * 5. Expired reservation handling (48-hour hold expiration releases the goat back to AVAILABLE)
+ * 5. Expired reservation handling (24-hour hold expiration releases the goat back to AVAILABLE)
  * 6. Partner farm default listing quota = 10
  * 7. Quota bypass rejection (partner farm cannot list beyond quota without Super Admin limit increase)
  * 8. Farm Admin cannot change quota
@@ -189,7 +189,7 @@ class Stage11MHardeningTest {
             val authoritativePrice = PriceUtils.calculateFinalPrice(currentGoat.price, currentGoat.discountPercentage)
 
             val bookingId = UUID.randomUUID().toString()
-            val expiryDate = currentTimeMillis + (48 * 3600 * 1000L) // 48 hours hold
+            val expiryDate = currentTimeMillis + (24 * 3600 * 1000L) // 24 hours hold
 
             val booking = Booking(
                 id = bookingId,
@@ -341,7 +341,7 @@ class Stage11MHardeningTest {
     }
 
     // -------------------------------------------------------------------------
-    // 5. Expired Reservation Handling (48 Hours)
+    // 5. Expired Reservation Handling (24 Hours)
     // -------------------------------------------------------------------------
     @Test
     fun testExpiredReservationHandlingReleasesGoat() {
@@ -354,8 +354,8 @@ class Stage11MHardeningTest {
         val booking1 = engine.createBookingAtomic(goat.id, "cust-1", UserRole.CUSTOMER).getOrThrow()
         assertEquals(AvailabilityStatus.RESERVED, engine.goats[goat.id]?.availabilityStatus)
 
-        // Advance time by 49 hours (> 48 hours hold)
-        engine.currentTimeMillis += (49 * 3600 * 1000L)
+        // Advance time by 25 hours (> 24 hours hold)
+        engine.currentTimeMillis += (25 * 3600 * 1000L)
 
         // Cust 2 attempts to book the expired goat
         val result2 = engine.createBookingAtomic(goat.id, "cust-2", UserRole.CUSTOMER)

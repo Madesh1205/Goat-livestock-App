@@ -61,7 +61,6 @@ fun MarketplaceHomeScreen(
     onSearchQueryChange: (String) -> Unit,
     onApplyCriteria: (GoatFilterCriteria) -> Unit,
     onBreedSelect: (String?) -> Unit,
-    onPurposeSelect: (GoatPurpose?) -> Unit,
     onSortOptionSelect: (SortOption) -> Unit,
     onClearAllFilters: () -> Unit,
     onRemoveBreed: () -> Unit,
@@ -70,7 +69,6 @@ fun MarketplaceHomeScreen(
     onRemoveAge: () -> Unit,
     onRemoveWeight: () -> Unit,
     onRemovePrice: () -> Unit,
-    onRemovePurpose: () -> Unit,
     onRemoveLocation: () -> Unit,
     onRemoveAvailability: () -> Unit,
     onRemoveSearchQuery: () -> Unit,
@@ -121,7 +119,7 @@ fun MarketplaceHomeScreen(
 
     // Distinct sections (showcase)
     val featuredGoats = remember(uiState.goats) {
-        uiState.goats.filter { it.isFeatured || (it.rating >= 4.0 && it.reviewCount > 0) }.take(5)
+        uiState.goats.filter { it.isFeatured }.ifEmpty { uiState.goats }.take(5)
     }
 
     val recentlyAddedGoats = remember(uiState.goats) {
@@ -364,7 +362,7 @@ fun MarketplaceHomeScreen(
                             Box(modifier = Modifier.weight(1f)) {
                                 if (criteria.searchQuery.isEmpty()) {
                                     Text(
-                                        text = "Search goat breed, farm, purpose...",
+                                        text = "Search goat breed, farm, tag...",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                         fontSize = 14.sp,
                                         maxLines = 1,
@@ -454,7 +452,6 @@ fun MarketplaceHomeScreen(
                     onRemoveAge = onRemoveAge,
                     onRemoveWeight = onRemoveWeight,
                     onRemovePrice = onRemovePrice,
-                    onRemovePurpose = onRemovePurpose,
                     onRemoveLocation = onRemoveLocation,
                     onRemoveAvailability = onRemoveAvailability,
                     onRemoveSearchQuery = onRemoveSearchQuery,
@@ -706,28 +703,13 @@ fun MarketplaceHomeScreen(
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                                 Spacer(modifier = Modifier.height(4.dp))
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text(
-                                                        text = "📍 ${goat.farmName}",
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.weight(1f)
-                                                    )
-                                                    if (goat.rating > 0.0 && goat.reviewCount > 0) {
-                                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                                            Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(11.dp))
-                                                            Text(text = " ${String.format("%.1f", goat.rating)}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                                        }
-                                                    } else {
-                                                        Text(text = "No reviews", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    }
-                                                }
+                                                Text(
+                                                    text = "📍 ${goat.farmName}",
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
                                         }
                                     }
@@ -873,42 +855,12 @@ fun MarketplaceHomeScreen(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Spacer(modifier = Modifier.height(3.dp))
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (farm.rating > 0.0) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(4.dp),
-                                                        color = Color(0xFFFFF8E1).copy(alpha = 0.15f)
-                                                    ) {
-                                                        Row(
-                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Icon(
-                                                                Icons.Default.Star,
-                                                                contentDescription = null,
-                                                                tint = Color(0xFFFFC107),
-                                                                modifier = Modifier.size(12.dp)
-                                                            )
-                                                            Spacer(modifier = Modifier.width(2.dp))
-                                                            Text(
-                                                                text = String.format("%.1f", farm.rating),
-                                                                fontSize = 11.5.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = MaterialTheme.colorScheme.onSurface
-                                                            )
-                                                        }
-                                                    }
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                }
-                                                Text(
-                                                    text = "• ${farm.totalGoatsListed} listed",
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
+                                            Text(
+                                                text = "${farm.totalGoatsListed} listed",
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
                                 }
@@ -930,7 +882,6 @@ fun MarketplaceHomeScreen(
                             val headerTitle = when {
                                 criteria.searchQuery.isNotBlank() -> "Results for \"${criteria.searchQuery}\""
                                 criteria.breed != null -> "${criteria.breed} Goats"
-                                criteria.purpose != null -> "${criteria.purpose.name.lowercase().replaceFirstChar { it.uppercase() }} Goats"
                                 else -> "All Approved Listings"
                             }
                             Text(

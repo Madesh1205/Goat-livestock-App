@@ -4,7 +4,9 @@ import android.util.Log
 import com.example.core.supabase.SupabaseConfig
 import com.example.core.supabase.SupabaseModule
 import com.example.core.util.PriceUtils
+import com.example.data.dto.BookingDto
 import com.example.data.dto.FarmDto
+import com.example.data.dto.GoatDeletionResponse
 import com.example.data.dto.GoatDto
 import com.example.data.dto.GoatImageDto
 import com.example.data.dto.ProfileDto
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.util.UUID
 
 interface GoatRepository {
@@ -293,6 +296,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
     }
 
     override suspend fun addGoatListing(goat: Goat): Result<Goat> = withContext(Dispatchers.IO) {
+        val newlyUploadedStoragePaths = mutableListOf<String>()
         try {
             // Validate inputs
             if (goat.breed.isBlank()) {
@@ -322,6 +326,45 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             val isAmmal = resolvedFarmId == SEED_AMMAL_FARM_UUID ||
                 (goat.farmName.contains("Ammal", ignoreCase = true) && !goat.farmName.contains("Partner", ignoreCase = true))
 
+            // Process photos: Upload any local URIs only after validation
+            val finalPhotos = mutableListOf<String>()
+            for ((index, photoStr) in goat.photos.withIndex()) {
+                if (com.example.util.ImageUploadHelper.isLocalUri(photoStr)) {
+                    val context = try { com.example.AmmalFarmApplication.instance.applicationContext } catch (_: Exception) { null }
+                    if (context != null) {
+                        val uri = android.net.Uri.parse(photoStr)
+                        val bytes = com.example.util.ImageUploadHelper.compressAndResizeImage(context, uri)
+                            ?: throw IllegalArgumentException("Could not read image from local URI: $photoStr")
+
+                        val uploadResult = com.example.util.ImageUploadHelper.uploadGoatImage(
+                            context = context,
+                            bytes = bytes,
+                            goatId = generatedId,
+                            photoIndex = index + 1,
+                            farmId = resolvedFarmId
+                        )
+
+                        val uploadedUrl = uploadResult.getOrElse { err ->
+                            throw RuntimeException("Failed to upload image ${index + 1}: ${err.message}", err)
+                        }
+
+                        if (com.example.util.ImageUploadHelper.isLocalUri(uploadedUrl)) {
+                            throw RuntimeException("Upload returned a local URI, remote storage upload failed")
+                        }
+
+                        val storagePath = SupabaseConfig.extractStoragePath(uploadedUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                        if (storagePath.isNotBlank()) {
+                            newlyUploadedStoragePaths.add(storagePath)
+                        }
+                        finalPhotos.add(uploadedUrl)
+                    } else {
+                        throw IllegalStateException("Context not available to upload local URI $photoStr")
+                    }
+                } else {
+                    finalPhotos.add(photoStr)
+                }
+            }
+
             val cleanGoat = goat.copy(
                 id = generatedId,
                 farmId = resolvedFarmId,
@@ -329,7 +372,8 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 approvalStatus = if (isAmmal) ApprovalStatus.APPROVED else ApprovalStatus.PENDING_APPROVAL,
                 availabilityStatus = AvailabilityStatus.AVAILABLE,
                 listingFeePaid = isAmmal,
-                listingFeeAmount = if (isAmmal) 0.0 else 100.0
+                listingFeeAmount = if (isAmmal) 0.0 else 100.0,
+                photos = finalPhotos
             )
 
             if (SupabaseConfig.isConfigured) {
@@ -371,9 +415,9 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 }
 
                 // Save photos in goat_images table if any
-                if (goat.photos.isNotEmpty()) {
+                if (cleanGoat.photos.isNotEmpty()) {
                     val nowIso = currentIsoTimestamp()
-                    val imageDtos = goat.photos.mapIndexed { index, pathOrUrl ->
+                    val imageDtos = cleanGoat.photos.mapIndexed { index, pathOrUrl ->
                         val cleanStoragePath = SupabaseConfig.extractStoragePath(pathOrUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
                         GoatImageDto(
                             id = UUID.randomUUID().toString(),
@@ -388,6 +432,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                         SupabaseModule.client.postgrest["goat_images"].insert(imageDtos)
                     } catch (imgErr: Exception) {
                         Log.w(TAG, "Could not insert goat_images records: ${imgErr.message}")
+                        throw imgErr
                     }
                 }
             }
@@ -398,11 +443,15 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             Result.success(cleanGoat)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add goat listing: ${e.message}", e)
+            if (newlyUploadedStoragePaths.isNotEmpty()) {
+                com.example.util.ImageUploadHelper.deleteStorageFiles(newlyUploadedStoragePaths)
+            }
             Result.failure(e)
         }
     }
 
     override suspend fun updateGoatListing(goat: Goat): Result<Goat> = withContext(Dispatchers.IO) {
+        val newlyUploadedStoragePaths = mutableListOf<String>()
         try {
             val validId = ensureValidUuid(goat.id)
 
@@ -450,59 +499,98 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 }
             }
 
+            // Process replacement / new local images
+            val finalPhotos = mutableListOf<String>()
+            for ((index, photoStr) in goat.photos.withIndex()) {
+                if (com.example.util.ImageUploadHelper.isLocalUri(photoStr)) {
+                    val context = try { com.example.AmmalFarmApplication.instance.applicationContext } catch (_: Exception) { null }
+                    if (context != null) {
+                        val uri = android.net.Uri.parse(photoStr)
+                        val bytes = com.example.util.ImageUploadHelper.compressAndResizeImage(context, uri)
+                            ?: throw IllegalArgumentException("Could not read image from local URI: $photoStr")
+
+                        val uploadResult = com.example.util.ImageUploadHelper.uploadGoatImage(
+                            context = context,
+                            bytes = bytes,
+                            goatId = validId,
+                            photoIndex = index + 1,
+                            farmId = goat.farmId
+                        )
+
+                        val uploadedUrl = uploadResult.getOrElse { err ->
+                            throw RuntimeException("Failed to upload replacement image ${index + 1}: ${err.message}", err)
+                        }
+
+                        if (com.example.util.ImageUploadHelper.isLocalUri(uploadedUrl)) {
+                            throw RuntimeException("Upload returned local URI, remote storage upload failed")
+                        }
+
+                        val storagePath = SupabaseConfig.extractStoragePath(uploadedUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                        if (storagePath.isNotBlank()) {
+                            newlyUploadedStoragePaths.add(storagePath)
+                        }
+                        finalPhotos.add(uploadedUrl)
+                    } else {
+                        throw IllegalStateException("Context not available to upload local URI $photoStr")
+                    }
+                } else {
+                    finalPhotos.add(photoStr)
+                }
+            }
+
             val validFarmId = ensureValidUuid(goat.farmId)
-            val cleanGoat = goat.copy(id = validId, farmId = validFarmId)
+            val cleanGoat = goat.copy(id = validId, farmId = validFarmId, photos = finalPhotos)
             val dto = GoatDto.fromDomain(cleanGoat)
 
             if (SupabaseConfig.isConfigured) {
+                // Fetch existing images before update
+                val existingImages = try {
+                    SupabaseModule.client.postgrest["goat_images"]
+                        .select {
+                            filter {
+                                eq("goat_id", validId)
+                            }
+                        }.decodeList<GoatImageDto>()
+                } catch (_: Exception) { emptyList() }
+
                 SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].update(dto) {
                     filter {
                         eq("id", validId)
                     }
                 }
 
-                // Sync photos in goat_images and delete removed storage files
-                try {
-                    val existingImages = SupabaseModule.client.postgrest["goat_images"]
-                        .select {
-                            filter {
-                                eq("goat_id", validId)
-                            }
-                        }.decodeList<GoatImageDto>()
-
-                    val currentPaths = goat.photos.map { SupabaseConfig.extractStoragePath(it, SupabaseConfig.BUCKET_GOAT_IMAGES) }.toSet()
-                    val removedFiles = existingImages.filter { img ->
-                        val imgPath = SupabaseConfig.extractStoragePath(img.imageUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
-                        imgPath.isNotBlank() && !currentPaths.contains(imgPath)
-                    }.map { it.imageUrl }
-
-                    if (removedFiles.isNotEmpty()) {
-                        com.example.util.ImageUploadHelper.deleteStorageFiles(removedFiles)
+                // Delete old goat_images DB records
+                SupabaseModule.client.postgrest["goat_images"].delete {
+                    filter {
+                        eq("goat_id", validId)
                     }
+                }
 
-                    SupabaseModule.client.postgrest["goat_images"].delete {
-                        filter {
-                            eq("goat_id", validId)
-                        }
+                if (cleanGoat.photos.isNotEmpty()) {
+                    val nowIso = currentIsoTimestamp()
+                    val newImageDtos = cleanGoat.photos.mapIndexed { index, pathOrUrl ->
+                        val cleanStoragePath = SupabaseConfig.extractStoragePath(pathOrUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                        GoatImageDto(
+                            id = UUID.randomUUID().toString(),
+                            goatId = validId,
+                            imageUrl = cleanStoragePath.ifBlank { pathOrUrl },
+                            displayOrder = index,
+                            isPrimary = index == 0,
+                            createdAt = nowIso
+                        )
                     }
+                    SupabaseModule.client.postgrest["goat_images"].insert(newImageDtos)
+                }
 
-                    if (goat.photos.isNotEmpty()) {
-                        val nowIso = currentIsoTimestamp()
-                        val newImageDtos = goat.photos.mapIndexed { index, pathOrUrl ->
-                            val cleanStoragePath = SupabaseConfig.extractStoragePath(pathOrUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
-                            GoatImageDto(
-                                id = UUID.randomUUID().toString(),
-                                goatId = validId,
-                                imageUrl = cleanStoragePath.ifBlank { pathOrUrl },
-                                displayOrder = index,
-                                isPrimary = index == 0,
-                                createdAt = nowIso
-                            )
-                        }
-                        SupabaseModule.client.postgrest["goat_images"].insert(newImageDtos)
-                    }
-                } catch (syncErr: Exception) {
-                    Log.w(TAG, "Failed to sync goat_images on update: ${syncErr.message}")
+                // ONLY AFTER new uploads & DB update succeed: delete removed old Storage files
+                val currentStoragePaths = cleanGoat.photos.map { SupabaseConfig.extractStoragePath(it, SupabaseConfig.BUCKET_GOAT_IMAGES) }.toSet()
+                val removedFiles = existingImages.filter { img ->
+                    val imgPath = SupabaseConfig.extractStoragePath(img.imageUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                    imgPath.isNotBlank() && !currentStoragePaths.contains(imgPath) && !com.example.util.ImageUploadHelper.isProtectedStoragePath(imgPath)
+                }.map { it.imageUrl }
+
+                if (removedFiles.isNotEmpty()) {
+                    com.example.util.ImageUploadHelper.deleteStorageFiles(removedFiles)
                 }
             }
 
@@ -511,7 +599,10 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             invalidateCache()
             Result.success(cleanGoat)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to update goat listing: ${e.message}", e)
+            Log.e(TAG, "Failed to update goat listing, rolling back new partial uploads: ${e.message}", e)
+            if (newlyUploadedStoragePaths.isNotEmpty()) {
+                com.example.util.ImageUploadHelper.deleteStorageFiles(newlyUploadedStoragePaths)
+            }
             Result.failure(e)
         }
     }
@@ -535,52 +626,136 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                     return@withContext Result.failure(SecurityException("Customers cannot delete goat listings"))
                 }
 
-                val existingDto = try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                        .select { filter { eq("id", validId) } }
-                        .decodeSingleOrNull<GoatDto>()
-                } catch (_: Exception) { null }
+                // 1. Attempt server-authoritative deletion RPC
+                var rpcExecuted = false
+                var storagePathsToDelete = emptyList<String>()
 
-                if (existingDto != null && !isSuperAdmin) {
-                    val farmDto = try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                            .select { filter { eq("id", existingDto.farmId) } }
-                            .decodeSingleOrNull<FarmDto>()
+                try {
+                    val rpcResponse = SupabaseModule.client.postgrest.rpc(
+                        function = "delete_goat_listing_secure",
+                        parameters = buildJsonObject {
+                            put("p_goat_id", validId)
+                        }
+                    ).decodeSingleOrNull<GoatDeletionResponse>()
+
+                    if (rpcResponse != null && rpcResponse.success) {
+                        rpcExecuted = true
+                        storagePathsToDelete = rpcResponse.deletedImages
+                        Log.i(TAG, "delete_goat_listing_secure RPC succeeded. ${storagePathsToDelete.size} images to clean up. Historical bookings preserved: ${rpcResponse.historicalBookingsPreserved}")
+                    }
+                } catch (rpcErr: Exception) {
+                    val errMsg = rpcErr.message ?: ""
+                    if (errMsg.contains("active reservations", ignoreCase = true) ||
+                        errMsg.contains("Unauthorized", ignoreCase = true) ||
+                        errMsg.contains("Caller profile not found", ignoreCase = true)) {
+                        return@withContext Result.failure(rpcErr)
+                    }
+                    Log.w(TAG, "delete_goat_listing_secure RPC unavailable or failed, falling back to direct secure flow: ${rpcErr.message}")
+                }
+
+                // 2. Direct fallback flow if RPC was not available
+                if (!rpcExecuted) {
+                    val existingDto = try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                            .select { filter { eq("id", validId) } }
+                            .decodeSingleOrNull<GoatDto>()
                     } catch (_: Exception) { null }
 
-                    if (farmDto != null && farmDto.ownerId != authUser.id) {
-                        return@withContext Result.failure(SecurityException("Farm Admin cannot delete another farm's goat"))
-                    }
-                }
+                    if (existingDto != null && !isSuperAdmin) {
+                        val farmDto = try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                                .select { filter { eq("id", existingDto.farmId) } }
+                                .decodeSingleOrNull<FarmDto>()
+                        } catch (_: Exception) { null }
 
-                // Delete goat record from Supabase first
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].delete {
-                    filter {
-                        eq("id", validId)
-                    }
-                }
-
-                // Clean up associated images only if delete succeeded
-                try {
-                    val existingImages = SupabaseModule.client.postgrest["goat_images"]
-                        .select {
-                            filter {
-                                eq("goat_id", validId)
-                            }
-                        }.decodeList<GoatImageDto>()
-
-                    val filesToDelete = existingImages.map { it.imageUrl }
-                    if (filesToDelete.isNotEmpty()) {
-                        com.example.util.ImageUploadHelper.deleteStorageFiles(filesToDelete)
-                    }
-
-                    SupabaseModule.client.postgrest["goat_images"].delete {
-                        filter {
-                            eq("goat_id", validId)
+                        if (farmDto != null && farmDto.ownerId != authUser.id) {
+                            return@withContext Result.failure(SecurityException("Farm Admin cannot delete another farm's goat"))
                         }
                     }
-                } catch (imgCleanupErr: Exception) {
-                    Log.w(TAG, "Error during goat image cleanup: ${imgCleanupErr.message}")
+
+                    // Booking safety check: Verify no active reservations exist
+                    val allBookings = try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
+                            .select {
+                                filter {
+                                    eq("goat_id", validId)
+                                }
+                            }.decodeList<BookingDto>()
+                    } catch (_: Exception) { emptyList() }
+
+                    val activeBookings = allBookings.filter { it.status in listOf("PENDING", "RESERVED", "CONFIRMED") }
+                    if (activeBookings.isNotEmpty()) {
+                        return@withContext Result.failure(IllegalStateException("Cannot delete goat listing with active reservations or bookings (${activeBookings.size} active). Complete or cancel active reservations first."))
+                    }
+
+                    // Preserve historical bookings by unlinking goat_id
+                    val historicalBookings = allBookings.filter { it.status !in listOf("PENDING", "RESERVED", "CONFIRMED") }
+                    if (historicalBookings.isNotEmpty()) {
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].update(
+                                buildJsonObject {
+                                    put("goat_id", null as String?)
+                                }
+                            ) {
+                                filter {
+                                    eq("goat_id", validId)
+                                }
+                            }
+                        } catch (bErr: Exception) {
+                            Log.w(TAG, "Unlinking historical bookings failed: ${bErr.message}")
+                        }
+                    }
+
+                    // Retrieve image URLs BEFORE deleting goat records
+                    val existingImages = try {
+                        SupabaseModule.client.postgrest["goat_images"]
+                            .select {
+                                filter {
+                                    eq("goat_id", validId)
+                                }
+                            }.decodeList<GoatImageDto>()
+                    } catch (_: Exception) { emptyList() }
+
+                    storagePathsToDelete = existingImages.map { it.imageUrl }
+
+                    // Delete database records
+                    try {
+                        SupabaseModule.client.postgrest["wishlist"].delete {
+                            filter { eq("goat_id", validId) }
+                        }
+                    } catch (_: Exception) {}
+
+                    try {
+                        SupabaseModule.client.postgrest["goat_images"].delete {
+                            filter { eq("goat_id", validId) }
+                        }
+                    } catch (_: Exception) {}
+
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].delete {
+                        filter {
+                            eq("id", validId)
+                        }
+                    }
+                }
+
+                // 3. Storage Image Cleanup: delete actual stored paths from Supabase Storage
+                if (storagePathsToDelete.isNotEmpty()) {
+                    val cleanupResult = com.example.util.ImageUploadHelper.deleteStorageFiles(storagePathsToDelete)
+                    if (cleanupResult.isSuccess) {
+                        try {
+                            SupabaseModule.client.postgrest.rpc(
+                                function = "complete_storage_cleanup",
+                                parameters = buildJsonObject {
+                                    put("p_goat_id", validId)
+                                    putJsonArray("p_completed_paths") {
+                                        storagePathsToDelete.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) }
+                                    }
+                                }
+                            )
+                        } catch (_: Exception) {}
+                    } else {
+                        Log.w(TAG, "Storage cleanup reported error: ${cleanupResult.exceptionOrNull()?.message}")
+                    }
                 }
             }
 

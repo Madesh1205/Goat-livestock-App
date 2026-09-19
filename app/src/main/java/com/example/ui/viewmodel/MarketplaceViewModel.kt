@@ -60,7 +60,6 @@ data class MarketplaceUiState(
     val approvedFarms: List<Farm> get() = farms.filter { it.verificationStatus == VerificationStatus.APPROVED }
     val searchQuery: String get() = filterCriteria.searchQuery
     val selectedBreed: String? get() = filterCriteria.breed
-    val selectedPurpose: GoatPurpose? get() = filterCriteria.purpose
     val selectedFarmId: String? get() = filterCriteria.farmId
     val minPrice: Double? get() = filterCriteria.minPrice
     val maxPrice: Double? get() = filterCriteria.maxPrice
@@ -462,7 +461,7 @@ class MarketplaceViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, networkError = null) }
             repository.invalidateCache()
-            // 1. Refresh public marketplace data (approved farms, reviews, available breeds)
+            // 1. Refresh public marketplace data (approved farms, available breeds)
             loadPublicMarketplaceData()
             // 2. Refresh role-authorized data
             val currentUser = _uiState.value.currentUser
@@ -498,13 +497,6 @@ class MarketplaceViewModel(
     fun selectBreed(breed: String?) {
         val updated = _filterCriteria.updateAndGet {
             it.copy(breed = if (it.breed == breed || breed.equals("All", ignoreCase = true)) null else breed)
-        }
-        _uiState.update { it.copy(filterCriteria = updated) }
-    }
-
-    fun selectPurpose(purpose: GoatPurpose?) {
-        val updated = _filterCriteria.updateAndGet {
-            it.copy(purpose = if (it.purpose == purpose) null else purpose)
         }
         _uiState.update { it.copy(filterCriteria = updated) }
     }
@@ -613,11 +605,6 @@ class MarketplaceViewModel(
         _uiState.update { it.copy(filterCriteria = updated) }
     }
 
-    fun removePurposeFilter() {
-        val updated = _filterCriteria.updateAndGet { it.copy(purpose = null) }
-        _uiState.update { it.copy(filterCriteria = updated) }
-    }
-
     fun removeLocationFilter() {
         val updated = _filterCriteria.updateAndGet { it.copy(location = null) }
         _uiState.update { it.copy(filterCriteria = updated) }
@@ -722,6 +709,18 @@ class MarketplaceViewModel(
     }
 
     fun createBooking(goatId: String, notes: String, onSuccess: () -> Unit) {
+        val currentUser = _uiState.value.currentUser
+        val targetGoat = _uiState.value.goats.find { it.id == goatId }
+        val targetFarm = _uiState.value.farms.find { it.id == targetGoat?.farmId }
+        if (currentUser?.role == UserRole.FARM_ADMIN) {
+            val isOwnFarm = (targetGoat != null && currentUser.farmId != null && targetGoat.farmId == currentUser.farmId) ||
+                    (targetFarm != null && targetFarm.ownerId == currentUser.id)
+            if (isOwnFarm) {
+                _uiState.update { it.copy(errorMessage = "You cannot book goats listed by your own farm.") }
+                return
+            }
+        }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = repository.createBooking(goatId, notes)

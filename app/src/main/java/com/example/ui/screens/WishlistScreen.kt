@@ -35,6 +35,7 @@ import coil.request.ImageRequest
 import com.example.model.AvailabilityStatus
 import com.example.model.Goat
 import com.example.model.GoatGender
+import com.example.model.UserRole
 import com.example.ui.viewmodel.MarketplaceUiState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +72,7 @@ fun WishlistScreen(
     val availableBreeds = remember(savedGoats) {
         savedGoats.map { it.breed }.distinct().sorted()
     }
+    val isFarmAdmin = uiState.currentUser?.role == UserRole.FARM_ADMIN
 
     Scaffold(
         topBar = {
@@ -262,6 +264,10 @@ fun WishlistScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(filteredGoats, key = { it.id }) { goat ->
+                        val isOwnFarm = isFarmAdmin && (
+                            (uiState.currentUser?.farmId != null && uiState.currentUser.farmId == goat.farmId) ||
+                            uiState.farms.find { it.id == goat.farmId }?.ownerId == uiState.currentUser?.id
+                        )
                         WishlistGoatCard(
                             goat = goat,
                             onClick = { onGoatClick(goat) },
@@ -269,7 +275,14 @@ fun WishlistScreen(
                                 onRemoveFromWishlist(goat.id)
                                 Toast.makeText(context, "Removed ${goat.name} from Wishlist", Toast.LENGTH_SHORT).show()
                             },
-                            onBook = { onBookGoat(goat) }
+                            canBook = !isOwnFarm,
+                            onBook = {
+                                if (isOwnFarm) {
+                                    Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
+                                } else {
+                                    onBookGoat(goat)
+                                }
+                            }
                         )
                     }
                 }
@@ -284,6 +297,7 @@ private fun WishlistGoatCard(
     onClick: () -> Unit,
     onRemove: () -> Unit,
     onBook: () -> Unit,
+    canBook: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -474,7 +488,7 @@ private fun WishlistGoatCard(
                     }
                 }
 
-                if (goat.availabilityStatus == AvailabilityStatus.AVAILABLE) {
+                if (canBook && goat.availabilityStatus == AvailabilityStatus.AVAILABLE) {
                     FilledTonalButton(
                         onClick = onBook,
                         shape = RoundedCornerShape(8.dp),

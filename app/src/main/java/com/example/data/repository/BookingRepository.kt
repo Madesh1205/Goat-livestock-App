@@ -193,11 +193,27 @@ class SupabaseBookingRepositoryImpl : BookingRepository {
                     }.decodeSingleOrNull<ProfileDto>()
             } catch (_: Exception) { null }
 
+            if (customerDto?.role?.uppercase() == "FARM_ADMIN") {
+                val userFarmId = customerDto.farmId
+                val farmDto = try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select {
+                            filter {
+                                eq("id", effectiveFarmId)
+                            }
+                        }.decodeSingleOrNull<FarmDto>()
+                } catch (_: Exception) { null }
+
+                if ((userFarmId != null && userFarmId == effectiveFarmId) || farmDto?.ownerId == validCustomerId) {
+                    return@withContext Result.failure(IllegalStateException("You cannot book goats listed by your own farm."))
+                }
+            }
+
             // 4. Calculate authoritative final price snapshot
             val effectiveGoatPrice = goatDto.toDomain().finalPrice
             val newBookingId = UUID.randomUUID().toString()
             val nowIso = currentIsoTimestamp()
-            val expiresIso = futureIsoTimestamp(48)
+            val expiresIso = futureIsoTimestamp(24)
             val resolvedPhoto = GoatImageResolver.resolvePrimaryPhoto(validGoatId).ifBlank {
                 goatDto.toDomain().photos.firstOrNull() ?: ""
             }
@@ -245,7 +261,7 @@ class SupabaseBookingRepositoryImpl : BookingRepository {
                 amount = effectiveGoatPrice,
                 status = AvailabilityStatus.BOOKING_PENDING,
                 bookingDate = nowMillis,
-                reservationExpiryDate = nowMillis + (48 * 3600 * 1000L),
+                reservationExpiryDate = nowMillis + (24 * 3600 * 1000L),
                 notes = notes.trim()
             )
 

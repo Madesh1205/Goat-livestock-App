@@ -621,59 +621,7 @@ fun GoatFilterBottomSheet(
                     }
                 }
 
-                // --- 7. PURPOSE / UTILITY ---
-                item {
-                    FilterSectionHeader(
-                        title = "Purpose & Utility",
-                        icon = Icons.Outlined.WorkOutline,
-                        selectedSubtitle = draftCriteria.purpose?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "All Purposes"
-                    )
-
-                    FlowRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = draftCriteria.purpose == null,
-                            onClick = { draftCriteria = draftCriteria.copy(purpose = null) },
-                            label = { Text("All Purposes", fontSize = 13.sp) }
-                        )
-
-                        GoatPurpose.values().forEach { purpose ->
-                            val isSelected = draftCriteria.purpose == purpose
-                            val label = when (purpose) {
-                                GoatPurpose.BREEDING -> "Breeding Stud"
-                                GoatPurpose.DAIRY -> "Dairy (High Milk)"
-                                GoatPurpose.MEAT -> "Meat Production"
-                                GoatPurpose.PET -> "Pet / Backyard"
-                                GoatPurpose.SHOW -> "Show / Exhibition"
-                            }
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = {
-                                    draftCriteria = draftCriteria.copy(
-                                        purpose = if (isSelected) null else purpose
-                                    )
-                                },
-                                label = { Text(label, fontSize = 13.sp) },
-                                leadingIcon = if (isSelected) {
-                                    {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                } else null
-                            )
-                        }
-                    }
-                }
-
-                // --- 8. VERIFIED FARM PARTNER ---
+                // --- 7. VERIFIED FARM PARTNER ---
                 item {
                     FilterSectionHeader(
                         title = "Farm / Breeder",

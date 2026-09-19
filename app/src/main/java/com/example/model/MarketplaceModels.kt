@@ -166,7 +166,7 @@ data class Booking(
     val amount: Double,
     val status: AvailabilityStatus = AvailabilityStatus.BOOKING_PENDING,
     val bookingDate: Long = System.currentTimeMillis(),
-    val reservationExpiryDate: Long = System.currentTimeMillis() + (48 * 3600 * 1000L), // 48h hold
+    val reservationExpiryDate: Long = System.currentTimeMillis() + (24 * 3600 * 1000L), // 24h hold
     val notes: String = ""
 ) {
     val formattedAmount: String

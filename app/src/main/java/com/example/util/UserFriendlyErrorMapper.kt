@@ -130,7 +130,15 @@ object UserFriendlyErrorMapper {
             return "Your session has expired. Please sign in again."
         }
 
-        // Permission
+        // Own farm booking restriction
+        if (msg.contains("own farm") ||
+            msg.contains("own listings") ||
+            msg.contains("cannot book goats listed by your own farm") ||
+            msg.contains("breeders cannot place booking holds on their own")
+        ) {
+            return "You cannot book goats listed by your own farm."
+        }
+
         if (isPermissionFailure(msg)) {
             return "You do not have permission to book this goat."
         }

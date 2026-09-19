@@ -522,19 +522,42 @@ object ImageUploadHelper {
      */
     suspend fun deleteStorageFile(storagePath: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            if (storagePath.startsWith("file://") || storagePath.startsWith("data:") || storagePath.startsWith("http")) {
-                if (storagePath.startsWith("file://")) {
-                    File(storagePath.removePrefix("file://")).delete()
-                }
+            if (storagePath.startsWith("file://")) {
+                File(storagePath.removePrefix("file://")).delete()
+                return@withContext Result.success(Unit)
+            }
+            if (storagePath.startsWith("data:") || storagePath.startsWith("content://") || storagePath.startsWith("android.resource://")) {
                 return@withContext Result.success(Unit)
             }
             val cleanPath = SupabaseConfig.extractStoragePath(storagePath, SupabaseConfig.BUCKET_GOAT_IMAGES)
             if (cleanPath.isBlank()) {
                 return@withContext Result.success(Unit)
             }
-            val bucket = SupabaseModule.storage[SupabaseConfig.BUCKET_GOAT_IMAGES]
-            bucket.delete(cleanPath)
-            Log.d(TAG, "Deleted file from Supabase Storage: $cleanPath")
+
+            // Safety guard: Never delete farm logos or farm banners during goat cleanup
+            if (isProtectedStoragePath(cleanPath)) {
+                Log.w(TAG, "Safety guard: refusing to delete protected path: $cleanPath")
+                return@withContext Result.success(Unit)
+            }
+
+            if (SupabaseConfig.isConfigured) {
+                try {
+                    val bucket = SupabaseModule.storage[SupabaseConfig.BUCKET_GOAT_IMAGES]
+                    bucket.delete(cleanPath)
+                    Log.d(TAG, "Deleted file from Supabase Storage: $cleanPath")
+                    return@withContext Result.success(Unit)
+                } catch (sdkErr: Exception) {
+                    Log.w(TAG, "SDK file delete failed ($cleanPath): ${sdkErr.message}, attempting REST delete")
+                }
+
+                // Fallback to REST API delete
+                val restSuccess = deleteViaRestApi(listOf(cleanPath), SupabaseConfig.BUCKET_GOAT_IMAGES)
+                if (restSuccess) {
+                    return@withContext Result.success(Unit)
+                }
+            }
+
+            Log.d(TAG, "Storage delete finished for: $cleanPath")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.w(TAG, "Error deleting file from Supabase Storage ($storagePath): ${e.message}")
@@ -551,23 +574,110 @@ object ImageUploadHelper {
                 if (path.startsWith("file://")) {
                     File(path.removePrefix("file://")).delete()
                     null
-                } else if (path.startsWith("data:") || path.startsWith("http")) {
+                } else if (path.startsWith("data:") || path.startsWith("content://") || path.startsWith("android.resource://")) {
                     null
                 } else {
                     val p = SupabaseConfig.extractStoragePath(path, SupabaseConfig.BUCKET_GOAT_IMAGES)
-                    if (p.isNotBlank()) p else null
+                    // Safety guard: Never delete farm logos or banners
+                    if (p.isNotBlank() && !isProtectedStoragePath(p)) {
+                        p
+                    } else {
+                        null
+                    }
                 }
             }
+
             if (cleanPaths.isEmpty()) {
                 return@withContext Result.success(Unit)
             }
-            val bucket = SupabaseModule.storage[SupabaseConfig.BUCKET_GOAT_IMAGES]
-            bucket.delete(cleanPaths)
-            Log.d(TAG, "Deleted ${cleanPaths.size} files from Supabase Storage")
+
+            if (SupabaseConfig.isConfigured) {
+                try {
+                    val bucket = SupabaseModule.storage[SupabaseConfig.BUCKET_GOAT_IMAGES]
+                    bucket.delete(cleanPaths)
+                    Log.d(TAG, "Deleted ${cleanPaths.size} files from Supabase Storage SDK")
+                    return@withContext Result.success(Unit)
+                } catch (sdkErr: Exception) {
+                    Log.w(TAG, "SDK batch delete failed: ${sdkErr.message}, attempting REST batch delete")
+                }
+
+                val restSuccess = deleteViaRestApi(cleanPaths, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                if (restSuccess) {
+                    Log.d(TAG, "Deleted ${cleanPaths.size} files via Supabase Storage REST API")
+                    return@withContext Result.success(Unit)
+                }
+            }
+
+            Log.d(TAG, "Finished batch delete for ${cleanPaths.size} paths")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.w(TAG, "Error batch deleting files from Supabase Storage: ${e.message}")
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Checks whether a string represents a local file/content URI.
+     */
+    fun isLocalUri(pathOrUrl: String): Boolean {
+        if (pathOrUrl.isBlank()) return false
+        val lower = pathOrUrl.lowercase().trim()
+        return lower.startsWith("content://") ||
+               lower.startsWith("file://") ||
+               lower.startsWith("/data/") ||
+               lower.startsWith("/storage/") ||
+               lower.startsWith("android.resource://")
+    }
+
+    /**
+     * Safety guard to ensure farm branding assets are never accidentally deleted during goat listing removal.
+     */
+    fun isProtectedStoragePath(path: String): Boolean {
+        val lower = path.lowercase()
+        return lower.contains("farm_logo") || 
+               lower.contains("farm_banner") || 
+               lower.contains("/logo") || 
+               lower.contains("/banner") ||
+               lower.startsWith("logo/") ||
+               lower.startsWith("banner/")
+    }
+
+    private suspend fun deleteViaRestApi(paths: List<String>, bucketName: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val sessionToken = SupabaseModule.auth.currentAccessTokenOrNull()
+                ?: SupabaseConfig.supabaseAnonKey
+            val anonKey = SupabaseConfig.supabaseAnonKey
+            val supabaseUrl = SupabaseConfig.supabaseUrl
+
+            val client = SupabaseModule.createCustomOkHttpClient()
+            val deleteUrl = "$supabaseUrl/storage/v1/object/$bucketName"
+
+            val jsonArray = buildString {
+                append("{\"prefixes\":[")
+                paths.forEachIndexed { index, p ->
+                    append("\"").append(p).append("\"")
+                    if (index < paths.size - 1) append(",")
+                }
+                append("]}")
+            }
+
+            val requestBody = jsonArray.toRequestBody("application/json".toMediaTypeOrNull())
+
+            val request = Request.Builder()
+                .url(deleteUrl)
+                .delete(requestBody)
+                .header("Authorization", "Bearer $sessionToken")
+                .header("apikey", anonKey)
+                .header("Content-Type", "application/json")
+                .build()
+
+            val response = client.newCall(request).execute()
+            val code = response.code
+            response.close()
+            code in 200..299 || code == 404
+        } catch (e: Exception) {
+            Log.w(TAG, "Storage REST API delete failed: ${e.message}")
+            false
         }
     }
 

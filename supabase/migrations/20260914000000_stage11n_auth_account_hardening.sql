@@ -144,12 +144,17 @@ DECLARE
     v_is_super_admin BOOLEAN := FALSE;
     v_auth_uid UUID := auth.uid();
 BEGIN
-    -- Check if current authenticated caller is Super Admin
-    IF v_auth_uid IS NOT NULL THEN
-        SELECT (role = 'SUPER_ADMIN') INTO v_is_super_admin
-        FROM public.profiles
-        WHERE id = v_auth_uid;
+    -- 1. Direct DB admin / SQL Editor / backend service role (auth.uid() is NULL):
+    -- Allow direct administrative operations unconditionally
+    IF v_auth_uid IS NULL THEN
+        NEW.updated_at := NOW();
+        RETURN NEW;
     END IF;
+
+    -- Check if current authenticated caller is Super Admin
+    SELECT (role = 'SUPER_ADMIN') INTO v_is_super_admin
+    FROM public.profiles
+    WHERE id = v_auth_uid;
 
     -- Super Admin has unrestricted profile update/insert rights
     IF v_is_super_admin IS TRUE THEN

@@ -54,37 +54,38 @@ supabase functions deploy send-fcm-notification --project-ref <MUMBAI_PROJECT_RE
 
 ---
 
-## 4. Scheduling `expire-bookings` via pg_cron (Database Level)
+## 4. Scheduling `expire_overdue_bookings()` via pg_cron (Database Level)
 
 In Mumbai Supabase SQL Editor:
 
 ```sql
--- 1. Enable pg_net and pg_cron extensions
+-- 1. Enable pg_cron extension
 CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
 
--- 2. Option A (Recommended): Schedule hourly execution of stored procedure directly in Postgres
-SELECT cron.schedule(
-    'hourly-booking-expiration',
-    '0 * * * *', -- Every hour at minute 0
-    $$SELECT public.expire_overdue_bookings();$$
-);
+-- 2. Schedule 5-minute execution of server-authoritative stored procedure
+-- Removes previous hourly schedule if present
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p 
+        JOIN pg_namespace n ON p.pronamespace = n.oid 
+        WHERE n.nspname = 'cron' AND p.proname = 'schedule'
+    ) THEN
+        BEGIN
+            PERFORM cron.unschedule('hourly-booking-expiration');
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
 
--- Option B: Trigger the Edge Function via pg_net (using Service Role Key for JWT validation):
-/*
-SELECT cron.schedule(
-    'hourly-edge-function-booking-expiration',
-    '0 * * * *',
-    $$
-    SELECT net.http_post(
-        url:='https://<MUMBAI_PROJECT_REF>.supabase.co/functions/v1/expire-bookings',
-        headers:=jsonb_build_object(
-            'Content-Type', 'application/json',
-            'Authorization', 'Bearer <MUMBAI_SERVICE_ROLE_KEY>'
-        ),
-        body:='{}'::jsonb
-    );
-    $$
-);
-*/
+        BEGIN
+            PERFORM cron.unschedule('expire-overdue-bookings-every-5-min');
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+
+        PERFORM cron.schedule(
+            'expire-overdue-bookings-every-5-min',
+            '*/5 * * * *', -- Every 5 minutes
+            'SELECT public.expire_overdue_bookings();'
+        );
+    END IF;
+END $$;
 ```

@@ -199,7 +199,7 @@ fun BookingsScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "48-Hour exclusive hold guarantees no other customer can book your selected goats.",
+                            text = "24-Hour exclusive hold guarantees no other customer can book your selected goats.",
                             fontSize = 12.sp,
                             color = Color(0xFF5D4037),
                             lineHeight = 16.sp
@@ -285,7 +285,7 @@ fun BookingsScreen(
             },
             title = {
                 Text(
-                    text = "Cancel 48h Hold?",
+                    text = "Cancel 24h Hold?",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
@@ -489,7 +489,7 @@ fun BookingCard(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "48h Hold",
+                        text = "24h Hold",
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -867,7 +867,7 @@ fun BookingDetailContent(
             ) {
                 Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Release & Cancel 48h Hold", fontWeight = FontWeight.Bold)
+                Text("Release & Cancel 24h Hold", fontWeight = FontWeight.Bold)
             }
         }
 
@@ -988,7 +988,7 @@ fun getBookingStatusStyle(status: AvailabilityStatus): Triple<Color, Color, Stri
         AvailabilityStatus.RESERVED -> Triple(
             Color(0xFFFFF3E0),
             Color(0xFFE65100),
-            "48-Hour Reserved"
+            "24-Hour Reserved"
         )
         AvailabilityStatus.COMPLETED -> Triple(
             Color(0xFFE3F2FD),

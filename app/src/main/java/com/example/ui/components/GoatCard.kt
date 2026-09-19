@@ -155,79 +155,28 @@ fun GoatGridCard(
                     }
                 }
 
-                // Top Right: Rating Chip & Wishlist Heart Button
-                Row(
-                    modifier = Modifier
-                        .padding(6.dp)
-                        .align(Alignment.TopEnd),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
+                // Top Right: Wishlist Heart Button
+                if (onWishlistToggle != null) {
                     Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = Color.Black.copy(alpha = 0.75f)
+                        shape = CircleShape,
+                        color = if (isWishlisted) Color.White else Color.Black.copy(alpha = 0.70f),
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .align(Alignment.TopEnd)
+                            .testTag("goat_card_wishlist_button_${goat.id}")
+                            .size(32.dp)
+                            .clickable { onWishlistToggle() }
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (goat.rating > 0.0 && goat.reviewCount > 0) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = "Rating",
-                                    tint = Color(0xFFFFC107),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = String.format("%.1f", goat.rating),
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = " (${goat.reviewCount})",
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontSize = 10.sp
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.RateReview,
-                                    contentDescription = "No Reviews",
-                                    tint = Color.White.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(11.dp)
-                                )
-                                Spacer(modifier = Modifier.width(3.dp))
-                                Text(
-                                    text = "No reviews",
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    }
-
-                    if (onWishlistToggle != null) {
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isWishlisted) Color.White else Color.Black.copy(alpha = 0.70f),
-                            modifier = Modifier
-                                .testTag("goat_card_wishlist_button_${goat.id}")
-                                .size(32.dp)
-                                .clickable { onWishlistToggle() }
-                        ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isWishlisted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    contentDescription = if (isWishlisted) "Remove from Wishlist" else "Save to Wishlist",
-                                    tint = if (isWishlisted) Color(0xFFE91E63) else Color.White,
-                                    modifier = Modifier.size(17.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = if (isWishlisted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = if (isWishlisted) "Remove from Wishlist" else "Save to Wishlist",
+                                tint = if (isWishlisted) Color(0xFFE91E63) else Color.White,
+                                modifier = Modifier.size(17.dp)
+                            )
                         }
                     }
                 }
@@ -403,19 +352,6 @@ fun GoatGridCard(
                         )
                     }
                 }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer
-                ) {
-                    Text(
-                        text = goat.purpose.name,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
-                    )
-                }
             }
         }
     }
@@ -510,53 +446,18 @@ fun GoatListCard(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                // Breed Badge & Rating
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                // Breed Badge
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Text(
-                            text = goat.breed,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
-                        )
-                    }
-
-                    if (goat.rating > 0.0 && goat.reviewCount > 0) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = "Rating",
-                                tint = Color(0xFFFFC107),
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = String.format("%.1f", goat.rating),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = " (${goat.reviewCount})",
-                                fontSize = 10.5.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        Text(
-                            text = "No reviews",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        text = goat.breed,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))

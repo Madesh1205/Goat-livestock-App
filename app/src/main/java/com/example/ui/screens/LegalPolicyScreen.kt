@@ -75,7 +75,7 @@ fun LegalPolicyScreen(
                     "Customer Account Data: Name, verified email address, phone number, and primary district or delivery location.",
                     "Farm Partner Data: Farm business name, government farm registration number, physical address, GPS coordinates, breeder certification details, and veterinarian health certificates.",
                     "Livestock Listing Media: High-resolution photographs, breed pedigrees, weight/age records, vaccination records, and pricing information provided by breeders.",
-                    "Reservation & Booking Data: Booking timestamps, 48-hour reservation statuses, direct seller notes, and customer review submissions.",
+                    "Reservation & Booking Data: Booking timestamps, 24-hour reservation statuses, and direct seller notes.",
                     "Technical Diagnostics: Device hardware model, operating system version, and application crash diagnostics used solely to improve stability."
                 ),
                 highlights = listOf("No financial card data stored", "Farm records verified prior to listing approval")
@@ -99,10 +99,10 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.ManageAccounts,
                 summary = "Data is used strictly to facilitate livestock transactions, ensure breed integrity, and prevent fraud.",
                 details = listOf(
-                    "Platform Facilitation: Facilitating authentic 48-hour livestock reservations between buyers and licensed farm breeders.",
+                    "Platform Facilitation: Facilitating authentic 24-hour livestock reservations between buyers and licensed farm breeders.",
                     "Quality & Pedigree Verification: Reviewing breeder credentials, breed purity claims, and health documentation to safeguard livestock buyers.",
                     "In-App Notifications: Dispatching updates regarding reservation confirmations, farm approvals, report resolutions, and important safety announcements.",
-                    "Fraud Prevention: Detecting duplicate listings, spam communications, fabricated reviews, or unauthorized trading."
+                    "Fraud Prevention: Detecting duplicate listings, spam communications, or unauthorized trading."
                 ),
                 highlights = listOf("Direct farm-to-buyer connection", "Automated booking notifications")
             ),
@@ -112,7 +112,7 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.Share,
                 summary = "We never sell or rent your personal data to external advertisers or brokers.",
                 details = listOf(
-                    "Transaction Counterparts: When a customer places a 48-hour reservation, their contact name and verified phone number are shared exclusively with the respective farm breeder to arrange animal inspection and pickup.",
+                    "Transaction Counterparts: When a customer places a 24-hour reservation, their contact name and verified phone number are shared exclusively with the respective farm breeder to arrange animal inspection and pickup.",
                     "Regulatory & Legal Compliance: We may disclose information if mandated by law, judicial subpoena, or animal health regulatory agencies investigating livestock welfare violations.",
                     "Service Infrastructure: Data is hosted in secure, certified cloud server facilities adhering to standard industry data compliance protocols."
                 ),
@@ -167,7 +167,7 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.Storefront,
                 summary = "The app is an informational and reservation coordination marketplace, not an animal owner or logistics agent.",
                 details = listOf(
-                    "Platform Scope: The application acts as a digital marketplace allowing registered farm partners to display verified livestock listings and allowing interested customers to hold 48-hour reservations.",
+                    "Platform Scope: The application acts as a digital marketplace allowing registered farm partners to display verified livestock listings and allowing interested customers to hold 24-hour reservations.",
                     "Direct Transactions: Physical livestock examination, veterinary check, and financial transactions take place directly between the buyer and the farm breeder at the farm location.",
                     "Independent Breeders: Registered farms are independent agricultural entities and do not constitute employees, subsidiaries, or legal agents of the application."
                 ),
@@ -187,16 +187,16 @@ fun LegalPolicyScreen(
             ),
             PolicySection(
                 id = "term_reservation",
-                title = "4. 48-Hour Reservation System",
+                title = "4. 24-Hour Reservation System",
                 icon = Icons.Outlined.Timer,
-                summary = "Reservations protect buyers and breeders by holding livestock for inspection for up to 48 hours.",
+                summary = "Reservations protect buyers and breeders by holding livestock for inspection for up to 24 hours.",
                 details = listOf(
-                    "Reservation Window: When a customer reserves a goat, the listing status transitions to RESERVED for a maximum duration of 48 hours.",
-                    "Farm Visit & Inspection: The buyer must coordinate with the breeder to visit the farm or arrange certified livestock logistics before the 48-hour period elapses.",
+                    "Reservation Window: When a customer reserves a goat, the listing status transitions to RESERVED for a maximum duration of 24 hours.",
+                    "Farm Visit & Inspection: The buyer must coordinate with the breeder to visit the farm or arrange certified livestock logistics before the 24-hour period elapses.",
                     "Breeder Confirmation: The verified farm partner reserves the right to confirm, fulfill, or reject reservations based on livestock availability and genuine intent.",
-                    "Automated Expiry: If no transaction takes place within 48 hours and the breeder does not mark the booking complete, the livestock listing automatically reverts to AVAILABLE."
+                    "Automated Expiry: If no transaction takes place within 24 hours and the breeder does not mark the booking complete, the livestock listing automatically reverts to AVAILABLE."
                 ),
-                highlights = listOf("48-Hour exclusive hold", "Automated expiration on no-show")
+                highlights = listOf("24-Hour exclusive hold", "Automated expiration on no-show")
             ),
             PolicySection(
                 id = "term_welfare",
@@ -211,16 +211,16 @@ fun LegalPolicyScreen(
                 highlights = listOf("Zero tolerance for animal cruelty", "Transport compliance mandatory")
             ),
             PolicySection(
-                id = "term_reviews",
-                title = "6. Community Conduct & Reviews",
-                icon = Icons.Outlined.RateReview,
-                summary = "Reviews must reflect genuine transactions and constructive livestock feedback.",
+                id = "term_conduct",
+                title = "6. Community Conduct & Communication",
+                icon = Icons.Outlined.Groups,
+                summary = "Members must maintain ethical communication and constructive livestock trade practices.",
                 details = listOf(
-                    "Verified Feedback: Customers who have booked livestock are encouraged to share genuine reviews, ratings, and photographic proof of the animal received.",
-                    "Prohibited Content: Defamatory remarks, profane language, unverified competitor sabotage, and spam submissions are strictly prohibited.",
-                    "Moderation: Super Administrators monitor all reported reviews and reserve the right to delete abusive comments or penalize malicious users."
+                    "Professional Engagement: Customers and breeders must interact respectfully regarding livestock inquiries, appointments, and farm visits.",
+                    "Prohibited Content: Defamatory remarks, profane language, unverified competitor sabotage, and spam inquiries are strictly prohibited.",
+                    "Moderation: Super Administrators monitor all platform reports and reserve the right to penalize malicious users or disable abusive accounts."
                 ),
-                highlights = listOf("Authentic buyer reviews only", "Strict content moderation")
+                highlights = listOf("Respectful trade communication", "Strict content moderation")
             ),
             PolicySection(
                 id = "term_liability",
@@ -442,7 +442,7 @@ fun LegalPolicyScreen(
                     item {
                         HighlightChip(
                             icon = Icons.Outlined.Timer,
-                            text = "48-Hour Fair Reservation",
+                            text = "24-Hour Fair Reservation",
                             color = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer
                         )
@@ -510,7 +510,7 @@ fun LegalPolicyScreen(
                                     text = if (selectedTab == 0)
                                         "Learn how our marketplace protects your identity, farm registration, and livestock booking records."
                                     else
-                                        "Understand the code of conduct, 48-hour reservation terms, and animal welfare commitments required of all members.",
+                                        "Understand the code of conduct, 24-hour reservation terms, and animal welfare commitments required of all members.",
                                     fontSize = 12.sp,
                                     lineHeight = 16.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -127,6 +127,11 @@ fun GoatDetailScreen(
 
 
     val isSuperAdmin = uiState.currentUser?.role == UserRole.SUPER_ADMIN
+    val isFarmAdmin = uiState.currentUser?.role == UserRole.FARM_ADMIN
+    val isOwnFarmGoat = isFarmAdmin && (
+        (uiState.currentUser?.farmId != null && uiState.currentUser.farmId == goat.farmId) ||
+        (resolvedFarm != null && resolvedFarm.ownerId == uiState.currentUser?.id)
+    )
 
     Scaffold(
         topBar = {
@@ -264,6 +269,32 @@ fun GoatDetailScreen(
 
                     // Dynamic State-Aware Book Now / Action Button
                     when {
+                        isOwnFarmGoat -> {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "You cannot book goats listed by your own farm.",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                         userActiveBooking != null -> {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -557,7 +588,7 @@ fun GoatDetailScreen(
                     Text(
                         text = when {
                             isAvailable -> "AVAILABLE"
-                            isReserved -> "RESERVED (48H HOLD)"
+                            isReserved -> "RESERVED (24H HOLD)"
                             isBooked -> "BOOKED"
                             isSold -> "SOLD"
                             else -> "UNAVAILABLE"
@@ -879,13 +910,13 @@ fun GoatDetailScreen(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "In Stock & Ready for 48-Hour Hold",
+                                        text = "In Stock & Ready for 24-Hour Hold",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         color = Color(0xFF1B5E20)
                                     )
                                     Text(
-                                        text = "Book now to place an exclusive 48-hour reservation while you arrange transport or farm visit.",
+                                        text = "Book now to place an exclusive 24-hour reservation while you arrange transport or farm visit.",
                                         fontSize = 11.sp,
                                         color = Color(0xFF2E7D32)
                                     )
@@ -913,13 +944,13 @@ fun GoatDetailScreen(
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column {
                                     Text(
-                                        text = "Currently Reserved (48h Hold)",
+                                        text = "Currently Reserved (24h Hold)",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         color = Color(0xFFB78103)
                                     )
                                     Text(
-                                        text = "Another customer has placed a 48-hour reservation on this goat. It will become available if not completed.",
+                                        text = "Another customer has placed a 24-hour reservation on this goat. It will become available if not completed.",
                                         fontSize = 11.sp,
                                         color = Color(0xFF795548)
                                     )
@@ -1072,12 +1103,6 @@ fun GoatDetailScreen(
                         SpecRow(
                             label = "Live Body Weight",
                             value = "${goat.weightKg} kg (Certified farm scale)"
-                        )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-                        SpecRow(
-                            label = "Primary Purpose",
-                            value = goat.purpose.name.lowercase().replaceFirstChar { it.uppercase() }
                         )
                     }
                 }
@@ -1382,7 +1407,7 @@ fun GoatDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "All goat listings are verified against state livestock breed standards. 48-hour reservation holds ensure no duplicate bookings.",
+                                text = "All goat listings are verified against state livestock breed standards. 24-hour reservation holds ensure no duplicate bookings.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1527,7 +1552,7 @@ fun GoatDetailScreen(
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "You must be signed in to book or place a 48-hour reservation on this goat. Sign in or create a buyer profile to continue.",
+                        text = "You must be signed in to book or place a 24-hour reservation on this goat. Sign in or create a buyer profile to continue.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
@@ -1674,6 +1699,11 @@ fun GoatDetailScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        if (isOwnFarmGoat) {
+                            Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
+                            showBookingPreviewDialog = false
+                            return@Button
+                        }
                         if (isAvailable) {
                             onBookGoat(goat.id, bookingNotes)
                             showBookingPreviewDialog = false
@@ -1733,6 +1763,10 @@ fun GoatDetailScreen(
                 Button(
                     onClick = {
                         showCallUnlockPromptDialog = false
+                        if (isOwnFarmGoat) {
+                            Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
+                            return@Button
+                        }
                         if (isAvailable) {
                             showBookingPreviewDialog = true
                         }

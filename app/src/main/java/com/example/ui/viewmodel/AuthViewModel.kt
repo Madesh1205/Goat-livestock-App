@@ -261,6 +261,19 @@ class AuthViewModel(
         }
     }
 
+    fun deleteAccount(onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            val result = authRepository.deleteAccount()
+            result.onSuccess {
+                _uiState.update { it.copy(isLoading = false, successMessage = "Account deleted successfully.") }
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(isLoading = false, errorMessage = err.message ?: "Failed to delete account.") }
+            }
+        }
+    }
+
     fun updateProfile(name: String, phone: String) {
         val cleanPhone = phone.trim()
         if (cleanPhone.isNotBlank()) {

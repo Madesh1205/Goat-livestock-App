@@ -169,4 +169,4 @@ SELECT
     p.farm_id,
     CASE WHEN p.role = 'SUPER_ADMIN' THEN '✅ SUPER ADMIN CONFIGURED' ELSE '⚠️ ROLE NOT SET' END AS status
 FROM public.profiles p
-WHERE p.email = 'madesh1205@gmail.com';
+WHERE p.role = 'SUPER_ADMIN';

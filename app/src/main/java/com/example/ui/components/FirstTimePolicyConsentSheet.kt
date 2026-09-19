@@ -169,8 +169,8 @@ fun FirstTimePolicyConsentSheet(
             // 2. Terms & Conditions Summary Card
             LegalConsentCard(
                 title = "2. Terms & Conditions",
-                summary = "Governs our 48-hour reservation system, breeder verification, in-person farm inspection rules, and strict Prevention of Cruelty to Animals compliance.",
-                highlights = listOf("48-Hr Hold", "Verified Breeders", "Cruelty-Free"),
+                summary = "Governs our 24-hour reservation system, breeder verification, in-person farm inspection rules, and strict Prevention of Cruelty to Animals compliance.",
+                highlights = listOf("24-Hr Hold", "Verified Breeders", "Cruelty-Free"),
                 icon = Icons.Outlined.Gavel,
                 isChecked = termsAccepted,
                 onCheckedChange = { termsAccepted = it },

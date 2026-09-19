@@ -412,7 +412,6 @@ class MainActivity : ComponentActivity() {
                                 onSearchQueryChange = { marketplaceViewModel.setSearchQuery(it) },
                                 onApplyCriteria = { marketplaceViewModel.updateFilterCriteria(it) },
                                 onBreedSelect = { marketplaceViewModel.selectBreed(it) },
-                                onPurposeSelect = { marketplaceViewModel.selectPurpose(it) },
                                 onSortOptionSelect = { marketplaceViewModel.setSortOption(it) },
                                 onClearAllFilters = { marketplaceViewModel.clearFilters() },
                                 onRemoveBreed = { marketplaceViewModel.removeBreedFilter() },
@@ -421,7 +420,6 @@ class MainActivity : ComponentActivity() {
                                 onRemoveAge = { marketplaceViewModel.removeAgeFilter() },
                                 onRemoveWeight = { marketplaceViewModel.removeWeightFilter() },
                                 onRemovePrice = { marketplaceViewModel.removePriceFilter() },
-                                onRemovePurpose = { marketplaceViewModel.removePurposeFilter() },
                                 onRemoveLocation = { marketplaceViewModel.removeLocationFilter() },
                                 onRemoveAvailability = { marketplaceViewModel.removeAvailabilityFilter() },
                                 onRemoveSearchQuery = { marketplaceViewModel.removeSearchFilter() },
@@ -499,9 +497,16 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.removeFromWishlist(goatId)
                                 },
                                 onBookGoat = { goat ->
-                                    if (authUiState.isAuthenticated) {
+                                    val currentUser = authUiState.currentUser
+                                    val isOwnFarm = currentUser?.role == UserRole.FARM_ADMIN && (
+                                        (currentUser.farmId != null && currentUser.farmId == goat.farmId) ||
+                                        uiState.farms.find { it.id == goat.farmId }?.ownerId == currentUser.id
+                                    )
+                                    if (isOwnFarm) {
+                                        Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
+                                    } else if (authUiState.isAuthenticated) {
                                         marketplaceViewModel.createBooking(goat.id, "Wishlist direct reservation") {
-                                            Toast.makeText(context, "48-Hour Reservation Placed for ${goat.name}!", Toast.LENGTH_LONG).show()
+                                            Toast.makeText(context, "24-Hour Reservation Placed for ${goat.name}!", Toast.LENGTH_LONG).show()
                                             navController.navigate(Screen.MyBookings.route)
                                         }
                                     } else {
@@ -590,9 +595,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onBookGoat = { goatId, notes ->
-                                        if (authUiState.isAuthenticated) {
+                                        val currentUser = authUiState.currentUser
+                                        val isOwnFarm = currentUser?.role == UserRole.FARM_ADMIN && (
+                                            (currentUser.farmId != null && currentUser.farmId == goat.farmId) ||
+                                            uiState.farms.find { it.id == goat.farmId }?.ownerId == currentUser.id
+                                        )
+                                        if (isOwnFarm) {
+                                            Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
+                                        } else if (authUiState.isAuthenticated) {
                                             marketplaceViewModel.createBooking(goatId, notes) {
-                                                Toast.makeText(context, "48-Hour Reservation Placed! Farm breeder notified.", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "24-Hour Reservation Placed! Farm breeder notified.", Toast.LENGTH_LONG).show()
                                                 navController.navigate(Screen.MyBookings.route)
                                             }
                                         } else {

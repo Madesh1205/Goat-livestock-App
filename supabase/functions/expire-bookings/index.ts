@@ -1,5 +1,5 @@
 // Supabase Edge Function: expire-bookings
-// Automatically releases 48-hour holds for expired booking reservations.
+// Automatically releases 24-hour holds for expired booking reservations.
 // Transitions booking status to EXPIRED and restores goat availability to AVAILABLE.
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
@@ -73,7 +73,7 @@ serve(async (req) => {
     const { data: expiredBookings, error: fetchErr } = await adminClient
       .from("bookings")
       .select("id, goat_id, customer_id, farm_id, booking_code, hold_expires_at")
-      .or("status.eq.PENDING,status.eq.HOLD")
+      .or("status.eq.PENDING,status.eq.HOLD,status.eq.RESERVED")
       .lt("hold_expires_at", nowIso);
 
     if (fetchErr) {
@@ -127,7 +127,7 @@ serve(async (req) => {
         await adminClient.from("notifications").insert({
           user_id: booking.customer_id,
           title: "Hold Expired ⏳",
-          body: `Your 48-hour reservation hold for booking #${booking.booking_code || booking.id.slice(0, 6)} has expired. The goat is now available for other buyers.`,
+          body: `Your 24-hour reservation hold for booking #${booking.booking_code || booking.id.slice(0, 6)} has expired. The goat is now available for other buyers.`,
           link_type: "MY_BOOKINGS",
           link_id: booking.id,
           is_read: false

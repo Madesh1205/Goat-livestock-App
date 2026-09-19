@@ -179,7 +179,6 @@ fun FarmDetailScreen(
                     goat.name.contains(searchQuery, ignoreCase = true) ||
                     goat.tagNumber.contains(searchQuery, ignoreCase = true) ||
                     goat.breed.contains(searchQuery, ignoreCase = true) ||
-                    goat.purpose.name.contains(searchQuery, ignoreCase = true) ||
                     goat.description.contains(searchQuery, ignoreCase = true)
             matchesBreed && matchesQuery
         }
@@ -466,7 +465,7 @@ fun FarmDetailScreen(
                                 }
                             }
 
-                            // Rating & Verification Row
+                            // Verification & Owner Row
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -474,39 +473,30 @@ fun FarmDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFFFFF8E1),
-                                        border = BorderStroke(1.dp, Color(0xFFFFD54F)),
-                                        modifier = Modifier.padding(end = 8.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color(0xFFE8F5E9),
+                                    border = BorderStroke(1.dp, Color(0xFFA5D6A7)),
+                                    modifier = Modifier.padding(end = 8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Star,
-                                                contentDescription = null,
-                                                tint = Color(0xFFF39C12),
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "${farm.rating}",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                color = Color(0xFFB78103)
-                                            )
-                                        }
+                                        Icon(
+                                            Icons.Default.Verified,
+                                            contentDescription = null,
+                                            tint = Color(0xFF2E7D32),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Verified Breeder",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color(0xFF2E7D32)
+                                        )
                                     }
-
-                                    Text(
-                                        text = "Verified Breeder",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
 
                                 Surface(
@@ -576,10 +566,10 @@ fun FarmDetailScreen(
                             tint = Color(0xFF2E7D32)
                         )
                         FarmStatBox(
-                            icon = Icons.Default.Star,
-                            value = if (farm.rating > 0.0) String.format("%.1f ★", farm.rating) else "5.0 ★",
-                            label = "Breeder Rating",
-                            tint = Color(0xFFF39C12)
+                            icon = Icons.Default.VerifiedUser,
+                            value = "Verified",
+                            label = "Breeder Status",
+                            tint = Color(0xFF1976D2)
                         )
                         FarmStatBox(
                             icon = Icons.Default.Timer,
@@ -685,7 +675,7 @@ fun FarmDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("farm_search_input"),
-                        placeholder = { Text("Search this farm by breed, tag, or purpose...", fontSize = 13.sp) },
+                        placeholder = { Text("Search this farm by breed, tag, or name...", fontSize = 13.sp) },
                         leadingIcon = {
                             Icon(Icons.Default.Search, contentDescription = "Search", tint = MaterialTheme.colorScheme.primary)
                         },

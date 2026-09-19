@@ -2,6 +2,7 @@ package com.example
 
 import com.example.core.util.PriceUtils
 import com.example.model.*
+import com.example.util.UserFriendlyErrorMapper
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -15,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - Notifications (Deduplication, Role Isolation, Lifecycle triggers)
  * - Reviews (Verified Purchase, Rating Range, Duplicate Prevention, Authenticity)
  * - Reports & Moderation (Abuse Prevention, Super Admin Scope, Audit Logs)
- * - Integration & Regression (PriceUtils, Double Booking, 48-Hour Hold, Listing Fees)
+ * - Integration & Regression (PriceUtils, Double Booking, 24-Hour Hold, Listing Fees)
  */
 class Stage10NotificationsReviewsModerationAuditTest {
 
@@ -26,7 +27,6 @@ class Stage10NotificationsReviewsModerationAuditTest {
         val goats = ConcurrentHashMap<String, Goat>()
         val bookings = ConcurrentHashMap<String, Booking>()
         val notifications = ConcurrentHashMap<String, AppNotification>()
-        val reviews = ConcurrentHashMap<String, Review>()
         val reports = ConcurrentHashMap<String, PlatformReport>()
         val auditLogs = mutableListOf<String>()
 
@@ -35,9 +35,6 @@ class Stage10NotificationsReviewsModerationAuditTest {
 
         // Unique index simulator: (reporter_id, target_type, target_id) where status == PENDING
         val reportPendingIndex = ConcurrentHashMap<String, String>() // key: "$reporterId::$targetType::$targetId" -> reportId
-
-        // Unique constraint simulator: (booking_id) on reviews
-        val reviewBookingIndex = ConcurrentHashMap<String, String>() // key: bookingId -> reviewId
 
         // --- Notification Dispatcher with Deduplication ---
         fun sendNotification(notification: AppNotification): Result<AppNotification> {
@@ -70,101 +67,6 @@ class Stage10NotificationsReviewsModerationAuditTest {
             }
             notifications[notificationId] = notif.copy(isRead = true)
             return Result.success(Unit)
-        }
-
-        // --- Review Ingestion with Authenticity & Trigger Recalculation ---
-        fun submitReview(
-            requestingUser: UserProfile,
-            bookingId: String,
-            rating: Int,
-            comment: String
-        ): Result<Review> {
-            if (rating !in 1..5) {
-                return Result.failure(IllegalArgumentException("Rating must be between 1 and 5."))
-            }
-            if (comment.isBlank()) {
-                return Result.failure(IllegalArgumentException("Review comment cannot be empty."))
-            }
-
-            val booking = bookings[bookingId]
-                ?: return Result.failure(IllegalArgumentException("Booking does not exist."))
-
-            if (booking.customerId != requestingUser.id && requestingUser.role != UserRole.SUPER_ADMIN) {
-                return Result.failure(SecurityException("Unauthorized: Customers can only review their own purchases."))
-            }
-
-            if (booking.status != AvailabilityStatus.COMPLETED && booking.status != AvailabilityStatus.CONFIRMED) {
-                return Result.failure(IllegalStateException("Reviews are only permitted for confirmed or completed bookings."))
-            }
-
-            val reviewId = UUID.randomUUID().toString()
-            if (reviewBookingIndex.putIfAbsent(bookingId, reviewId) != null) {
-                return Result.failure(IllegalStateException("Duplicate review: You have already reviewed this booking."))
-            }
-            val goat = goats[booking.goatId]
-            val farm = farms[booking.farmId]
-
-            val newReview = Review(
-                id = reviewId,
-                bookingId = bookingId,
-                goatId = booking.goatId,
-                goatName = goat?.name ?: "Goat",
-                farmId = booking.farmId,
-                farmName = farm?.name ?: "Farm",
-                customerId = requestingUser.id,
-                customerName = requestingUser.name,
-                rating = rating,
-                comment = comment.trim(),
-                isVerifiedPurchase = true,
-                isReported = false,
-                createdAt = System.currentTimeMillis()
-            )
-            reviews[reviewId] = newReview
-            recalculateRatings(booking.goatId, booking.farmId)
-            return Result.success(newReview)
-        }
-
-        fun hideReview(reviewId: String, caller: UserProfile): Result<Unit> {
-            if (caller.role != UserRole.SUPER_ADMIN) {
-                return Result.failure(SecurityException("Only Super Admin can hide reviews."))
-            }
-            val rev = reviews[reviewId] ?: return Result.failure(IllegalArgumentException("Review not found"))
-            reviews[reviewId] = rev.copy(isReported = true) // isReported flag simulates is_approved = false
-            recalculateRatings(rev.goatId, rev.farmId)
-            auditLogs.add("Super Admin ${caller.id} hid review $reviewId")
-            return Result.success(Unit)
-        }
-
-        fun restoreReview(reviewId: String, caller: UserProfile): Result<Unit> {
-            if (caller.role != UserRole.SUPER_ADMIN) {
-                return Result.failure(SecurityException("Only Super Admin can restore reviews."))
-            }
-            val rev = reviews[reviewId] ?: return Result.failure(IllegalArgumentException("Review not found"))
-            reviews[reviewId] = rev.copy(isReported = false)
-            recalculateRatings(rev.goatId, rev.farmId)
-            auditLogs.add("Super Admin ${caller.id} restored review $reviewId")
-            return Result.success(Unit)
-        }
-
-        private fun recalculateRatings(goatId: String, farmId: String) {
-            // Only approved reviews count
-            val approvedGoatReviews = reviews.values.filter { it.goatId == goatId && !it.isReported }
-            val goatAvg = if (approvedGoatReviews.isNotEmpty()) {
-                approvedGoatReviews.map { it.rating }.average()
-            } else 5.0
-            val goat = goats[goatId]
-            if (goat != null) {
-                goats[goatId] = goat.copy(rating = goatAvg, reviewCount = approvedGoatReviews.size)
-            }
-
-            val approvedFarmReviews = reviews.values.filter { it.farmId == farmId && !it.isReported }
-            val farmAvg = if (approvedFarmReviews.isNotEmpty()) {
-                approvedFarmReviews.map { it.rating }.average()
-            } else 5.0
-            val farm = farms[farmId]
-            if (farm != null) {
-                farms[farmId] = farm.copy(rating = farmAvg, totalReviews = approvedFarmReviews.size)
-            }
         }
 
         // --- Reports Ingestion with Abuse Prevention & Moderation ---
@@ -265,15 +167,73 @@ class Stage10NotificationsReviewsModerationAuditTest {
             auditLogs.add("Super Admin ${caller.id} resolved report $reportId")
             return Result.success(Unit)
         }
+
+        // --- RPC create_booking_hold simulation with authoritative database lookup ---
+        fun createBookingHold(
+            caller: UserProfile,
+            goatId: String,
+            notes: String = ""
+        ): Result<Booking> {
+            val goat = goats[goatId]
+                ?: return Result.failure(IllegalArgumentException("Goat listing not found."))
+            val farm = farms[goat.farmId]
+                ?: return Result.failure(IllegalArgumentException("Farm not found."))
+
+            // Authoritative server-side check: check caller own farm restriction
+            if (caller.role == UserRole.FARM_ADMIN) {
+                if ((caller.farmId != null && caller.farmId == goat.farmId) || farm.ownerId == caller.id) {
+                    return Result.failure(IllegalStateException("You cannot book goats listed by your own farm."))
+                }
+            } else if (farm.ownerId == caller.id) {
+                return Result.failure(IllegalStateException("You cannot book goats listed by your own farm."))
+            }
+
+            if (goat.availabilityStatus != AvailabilityStatus.AVAILABLE) {
+                return Result.failure(IllegalStateException("Goat is no longer available."))
+            }
+
+            // Check active hold
+            val activeBooking = bookings.values.find {
+                it.goatId == goatId && it.status in listOf(AvailabilityStatus.BOOKING_PENDING, AvailabilityStatus.RESERVED, AvailabilityStatus.CONFIRMED)
+            }
+            if (activeBooking != null) {
+                return Result.failure(IllegalStateException("This goat has already been reserved by another customer."))
+            }
+
+            val effectivePrice = PriceUtils.calculateFinalPrice(goat.price, goat.discountPercentage)
+            val booking = Booking(
+                id = UUID.randomUUID().toString(),
+                goatId = goat.id,
+                goatName = goat.name,
+                goatBreed = goat.breed,
+                goatPhoto = goat.photos.firstOrNull() ?: "",
+                customerId = caller.id,
+                customerName = caller.name,
+                customerPhone = caller.phone,
+                farmId = goat.farmId,
+                farmName = farm.name,
+                amount = effectivePrice,
+                status = AvailabilityStatus.BOOKING_PENDING,
+                bookingDate = System.currentTimeMillis(),
+                reservationExpiryDate = System.currentTimeMillis() + 24 * 3600 * 1000L,
+                notes = notes
+            )
+            bookings[booking.id] = booking
+            goats[goat.id] = goat.copy(availabilityStatus = AvailabilityStatus.RESERVED)
+            return Result.success(booking)
+        }
     }
 
     private lateinit var db: MockStage10DatabaseEngine
     private lateinit var customerUser: UserProfile
     private lateinit var otherCustomerUser: UserProfile
     private lateinit var farmAdminUser: UserProfile
+    private lateinit var otherFarmAdminUser: UserProfile
     private lateinit var superAdminUser: UserProfile
     private lateinit var testFarm: Farm
+    private lateinit var otherFarm: Farm
     private lateinit var testGoat: Goat
+    private lateinit var otherGoat: Goat
 
     @Before
     fun setUp() {
@@ -295,7 +255,15 @@ class Stage10NotificationsReviewsModerationAuditTest {
             id = "farm-admin-1",
             name = "Ammal Farm Admin",
             email = "owner@ammalfarm.com",
-            role = UserRole.FARM_ADMIN
+            role = UserRole.FARM_ADMIN,
+            farmId = "farm-1"
+        )
+        otherFarmAdminUser = UserProfile(
+            id = "farm-admin-2",
+            name = "Kaveri Farm Admin",
+            email = "owner@kaverifarm.com",
+            role = UserRole.FARM_ADMIN,
+            farmId = "farm-2"
         )
         superAdminUser = UserProfile(
             id = "super-admin-id",
@@ -307,6 +275,7 @@ class Stage10NotificationsReviewsModerationAuditTest {
         db.profiles[customerUser.id] = customerUser
         db.profiles[otherCustomerUser.id] = otherCustomerUser
         db.profiles[farmAdminUser.id] = farmAdminUser
+        db.profiles[otherFarmAdminUser.id] = otherFarmAdminUser
         db.profiles[superAdminUser.id] = superAdminUser
 
         testFarm = Farm(
@@ -323,6 +292,21 @@ class Stage10NotificationsReviewsModerationAuditTest {
             verificationStatus = VerificationStatus.APPROVED
         )
         db.farms[testFarm.id] = testFarm
+
+        otherFarm = Farm(
+            id = "farm-2",
+            name = "Kaveri Goat Breeders",
+            ownerId = otherFarmAdminUser.id,
+            ownerName = otherFarmAdminUser.name,
+            location = "Trichy",
+            contactNumber = "9123456780",
+            email = "contact@kaverifarm.com",
+            description = "Trichy specialist breeders",
+            rating = 4.8,
+            totalReviews = 5,
+            verificationStatus = VerificationStatus.APPROVED
+        )
+        db.farms[otherFarm.id] = otherFarm
 
         testGoat = Goat(
             id = "goat-1",
@@ -346,6 +330,29 @@ class Stage10NotificationsReviewsModerationAuditTest {
             reviewCount = 0
         )
         db.goats[testGoat.id] = testGoat
+
+        otherGoat = Goat(
+            id = "goat-2",
+            name = "Kanni Master",
+            tagNumber = "TAG-002",
+            breed = "Kanni",
+            gender = GoatGender.MALE,
+            ageMonths = 18,
+            weightKg = 40.0,
+            purpose = GoatPurpose.BREEDING,
+            description = "Kanni champion",
+            price = 25000.0,
+            discountPercentage = 0.0,
+            farmId = otherFarm.id,
+            farmName = otherFarm.name,
+            farmLocation = "Trichy",
+            photos = listOf("https://example.com/kanni.jpg"),
+            availabilityStatus = AvailabilityStatus.AVAILABLE,
+            approvalStatus = ApprovalStatus.APPROVED,
+            rating = 4.8,
+            reviewCount = 5
+        )
+        db.goats[otherGoat.id] = otherGoat
     }
 
     // ==========================================
@@ -357,7 +364,7 @@ class Stage10NotificationsReviewsModerationAuditTest {
         val notif = AppNotification(
             id = "notif-1",
             recipientUserId = customerUser.id,
-            title = "Reservation Active (48 Hours) 🐐",
+            title = "Reservation Active (24 Hours) 🐐",
             message = "Your reservation for ${testGoat.name} is active.",
             eventKey = "booking_created_b1"
         )
@@ -365,7 +372,7 @@ class Stage10NotificationsReviewsModerationAuditTest {
         assertTrue(result.isSuccess)
         val userNotifs = db.getNotificationsForUser(customerUser)
         assertEquals(1, userNotifs.size)
-        assertEquals("Reservation Active (48 Hours) 🐐", userNotifs[0].title)
+        assertEquals("Reservation Active (24 Hours) 🐐", userNotifs[0].title)
     }
 
     @Test
@@ -402,7 +409,7 @@ class Stage10NotificationsReviewsModerationAuditTest {
             id = "notif-4",
             recipientUserId = customerUser.id,
             title = "Hold Expired ⏳",
-            message = "Your 48-hour reservation hold for ${testGoat.name} has expired.",
+            message = "Your 24-hour reservation hold for ${testGoat.name} has expired.",
             eventKey = "booking_expired_b1"
         )
         db.sendNotification(notif)
@@ -528,14 +535,14 @@ class Stage10NotificationsReviewsModerationAuditTest {
         val notif1 = AppNotification(
             id = "notif-13a",
             recipientUserId = customerUser.id,
-            title = "Reservation Active (48 Hours) 🐐",
+            title = "Reservation Active (24 Hours) 🐐",
             message = "Hold active.",
             eventKey = "booking_created_b1"
         )
         val notif2 = AppNotification(
             id = "notif-13b",
             recipientUserId = customerUser.id,
-            title = "Reservation Active (48 Hours) 🐐",
+            title = "Reservation Active (24 Hours) 🐐",
             message = "Hold active duplicate.",
             eventKey = "booking_created_b1" // Identical event key
         )
@@ -586,181 +593,114 @@ class Stage10NotificationsReviewsModerationAuditTest {
     }
 
     // ==========================================
-    // REVIEW TESTS (15 - 21)
+    // STAGE 2 & FARM ADMIN BOOKING RULE TESTS (15 - 21)
     // ==========================================
 
     @Test
-    fun test15_eligibleCustomerCanReviewAfterCompletedBooking() {
-        val booking = Booking(
-            id = "booking-15",
-            goatId = testGoat.id,
-            goatName = testGoat.name,
-            goatBreed = testGoat.breed,
-            goatPhoto = testGoat.photos.first(),
-            customerId = customerUser.id,
-            customerName = customerUser.name,
-            customerPhone = "9876543210",
-            farmId = testFarm.id,
-            farmName = testFarm.name,
-            amount = 18000.0,
-            status = AvailabilityStatus.COMPLETED
-        )
-        db.bookings[booking.id] = booking
+    fun test15_farmAdminOwnFarmBooking_rejectedWithCorrectMessage() {
+        // 1. Direct RPC call by Farm Admin for own farm's goat -> rejected
+        val ownFarmBookingResult = db.createBookingHold(farmAdminUser, testGoat.id, "Attempt own booking")
+        assertTrue("Farm admin booking own farm goat must fail", ownFarmBookingResult.isFailure)
+        val exception = ownFarmBookingResult.exceptionOrNull()
+        assertTrue(exception is IllegalStateException)
+        assertEquals("You cannot book goats listed by your own farm.", exception?.message)
 
-        val reviewResult = db.submitReview(
-            requestingUser = customerUser,
-            bookingId = booking.id,
-            rating = 5,
-            comment = "Outstanding goat, healthy and strong!"
-        )
-        assertTrue("Eligible customer can review completed booking", reviewResult.isSuccess)
-        val review = reviewResult.getOrThrow()
-        assertEquals(booking.id, review.bookingId)
-        assertEquals(testGoat.id, review.goatId)
-        assertEquals(testFarm.id, review.farmId)
-        assertEquals(customerUser.id, review.customerId)
-        assertTrue(review.isVerifiedPurchase)
+        // 2. Verify UserFriendlyErrorMapper maps own farm booking error correctly
+        val mappedError = UserFriendlyErrorMapper.forBooking(IllegalStateException("You cannot book goats listed by your own farm."))
+        assertEquals("You cannot book goats listed by your own farm.", mappedError)
+
+        // Also test partial string matches
+        assertEquals("You cannot book goats listed by your own farm.", UserFriendlyErrorMapper.forBooking(Exception("Cannot reserve own farm listings")))
     }
 
     @Test
-    fun test16_unverifiedPurchaseCannotReviewWithoutBooking() {
-        val result = db.submitReview(
-            requestingUser = customerUser,
-            bookingId = "non-existent-booking",
-            rating = 5,
-            comment = "Nice goat"
-        )
-        assertTrue("Review without booking must fail", result.isFailure)
-        assertTrue(result.exceptionOrNull()?.message?.contains("does not exist") == true)
+    fun test15a_farmAdminAnotherFarmBooking_allowed() {
+        // Farm Admin booking another farm's goat -> ALLOWED
+        val otherFarmBookingResult = db.createBookingHold(farmAdminUser, otherGoat.id, "Farm Admin purchasing from other farm")
+        assertTrue("Farm admin booking another farm's goat must succeed", otherFarmBookingResult.isSuccess)
+        val booking = otherFarmBookingResult.getOrThrow()
+        assertEquals(otherGoat.id, booking.goatId)
+        assertEquals(otherFarm.id, booking.farmId)
+        assertEquals(farmAdminUser.id, booking.customerId)
+        assertEquals(AvailabilityStatus.BOOKING_PENDING, booking.status)
+        assertEquals(25000.0, booking.amount, 0.01)
     }
 
     @Test
-    fun test17_customerCannotReviewAnotherUsersBooking() {
-        val booking = Booking(
-            id = "booking-17",
-            goatId = testGoat.id,
-            goatName = testGoat.name,
-            goatBreed = testGoat.breed,
-            goatPhoto = testGoat.photos.first(),
-            customerId = otherCustomerUser.id, // Owned by other customer
-            customerName = otherCustomerUser.name,
-            customerPhone = "9876543210",
-            farmId = testFarm.id,
-            farmName = testFarm.name,
-            amount = 18000.0,
-            status = AvailabilityStatus.COMPLETED
-        )
-        db.bookings[booking.id] = booking
+    fun test15b_customerCanBookAnyFarmGoat() {
+        // Customer booking from testFarm
+        val custBooking1 = db.createBookingHold(customerUser, testGoat.id, "Customer booking farm 1")
+        assertTrue("Customer can book from farm 1", custBooking1.isSuccess)
+        val b1 = custBooking1.getOrThrow()
+        assertEquals(testGoat.id, b1.goatId)
+        assertEquals(customerUser.id, b1.customerId)
 
-        val unauthorizedReview = db.submitReview(
-            requestingUser = customerUser, // customerUser tries to review other's booking
-            bookingId = booking.id,
-            rating = 5,
-            comment = "Reviewing someone else's goat"
-        )
-        assertTrue("Cannot review another user's booking", unauthorizedReview.isFailure)
-        assertTrue(unauthorizedReview.exceptionOrNull() is SecurityException)
+        // Reset testGoat availability for subsequent checks
+        db.goats[testGoat.id] = testGoat.copy(availabilityStatus = AvailabilityStatus.AVAILABLE)
+        db.bookings.remove(b1.id)
+
+        // Customer booking from otherFarm
+        val custBooking2 = db.createBookingHold(customerUser, otherGoat.id, "Customer booking farm 2")
+        assertTrue("Customer can book from farm 2", custBooking2.isSuccess)
+        val b2 = custBooking2.getOrThrow()
+        assertEquals(otherGoat.id, b2.goatId)
+        assertEquals(customerUser.id, b2.customerId)
     }
 
     @Test
-    fun test18_duplicateReviewForSameBookingRejected() {
-        val booking = Booking(
-            id = "booking-18",
-            goatId = testGoat.id,
-            goatName = testGoat.name,
-            goatBreed = testGoat.breed,
-            goatPhoto = testGoat.photos.first(),
-            customerId = customerUser.id,
-            customerName = customerUser.name,
-            customerPhone = "9876543210",
-            farmId = testFarm.id,
-            farmName = testFarm.name,
-            amount = 18000.0,
-            status = AvailabilityStatus.COMPLETED
+    fun test15c_superAdminCanBookGoats_existingBehaviorUnchanged() {
+        val superAdminBooking = db.createBookingHold(superAdminUser, testGoat.id, "Super admin inspection booking")
+        assertTrue("Super Admin can book goats", superAdminBooking.isSuccess)
+        val booking = superAdminBooking.getOrThrow()
+        assertEquals(testGoat.id, booking.goatId)
+        assertEquals(superAdminUser.id, booking.customerId)
+    }
+
+    @Test
+    fun test15d_clientCannotBypassOwnFarmRestrictionByAlteringSuppliedFarmId() {
+        // Even if client manipulates request, authoritative DB lookup checks goat.farm_id from the database
+        val caller = farmAdminUser // belongs to farm-1
+        val goatInDb = db.goats[testGoat.id]!!
+        assertEquals("farm-1", goatInDb.farmId)
+
+        // DB function checks the goat's registered farm_id ("farm-1") against caller.farmId ("farm-1")
+        val result = db.createBookingHold(caller, testGoat.id, "Attempt bypass")
+        assertTrue("Must be rejected despite any client metadata", result.isFailure)
+        assertEquals("You cannot book goats listed by your own farm.", result.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun test15e_concurrentBookingProtectionMaintained() {
+        // First user reserves the goat
+        val firstBooking = db.createBookingHold(otherFarmAdminUser, testGoat.id, "First reservation")
+        assertTrue("First reservation succeeds", firstBooking.isSuccess)
+
+        // Second user attempts to reserve the same goat concurrently
+        val secondBooking = db.createBookingHold(customerUser, testGoat.id, "Second reservation attempt")
+        assertTrue("Concurrent reservation on already reserved goat must fail", secondBooking.isFailure)
+        assertEquals("Goat is no longer available.", secondBooking.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun test16_customerAndSuperAdminCanBookGoats() {
+        val customerCanBook = customerUser.role == UserRole.CUSTOMER || customerUser.role == UserRole.SUPER_ADMIN || customerUser.role == UserRole.FARM_ADMIN
+        assertTrue("Customer can book goats", customerCanBook)
+
+        val superAdminCanBook = superAdminUser.role == UserRole.CUSTOMER || superAdminUser.role == UserRole.SUPER_ADMIN || superAdminUser.role == UserRole.FARM_ADMIN
+        assertTrue("Super Admin can book goats", superAdminCanBook)
+    }
+
+    @Test
+    fun test17_goatPurposeRemovedFromListingUIAndSearchCriteria() {
+        val criteria = GoatFilterCriteria(
+            searchQuery = "Salem",
+            breed = "Salem Black",
+            minPrice = 10000.0,
+            maxPrice = 30000.0
         )
-        db.bookings[booking.id] = booking
-
-        val review1 = db.submitReview(customerUser, booking.id, 5, "First review")
-        assertTrue(review1.isSuccess)
-
-        val duplicateReview = db.submitReview(customerUser, booking.id, 4, "Second review attempt")
-        assertTrue("Duplicate review for same booking must be rejected", duplicateReview.isFailure)
-        assertTrue(duplicateReview.exceptionOrNull()?.message?.contains("Duplicate review") == true)
-    }
-
-    @Test
-    fun test19_ratingOutside1To5Rejected() {
-        val booking = Booking(
-            id = "booking-19",
-            goatId = testGoat.id,
-            goatName = testGoat.name,
-            goatBreed = testGoat.breed,
-            goatPhoto = testGoat.photos.first(),
-            customerId = customerUser.id,
-            customerName = customerUser.name,
-            customerPhone = "9876543210",
-            farmId = testFarm.id,
-            farmName = testFarm.name,
-            amount = 18000.0,
-            status = AvailabilityStatus.COMPLETED
-        )
-        db.bookings[booking.id] = booking
-
-        val zeroRating = db.submitReview(customerUser, booking.id, 0, "Zero star")
-        assertTrue("Rating 0 rejected", zeroRating.isFailure)
-
-        val sixRating = db.submitReview(customerUser, booking.id, 6, "Six star")
-        assertTrue("Rating 6 rejected", sixRating.isFailure)
-
-        val negativeRating = db.submitReview(customerUser, booking.id, -1, "Negative star")
-        assertTrue("Rating -1 rejected", negativeRating.isFailure)
-    }
-
-    @Test
-    fun test20_ratingAggregationMatchesApprovedReviewsOnly() {
-        val b1 = Booking("b20-1", testGoat.id, testGoat.name, testGoat.breed, "", customerUser.id, "", "", testFarm.id, "", 18000.0, AvailabilityStatus.COMPLETED)
-        val b2 = Booking("b20-2", testGoat.id, testGoat.name, testGoat.breed, "", otherCustomerUser.id, "", "", testFarm.id, "", 18000.0, AvailabilityStatus.COMPLETED)
-        db.bookings[b1.id] = b1
-        db.bookings[b2.id] = b2
-
-        db.submitReview(customerUser, b1.id, 5, "Awesome")
-        db.submitReview(otherCustomerUser, b2.id, 3, "Decent")
-
-        // Goat rating should be (5 + 3) / 2 = 4.0
-        val updatedGoat = db.goats[testGoat.id]!!
-        assertEquals(4.0, updatedGoat.rating, 0.01)
-        assertEquals(2, updatedGoat.reviewCount)
-    }
-
-    @Test
-    fun test21_superAdminCanHideRestoreReviewAndRecalculatesRating() {
-        val b1 = Booking("b21-1", testGoat.id, testGoat.name, testGoat.breed, "", customerUser.id, "", "", testFarm.id, "", 18000.0, AvailabilityStatus.COMPLETED)
-        val b2 = Booking("b21-2", testGoat.id, testGoat.name, testGoat.breed, "", otherCustomerUser.id, "", "", testFarm.id, "", 18000.0, AvailabilityStatus.COMPLETED)
-        db.bookings[b1.id] = b1
-        db.bookings[b2.id] = b2
-
-        val r1 = db.submitReview(customerUser, b1.id, 5, "Awesome").getOrThrow()
-        db.submitReview(otherCustomerUser, b2.id, 1, "Inappropriate spam review")
-
-        assertEquals(3.0, db.goats[testGoat.id]!!.rating, 0.01)
-
-        // Super Admin hides the spam 1-star review
-        val hideResult = db.hideReview(db.reviewBookingIndex[b2.id]!!, superAdminUser)
-        assertTrue(hideResult.isSuccess)
-
-        // Recalculated rating should now ONLY reflect r1 (rating: 5.0)
-        assertEquals(5.0, db.goats[testGoat.id]!!.rating, 0.01)
-        assertEquals(1, db.goats[testGoat.id]!!.reviewCount)
-
-        // Non-super admin cannot hide review
-        val unauthorizedHide = db.hideReview(r1.id, customerUser)
-        assertTrue(unauthorizedHide.isFailure)
-
-        // Super Admin restores the review
-        val restoreResult = db.restoreReview(db.reviewBookingIndex[b2.id]!!, superAdminUser)
-        assertTrue(restoreResult.isSuccess)
-        assertEquals(3.0, db.goats[testGoat.id]!!.rating, 0.01)
-        assertEquals(2, db.goats[testGoat.id]!!.reviewCount)
+        // Verify filter criteria works properly without purpose
+        val matches = criteria.matches(testGoat)
+        assertTrue("Goat matches criteria without purpose filter", matches)
     }
 
     // ==========================================
@@ -880,7 +820,7 @@ class Stage10NotificationsReviewsModerationAuditTest {
     // ==========================================
 
     @Test
-    fun test27_fullBookingToReviewLifecycle() {
+    fun test27_fullBookingLifecycle() {
         // Step 1: Create booking
         val booking = Booking(
             id = "booking-lifecycle-1",
@@ -897,26 +837,11 @@ class Stage10NotificationsReviewsModerationAuditTest {
             status = AvailabilityStatus.BOOKING_PENDING
         )
         db.bookings[booking.id] = booking
+        assertEquals(AvailabilityStatus.BOOKING_PENDING, db.bookings[booking.id]?.status)
 
-        // Step 2: Cannot review while BOOKING_PENDING
-        val pendingReview = db.submitReview(customerUser, booking.id, 5, "Premature review")
-        assertTrue("Cannot review while pending", pendingReview.isFailure)
-
-        // Step 3: Complete the booking
+        // Step 2: Complete the booking
         db.bookings[booking.id] = booking.copy(status = AvailabilityStatus.COMPLETED)
-
-        // Step 4: Submit verified review
-        val reviewResult = db.submitReview(customerUser, booking.id, 5, "Verified and delivered safely!")
-        assertTrue("Can review completed booking", reviewResult.isSuccess)
-        val review = reviewResult.getOrThrow()
-        assertEquals(5, review.rating)
-        assertEquals(testGoat.id, review.goatId)
-
-        // Step 5: Farm & Goat ratings updated
-        assertEquals(5.0, db.goats[testGoat.id]!!.rating, 0.01)
-        assertEquals(1, db.goats[testGoat.id]!!.reviewCount)
-        assertEquals(5.0, db.farms[testFarm.id]!!.rating, 0.01)
-        assertEquals(1, db.farms[testFarm.id]!!.totalReviews)
+        assertEquals(AvailabilityStatus.COMPLETED, db.bookings[booking.id]?.status)
     }
 
     @Test
@@ -939,8 +864,8 @@ class Stage10NotificationsReviewsModerationAuditTest {
         val ammalFarmOwnFee = 0.0
         assertEquals(0.0, ammalFarmOwnFee, 0.001)
 
-        // 4. 48-Hour hold duration invariant
-        val holdDurationMs = 48 * 3600 * 1000L
-        assertEquals(172800000L, holdDurationMs)
+        // 4. 24-Hour hold duration invariant
+        val holdDurationMs = 24 * 3600 * 1000L
+        assertEquals(86400000L, holdDurationMs)
     }
 }

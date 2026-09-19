@@ -9,6 +9,11 @@ import com.example.di.AppContainer
 import com.example.di.DefaultAppContainer
 
 class AmmalFarmApplication : Application() {
+    companion object {
+        lateinit var instance: AmmalFarmApplication
+            private set
+    }
+
     lateinit var container: AppContainer
         private set
 
@@ -17,6 +22,7 @@ class AmmalFarmApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         setupCrashHandler()
         SupabaseModule.initialize(this)
         appModule = AppModule(this)

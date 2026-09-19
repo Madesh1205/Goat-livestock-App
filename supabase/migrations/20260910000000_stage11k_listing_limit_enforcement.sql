@@ -85,7 +85,7 @@ BEGIN
             RAISE EXCEPTION 'Ammal Farm designation cannot be modified.';
         END IF;
 
-        IF OLD.verification_status IS DISTINCT FROM NEW.verification_status THEN
+        IF OLD.status IS DISTINCT FROM NEW.status THEN
             RAISE EXCEPTION 'Only Super Admin can modify farm verification status.';
         END IF;
     END IF;

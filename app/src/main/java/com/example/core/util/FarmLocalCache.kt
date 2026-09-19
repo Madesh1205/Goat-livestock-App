@@ -326,4 +326,10 @@ object FarmLocalCache {
             emptyList()
         }
     }
+
+    fun clear(context: Context? = null) {
+        try {
+            getPrefs(context)?.edit()?.clear()?.apply()
+        } catch (_: Exception) {}
+    }
 }

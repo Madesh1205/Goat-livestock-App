@@ -55,6 +55,7 @@ interface AuthRepository {
     suspend fun sendPasswordResetOtp(email: String): Result<Unit>
     suspend fun resetPassword(newPassword: String): Result<Unit>
     suspend fun logout()
+    suspend fun deleteAccount(): Result<Unit>
     suspend fun updateProfile(name: String, phone: String): Result<UserProfile>
 }
 
@@ -1253,6 +1254,37 @@ class AuthRepositoryImpl(
                 userFarm = null,
                 successMessage = "You have been logged out."
             )
+        }
+    }
+
+    override suspend fun deleteAccount(): Result<Unit> {
+        val current = _currentUser.value
+        _authState.update { it.copy(isLoading = true, errorMessage = null) }
+        return try {
+            if (SupabaseConfig.isConfigured) {
+                SupabaseModule.client.postgrest.rpc("delete_user_account")
+                try {
+                    SupabaseModule.auth.signOut()
+                } catch (_: Exception) {}
+            }
+
+            clearLocalCache()
+            FarmLocalCache.clear(context ?: SupabaseModule.getApplicationContext())
+            _currentUser.value = null
+            _currentFarm.value = null
+            _authState.update {
+                AuthState(
+                    isAuthenticated = false,
+                    userProfile = null,
+                    userFarm = null,
+                    successMessage = "Your account and personal data have been permanently deleted."
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            val userFriendly = UserFriendlyErrorMapper.toUserMessage(e, "Failed to delete account. Please try again.")
+            _authState.update { it.copy(isLoading = false, errorMessage = userFriendly) }
+            Result.failure(e)
         }
     }
 

@@ -254,17 +254,6 @@ class MarketplaceSearchTest {
         override suspend fun updateFarmVerification(farmId: String, status: VerificationStatus): Result<Unit> = Result.success(Unit)
         override suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit> = Result.success(Unit)
 
-        override fun getGoatReviews(goatId: String): Flow<List<Review>> = flowOf(emptyList())
-        override fun getFarmReviews(farmId: String): Flow<List<Review>> = flowOf(emptyList())
-        override fun getAllReviews(): Flow<List<Review>> = flowOf(emptyList())
-        override suspend fun addReview(bookingId: String, goatId: String, rating: Int, comment: String, photos: List<String>): Result<Review> = Result.failure(NotImplementedError())
-        override suspend fun addReview(goatId: String, rating: Int, comment: String): Result<Review> = Result.failure(NotImplementedError())
-        override suspend fun deleteReview(reviewId: String): Result<Unit> = Result.success(Unit)
-        override suspend fun reportReview(reviewId: String, reason: String): Result<Unit> = Result.success(Unit)
-        override suspend fun dismissReviewReport(reviewId: String): Result<Unit> = Result.success(Unit)
-        override suspend fun hideReview(reviewId: String): Result<Unit> = Result.success(Unit)
-        override suspend fun restoreReview(reviewId: String): Result<Unit> = Result.success(Unit)
-
         override fun getAllReports(): Flow<List<PlatformReport>> = flowOf(emptyList())
         override suspend fun submitReport(report: PlatformReport): Result<PlatformReport> = Result.success(report)
         override suspend fun updateReportStatus(reportId: String, status: ReportStatus, resolutionNotes: String?): Result<Unit> = Result.success(Unit)

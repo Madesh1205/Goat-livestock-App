@@ -373,20 +373,17 @@ BEGIN
     END IF;
 
     IF TG_OP = 'INSERT' THEN
-        -- If non-super-admin inserts a farm, force defaults:
-        IF v_is_super_admin IS NOT TRUE THEN
-            -- Only Super Admin can create an Ammal own farm or set higher quota
+        -- If an authenticated non-super-admin user inserts a farm, force safe defaults:
+        IF v_auth_uid IS NOT NULL AND v_is_super_admin IS NOT TRUE THEN
             NEW.is_ammal_own_farm := FALSE;
             NEW.goat_listing_limit := 10;
-            NEW.verification_status := 'PENDING';
-            IF v_auth_uid IS NOT NULL THEN
-                NEW.owner_id := v_auth_uid;
-            END IF;
+            NEW.status := 'PENDING'::public.farm_status;
+            NEW.owner_id := v_auth_uid;
         END IF;
         RETURN NEW;
 
     ELSIF TG_OP = 'UPDATE' THEN
-        -- Non-Super Admins are strictly prohibited from changing listing limits, ownership, or verification status
+        -- Non-Super Admins are strictly prohibited from changing listing limits, ownership, status, or Ammal Farm flag
         IF v_auth_uid IS NOT NULL AND v_is_super_admin IS NOT TRUE THEN
             IF OLD.goat_listing_limit IS DISTINCT FROM NEW.goat_listing_limit THEN
                 RAISE EXCEPTION 'Only Super Admin can update the farm listing limit.';
@@ -400,7 +397,7 @@ BEGIN
                 RAISE EXCEPTION 'Ammal Farm designation cannot be modified.';
             END IF;
 
-            IF OLD.verification_status IS DISTINCT FROM NEW.verification_status THEN
+            IF OLD.status IS DISTINCT FROM NEW.status THEN
                 RAISE EXCEPTION 'Only Super Admin can modify farm verification status.';
             END IF;
         END IF;

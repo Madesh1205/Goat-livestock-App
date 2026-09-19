@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import com.example.core.util.PriceUtils
+import com.example.core.util.GoatFormValidator
 
 import android.content.Intent
 import android.graphics.Bitmap
@@ -13,11 +14,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -914,12 +917,6 @@ fun FarmAdminScreen(
                                             ProfileInfoRow(Icons.Default.Phone, "Contact Phone", myFarm.contactNumber)
                                             ProfileInfoRow(Icons.Default.Email, "Email", myFarm.email)
                                             ProfileInfoRow(Icons.Default.Verified, "Verification", farmVerificationStatus.name)
-                                            val ratingText = if (myFarm.rating > 0.0) {
-                                                "${String.format("%.1f", myFarm.rating)} ★ Verified Breeder"
-                                            } else {
-                                                "Verified Breeder"
-                                            }
-                                            ProfileInfoRow(Icons.Default.Star, "Rating", ratingText)
 
                                             Spacer(modifier = Modifier.height(14.dp))
                                             Button(
@@ -1608,7 +1605,7 @@ private fun FarmGoatCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "Tag: ${goat.tagNumber} • Purpose: ${goat.purpose.name}",
+                        "Tag: ${goat.tagNumber}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1897,15 +1894,18 @@ private fun AddEditGoatDialog(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    var hasSubmitted by remember { mutableStateOf(false) }
 
     val goatId = remember { existingGoat?.id ?: UUID.randomUUID().toString() }
 
     var name by remember { mutableStateOf(existingGoat?.name ?: "") }
     var tagNumber by remember { mutableStateOf(existingGoat?.tagNumber ?: "AF-${UUID.randomUUID().toString().take(4).uppercase()}") }
-    var breed by remember { mutableStateOf(existingGoat?.breed ?: "Boer") }
+    var breed by remember { mutableStateOf(existingGoat?.breed ?: "") }
     var gender by remember { mutableStateOf(existingGoat?.gender ?: GoatGender.MALE) }
-    var age by remember { mutableStateOf(existingGoat?.ageMonths?.toString() ?: "14") }
-    var weight by remember { mutableStateOf(existingGoat?.weightKg?.toString() ?: "42.0") }
+    var age by remember { mutableStateOf(existingGoat?.ageMonths?.toString() ?: "") }
+    var weight by remember { mutableStateOf(existingGoat?.weightKg?.toString() ?: "") }
     var price by remember {
         mutableStateOf(
             if (existingGoat != null) {
@@ -1923,13 +1923,29 @@ private fun AddEditGoatDialog(
         )
     }
 
-    val priceValidation = PriceUtils.validatePrice(price)
-    val discountValidation = PriceUtils.validateDiscount(discountPercentage)
-    val isPriceValid = priceValidation is PriceUtils.PriceValidationResult.Valid
-    val isDiscountValid = discountValidation is PriceUtils.DiscountValidationResult.Valid
+    var description by remember { mutableStateOf(existingGoat?.description ?: "Healthy breeding pedigree goat in excellent condition.") }
 
-    val validPrice = (priceValidation as? PriceUtils.PriceValidationResult.Valid)?.price
-    val validDiscount = (discountValidation as? PriceUtils.DiscountValidationResult.Valid)?.discount ?: 0.0
+    var photos by remember {
+        mutableStateOf<List<String>>(
+            existingGoat?.photos ?: emptyList()
+        )
+    }
+
+    val validation = GoatFormValidator.validate(
+        name = name,
+        breed = breed,
+        age = age,
+        weight = weight,
+        price = price,
+        discountPercentage = discountPercentage,
+        photos = photos,
+        hasSubmitted = hasSubmitted
+    )
+
+    val validPrice = validation.validPrice
+    val validDiscount = validation.validDiscount ?: 0.0
+    val isPriceValid = validPrice != null
+    val isDiscountValid = validation.discountError == null
 
     val calculatedFinalPrice: Double? = if (validPrice != null && isDiscountValid) {
         PriceUtils.calculateFinalPrice(validPrice, validDiscount)
@@ -1939,53 +1955,15 @@ private fun AddEditGoatDialog(
         PriceUtils.calculateSavings(validPrice, validDiscount)
     } else null
 
-    var description by remember { mutableStateOf(existingGoat?.description ?: "Healthy breeding pedigree goat in excellent condition.") }
-
-    var photos by remember {
-        mutableStateOf<List<String>>(
-            existingGoat?.photos ?: emptyList()
-        )
-    }
-
     var isUploadingImage by remember { mutableStateOf(false) }
 
-    // Multi-source Image Picker Launchers
+    // Multi-source Image Picker Launchers (Deferred upload until Submit)
     val pickMultipleVisualMediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            isUploadingImage = true
-            coroutineScope.launch {
-                var uploadedCount = 0
-                val initialPhotoCount = photos.size
-                for ((idx, uri) in uris.withIndex()) {
-                    val compressedBytes = ImageUploadHelper.compressAndResizeImage(context, uri)
-                    if (compressedBytes != null) {
-                        val result = ImageUploadHelper.uploadGoatImage(
-                            context = context,
-                            bytes = compressedBytes,
-                            goatId = goatId,
-                            photoIndex = initialPhotoCount + idx + 1,
-                            farmId = farmId
-                        )
-                        result.onSuccess { resolvedUrl ->
-                            photos = photos + resolvedUrl
-                            uploadedCount++
-                        }.onFailure { err ->
-                            val localUrl = ImageUploadHelper.saveImageLocally(context, compressedBytes, "goat_${goatId}")
-                            photos = photos + localUrl
-                            uploadedCount++
-                            Log.e("FarmAdminScreen", "Upload failed, saved locally: ${err.message}", err)
-                        }
-                    }
-                }
-                isUploadingImage = false
-                if (uploadedCount > 0) {
-                    Toast.makeText(context, "$uploadedCount photo(s) added to listing!", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Could not process selected image files.", Toast.LENGTH_SHORT).show()
-                }
-            }
+            photos = photos + uris.map { it.toString() }
+            Toast.makeText(context, "${uris.size} photo(s) selected!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1993,31 +1971,8 @@ private fun AddEditGoatDialog(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            isUploadingImage = true
-            coroutineScope.launch {
-                val compressedBytes = ImageUploadHelper.compressAndResizeImage(context, uri)
-                if (compressedBytes != null) {
-                    val result = ImageUploadHelper.uploadGoatImage(
-                        context = context,
-                        bytes = compressedBytes,
-                        goatId = goatId,
-                        photoIndex = photos.size + 1,
-                        farmId = farmId
-                    )
-                    result.onSuccess { resolvedUrl ->
-                        photos = photos + resolvedUrl
-                        Toast.makeText(context, "Photo added to listing!", Toast.LENGTH_SHORT).show()
-                    }.onFailure { err ->
-                        val localUrl = ImageUploadHelper.saveImageLocally(context, compressedBytes, "goat_${goatId}")
-                        photos = photos + localUrl
-                        Toast.makeText(context, "Photo saved to listing!", Toast.LENGTH_SHORT).show()
-                        Log.e("FarmAdminScreen", "Upload failed, saved locally: ${err.message}", err)
-                    }
-                } else {
-                    Toast.makeText(context, "Could not process image.", Toast.LENGTH_SHORT).show()
-                }
-                isUploadingImage = false
-            }
+            photos = photos + uri.toString()
+            Toast.makeText(context, "Photo selected!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2025,38 +1980,8 @@ private fun AddEditGoatDialog(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            isUploadingImage = true
-            coroutineScope.launch {
-                var uploadedCount = 0
-                val initialPhotoCount = photos.size
-                for ((idx, uri) in uris.withIndex()) {
-                    val compressedBytes = ImageUploadHelper.compressAndResizeImage(context, uri)
-                    if (compressedBytes != null) {
-                        val result = ImageUploadHelper.uploadGoatImage(
-                            context = context,
-                            bytes = compressedBytes,
-                            goatId = goatId,
-                            photoIndex = initialPhotoCount + idx + 1,
-                            farmId = farmId
-                        )
-                        result.onSuccess { resolvedUrl ->
-                            photos = photos + resolvedUrl
-                            uploadedCount++
-                        }.onFailure { err ->
-                            val localUrl = ImageUploadHelper.saveImageLocally(context, compressedBytes, "goat_${goatId}")
-                            photos = photos + localUrl
-                            uploadedCount++
-                            Log.e("FarmAdminScreen", "Upload failed, saved locally: ${err.message}", err)
-                        }
-                    }
-                }
-                isUploadingImage = false
-                if (uploadedCount > 0) {
-                    Toast.makeText(context, "$uploadedCount photo(s) added to listing!", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Could not process selected image files.", Toast.LENGTH_SHORT).show()
-                }
-            }
+            photos = photos + uris.map { it.toString() }
+            Toast.makeText(context, "${uris.size} photo(s) selected!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2064,29 +1989,8 @@ private fun AddEditGoatDialog(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            isUploadingImage = true
-            coroutineScope.launch {
-                val compressedBytes = ImageUploadHelper.compressAndResizeImage(context, uri)
-                if (compressedBytes != null) {
-                    val result = ImageUploadHelper.uploadGoatImage(
-                        context = context,
-                        bytes = compressedBytes,
-                        goatId = goatId,
-                        photoIndex = photos.size + 1,
-                        farmId = farmId
-                    )
-                    result.onSuccess { resolvedUrl ->
-                        photos = photos + resolvedUrl
-                        Toast.makeText(context, "Photo added to listing!", Toast.LENGTH_SHORT).show()
-                    }.onFailure { err ->
-                        val localUrl = ImageUploadHelper.saveImageLocally(context, compressedBytes, "goat_${goatId}")
-                        photos = photos + localUrl
-                        Toast.makeText(context, "Photo saved to listing!", Toast.LENGTH_SHORT).show()
-                        Log.e("FarmAdminScreen", "Upload failed, saved locally: ${err.message}", err)
-                    }
-                }
-                isUploadingImage = false
-            }
+            photos = photos + uri.toString()
+            Toast.makeText(context, "Photo selected!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2094,26 +1998,11 @@ private fun AddEditGoatDialog(
         contract = ActivityResultContracts.TakePicturePreview()
     ) { bitmap: Bitmap? ->
         if (bitmap != null) {
-            isUploadingImage = true
             coroutineScope.launch {
                 val compressedBytes = ImageUploadHelper.compressAndResizeBitmap(bitmap)
-                val result = ImageUploadHelper.uploadGoatImage(
-                    context = context,
-                    bytes = compressedBytes,
-                    goatId = goatId,
-                    customFileName = "camera_photo_${photos.size + 1}",
-                    farmId = farmId
-                )
-                result.onSuccess { resolvedUrl ->
-                    photos = photos + resolvedUrl
-                    Toast.makeText(context, "Camera photo added!", Toast.LENGTH_SHORT).show()
-                }.onFailure { err ->
-                    val localUrl = ImageUploadHelper.saveImageLocally(context, compressedBytes, "goat_${goatId}")
-                    photos = photos + localUrl
-                    Toast.makeText(context, "Camera photo saved!", Toast.LENGTH_SHORT).show()
-                    Log.e("FarmAdminScreen", "Upload failed, saved locally: ${err.message}", err)
-                }
-                isUploadingImage = false
+                val localUrl = ImageUploadHelper.saveImageLocally(context, compressedBytes, "temp_goat_$goatId")
+                photos = photos + localUrl
+                Toast.makeText(context, "Camera photo selected!", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -2167,26 +2056,36 @@ private fun AddEditGoatDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 LazyColumn(
+                    state = listState,
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                // Name
+                // Name (Item 0)
                 item {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Goat Name") },
+                        label = { Text("Goat Name *") },
                         placeholder = { Text("e.g. Sultan Champion Stud") },
+                        isError = validation.nameError != null,
+                        supportingText = validation.nameError?.let { err ->
+                            { Text(err, color = MaterialTheme.colorScheme.error) }
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                // Breed Selector
+                // Breed Selector (Item 1)
                 item {
                     Column {
-                        Text("Breed Selection", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "Breed Selection *",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (validation.breedError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
                         val commonBreeds = listOf("Boer", "Tellicherry (Malabari)", "Jamunapari", "Sirohi", "Salem Black", "Barbari", "Beetal", "Osmanabadi", "Kanni Aadu")
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2201,13 +2100,17 @@ private fun AddEditGoatDialog(
                         OutlinedTextField(
                             value = breed,
                             onValueChange = { breed = it },
-                            label = { Text("Or Custom Breed") },
+                            label = { Text("Or Custom Breed *") },
+                            isError = validation.breedError != null,
+                            supportingText = validation.breedError?.let { err ->
+                                { Text(err, color = MaterialTheme.colorScheme.error) }
+                            },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
 
-                // Gender
+                // Gender (Item 2)
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2232,27 +2135,37 @@ private fun AddEditGoatDialog(
                     }
                 }
 
-                // Age, Weight, Price
+                // Age, Weight (Item 3)
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = age,
                             onValueChange = { age = it },
-                            label = { Text("Age (Mos)") },
+                            label = { Text("Age (Mos) *") },
+                            placeholder = { Text("e.g. 14") },
+                            isError = validation.ageError != null,
+                            supportingText = validation.ageError?.let { err ->
+                                { Text(err, color = MaterialTheme.colorScheme.error) }
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.weight(1f)
                         )
                         OutlinedTextField(
                             value = weight,
                             onValueChange = { weight = it },
-                            label = { Text("Weight (Kg)") },
+                            label = { Text("Weight (Kg) *") },
+                            placeholder = { Text("e.g. 42.0") },
+                            isError = validation.weightError != null,
+                            supportingText = validation.weightError?.let { err ->
+                                { Text(err, color = MaterialTheme.colorScheme.error) }
+                            },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
 
-                // Price, Discount % and Live Final Price Preview
+                // Price, Discount % and Live Final Price Preview (Item 4)
                 item {
                     Column(
                         modifier = Modifier
@@ -2281,10 +2194,10 @@ private fun AddEditGoatDialog(
                                 onValueChange = { price = it },
                                 label = { Text("Price (₹) *") },
                                 placeholder = { Text("e.g. 28000") },
-                                isError = price.isNotBlank() && !isPriceValid,
-                                supportingText = if (price.isNotBlank() && priceValidation is PriceUtils.PriceValidationResult.Error) {
-                                    { Text(priceValidation.message, color = MaterialTheme.colorScheme.error) }
-                                } else null,
+                                isError = validation.priceError != null,
+                                supportingText = validation.priceError?.let { err ->
+                                    { Text(err, color = MaterialTheme.colorScheme.error) }
+                                },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.weight(1.2f)
                             )
@@ -2295,10 +2208,10 @@ private fun AddEditGoatDialog(
                                 onValueChange = { discountPercentage = it },
                                 label = { Text("Discount (%)") },
                                 placeholder = { Text("0 - 100") },
-                                isError = discountPercentage.isNotBlank() && !isDiscountValid,
-                                supportingText = if (discountPercentage.isNotBlank() && discountValidation is PriceUtils.DiscountValidationResult.Error) {
-                                    { Text(discountValidation.message, color = MaterialTheme.colorScheme.error) }
-                                } else null,
+                                isError = validation.discountError != null,
+                                supportingText = validation.discountError?.let { err ->
+                                    { Text(err, color = MaterialTheme.colorScheme.error) }
+                                },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                 modifier = Modifier.weight(1f)
                             )
@@ -2309,7 +2222,7 @@ private fun AddEditGoatDialog(
                             shape = RoundedCornerShape(10.dp),
                             color = if (isPriceValid && isDiscountValid) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                            border = androidx.compose.foundation.BorderStroke(
+                            border = BorderStroke(
                                 1.dp,
                                 if (isPriceValid && isDiscountValid) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                 else MaterialTheme.colorScheme.outlineVariant
@@ -2418,7 +2331,7 @@ private fun AddEditGoatDialog(
                     }
                 }
 
-                // Description
+                // Description (Item 5)
                 item {
                     OutlinedTextField(
                         value = description,
@@ -2429,10 +2342,33 @@ private fun AddEditGoatDialog(
                     )
                 }
 
-                // Photos Section
+                // Photos Section (Item 6)
                 item {
-                    Column {
-                        Text("Goat Photos (${photos.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(
+                                width = if (validation.photoError != null) 1.5.dp else 0.dp,
+                                color = if (validation.photoError != null) MaterialTheme.colorScheme.error else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(if (validation.photoError != null) 8.dp else 0.dp)
+                    ) {
+                        Text(
+                            "Goat Photos (${photos.size}) *",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (validation.photoError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                        )
+                        if (validation.photoError != null) {
+                            Text(
+                                text = validation.photoError!!,
+                                color = MaterialTheme.colorScheme.error,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
 
                         // Selected photos row
@@ -2510,7 +2446,7 @@ private fun AddEditGoatDialog(
                     }
                 }
 
-                // Platform Lifecycle Notice
+                // Platform Lifecycle Notice (Item 7)
                 item {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
@@ -2555,17 +2491,43 @@ private fun AddEditGoatDialog(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Button(
-                    enabled = isPriceValid && isDiscountValid,
+                    enabled = true,
                     onClick = {
-                        val finalPriceVal = (priceValidation as? PriceUtils.PriceValidationResult.Valid)?.price ?: return@Button
-                        val finalDiscountVal = (discountValidation as? PriceUtils.DiscountValidationResult.Valid)?.discount ?: return@Button
-                        val goat = existingGoat?.copy(
-                            name = name.ifBlank { "$breed Goat" },
-                            tagNumber = tagNumber.ifBlank { existingGoat.tagNumber },
+                        hasSubmitted = true
+                        val formValidation = GoatFormValidator.validate(
+                            name = name,
                             breed = breed,
+                            age = age,
+                            weight = weight,
+                            price = price,
+                            discountPercentage = discountPercentage,
+                            photos = photos,
+                            hasSubmitted = true
+                        )
+                        if (!formValidation.isValid) {
+                            Toast.makeText(context, "Please fix the highlighted required fields", Toast.LENGTH_SHORT).show()
+                            formValidation.firstInvalidFieldIndex?.let { idx ->
+                                coroutineScope.launch {
+                                    listState.animateScrollToItem(idx)
+                                }
+                            }
+                            return@Button
+                        }
+
+                        val finalPriceVal = formValidation.validPrice ?: return@Button
+                        val finalDiscountVal = formValidation.validDiscount ?: 0.0
+                        val finalAgeVal = age.trim().toInt()
+                        val finalWeightVal = weight.trim().toDouble()
+                        val finalName = name.trim()
+                        val finalBreed = breed.trim()
+
+                        val goat = existingGoat?.copy(
+                            name = finalName,
+                            tagNumber = tagNumber.ifBlank { existingGoat.tagNumber },
+                            breed = finalBreed,
                             gender = gender,
-                            ageMonths = age.toIntOrNull() ?: existingGoat.ageMonths,
-                            weightKg = weight.toDoubleOrNull() ?: existingGoat.weightKg,
+                            ageMonths = finalAgeVal,
+                            weightKg = finalWeightVal,
                             purpose = existingGoat.purpose,
                             description = description,
                             price = finalPriceVal,
@@ -2576,12 +2538,12 @@ private fun AddEditGoatDialog(
                             farmLocation = existingGoat.farmLocation
                         ) ?: Goat(
                             id = goatId,
-                            name = name.ifBlank { "$breed Goat" },
+                            name = finalName,
                             tagNumber = tagNumber,
-                            breed = breed,
+                            breed = finalBreed,
                             gender = gender,
-                            ageMonths = age.toIntOrNull() ?: 12,
-                            weightKg = weight.toDoubleOrNull() ?: 35.0,
+                            ageMonths = finalAgeVal,
+                            weightKg = finalWeightVal,
                             purpose = GoatPurpose.BREEDING,
                             description = description,
                             price = finalPriceVal,

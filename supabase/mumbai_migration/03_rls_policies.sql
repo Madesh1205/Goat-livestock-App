@@ -198,7 +198,21 @@ DROP POLICY IF EXISTS "goat_images_delete_policy" ON public.goat_images;
 
 CREATE POLICY "goat_images_select_policy" ON public.goat_images
     FOR SELECT TO public
-    USING (true);
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.goats g
+            WHERE g.id = goat_images.goat_id
+              AND (
+                  (g.status != 'INACTIVE' AND g.is_approved_by_admin = TRUE)
+                  OR (auth.uid() IS NOT NULL AND EXISTS (
+                      SELECT 1 FROM public.farms f
+                      WHERE f.id = g.farm_id
+                        AND f.owner_id = auth.uid()
+                  ))
+                  OR public.is_super_admin()
+              )
+        )
+    );
 
 CREATE POLICY "goat_images_insert_policy" ON public.goat_images
     FOR INSERT TO authenticated
@@ -268,7 +282,17 @@ CREATE POLICY "bookings_select_policy" ON public.bookings
 
 CREATE POLICY "bookings_insert_policy" ON public.bookings
     FOR INSERT TO authenticated
-    WITH CHECK (customer_id::text = auth.uid()::text OR public.is_super_admin());
+    WITH CHECK (
+        public.is_super_admin()
+        OR (
+            customer_id::text = auth.uid()::text
+            AND NOT EXISTS (
+                SELECT 1 FROM public.farms f
+                WHERE f.id = bookings.farm_id
+                  AND f.owner_id::text = auth.uid()::text
+            )
+        )
+    );
 
 CREATE POLICY "bookings_update_policy" ON public.bookings
     FOR UPDATE TO authenticated

@@ -499,7 +499,7 @@ private fun getNotificationVisuals(type: NotificationType): Triple<ImageVector, 
         )
         NotificationType.NEW_FARM_APPLICATION,
         NotificationType.NEW_LISTING_PENDING -> Triple(
-            Icons.Default.RateReview,
+            Icons.Default.FactCheck,
             Color(0xFFEDE7F6),
             Color(0xFF512DA8)
         )

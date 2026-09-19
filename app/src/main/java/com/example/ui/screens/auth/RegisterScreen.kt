@@ -304,7 +304,7 @@ fun RegisterScreen(
                         )
                         Column {
                             Text(
-                                text = "Partner Registration Fee: ₹100",
+                                text = "Partner Farm Application",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -556,7 +556,7 @@ fun RegisterScreen(
                         } else if (selectedTab == 0) {
                             "Create Customer Account"
                         } else {
-                            "Submit Farm Application (₹100 Fee)"
+                            "Submit Farm Application"
                         },
                         fontWeight = FontWeight.Bold
                     )
@@ -685,18 +685,12 @@ fun RegisterScreen(
                             ) {
                                 Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                 Text(
-                                    text = "Status: PENDING",
+                                    text = "Status: PENDING VERIFICATION",
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            Text(
-                                text = "Partner Registration / Listing Fee: ₹100",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
                         }
                     }
                     Text(

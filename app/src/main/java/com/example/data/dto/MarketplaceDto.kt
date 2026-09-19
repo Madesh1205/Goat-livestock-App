@@ -56,7 +56,7 @@ fun currentIsoTimestamp(): String {
 /**
  * Generates an ISO-8601 UTC timestamp string in the future for PostgreSQL TIMESTAMPTZ columns.
  */
-fun futureIsoTimestamp(hours: Long = 48): String {
+fun futureIsoTimestamp(hours: Long = 24): String {
     val future = Date(System.currentTimeMillis() + hours * 3600 * 1000L)
     return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
@@ -381,7 +381,7 @@ data class BookingDto(
     @SerialName("completed_at") val completedAt: String? = null,
     @SerialName("cancelled_at") val cancelledAt: String? = null,
     @SerialName("booking_date") val bookingDate: String = currentIsoTimestamp(),
-    @SerialName("hold_expires_at") val holdExpiresAt: String = futureIsoTimestamp(48),
+    @SerialName("hold_expires_at") val holdExpiresAt: String = futureIsoTimestamp(24),
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 ) {
@@ -406,7 +406,7 @@ data class BookingDto(
         }
 
         val parsedBookingDate = parseIsoTimestamp(bookingDate) ?: parseIsoTimestamp(createdAt) ?: System.currentTimeMillis()
-        val parsedExpiryDate = parseIsoTimestamp(holdExpiresAt) ?: (parsedBookingDate + (48 * 3600 * 1000L))
+        val parsedExpiryDate = parseIsoTimestamp(holdExpiresAt) ?: (parsedBookingDate + (24 * 3600 * 1000L))
 
         return Booking(
             id = id,
@@ -430,7 +430,7 @@ data class BookingDto(
     companion object {
         fun fromDomain(domain: Booking): BookingDto {
             val nowIso = currentIsoTimestamp()
-            val expiresIso = futureIsoTimestamp(48)
+            val expiresIso = futureIsoTimestamp(24)
             return BookingDto(
                 id = ensureValidUuid(domain.id),
                 goatId = ensureValidUuid(domain.goatId),
@@ -662,4 +662,13 @@ data class PaymentVerificationRpcResponse(
     @SerialName("verified_at") val verifiedAt: String? = null,
     @SerialName("already_paid") val alreadyPaid: Boolean = false,
     @SerialName("approval_status") val approvalStatus: String? = "PENDING_APPROVAL"
+)
+
+@Serializable
+data class GoatDeletionResponse(
+    val success: Boolean = false,
+    @SerialName("goat_id") val goatId: String = "",
+    @SerialName("farm_id") val farmId: String = "",
+    @SerialName("deleted_images") val deletedImages: List<String> = emptyList(),
+    @SerialName("historical_bookings_preserved") val historicalBookingsPreserved: Int = 0
 )
