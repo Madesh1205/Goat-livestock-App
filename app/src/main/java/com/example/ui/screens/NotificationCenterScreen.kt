@@ -54,7 +54,8 @@ fun NotificationCenterScreen(
     onDeleteNotification: (String) -> Unit,
     onClearAllNotifications: () -> Unit,
     onNavigateToRoute: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNotificationClick: ((AppNotification) -> Unit)? = null
 ) {
     var selectedFilter by remember { mutableStateOf(NotificationFilterTab.ALL) }
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -278,9 +279,13 @@ fun NotificationCenterScreen(
                             isCustomer = isCustomer,
                             onItemClick = {
                                 onMarkAsRead(notification.id)
-                                notification.deepLinkRoute?.let { route ->
-                                    if (!isCustomer || (route != "farm_dashboard" && route != "super_admin_dashboard")) {
-                                        onNavigateToRoute(route)
+                                if (onNotificationClick != null) {
+                                    onNotificationClick(notification)
+                                } else {
+                                    val targetRoute = notification.deepLinkRoute
+                                        ?: com.example.util.DeepLinkUtils.resolveDeepLinkRoute(notification.type, notification.referenceId)
+                                    if (!isCustomer || (targetRoute != "farm_dashboard" && targetRoute != "super_admin_dashboard")) {
+                                        onNavigateToRoute(targetRoute)
                                     }
                                 }
                             },
@@ -288,8 +293,12 @@ fun NotificationCenterScreen(
                             onDelete = { onDeleteNotification(notification.id) },
                             onDeepLinkClick = { route ->
                                 onMarkAsRead(notification.id)
-                                if (!isCustomer || (route != "farm_dashboard" && route != "super_admin_dashboard")) {
-                                    onNavigateToRoute(route)
+                                if (onNotificationClick != null) {
+                                    onNotificationClick(notification)
+                                } else {
+                                    if (!isCustomer || (route != "farm_dashboard" && route != "super_admin_dashboard")) {
+                                        onNavigateToRoute(route)
+                                    }
                                 }
                             }
                         )

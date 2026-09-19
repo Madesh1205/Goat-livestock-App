@@ -9,11 +9,13 @@ import com.example.data.dto.SEED_AMMAL_FARM_UUID
 import com.example.data.dto.ensureValidUuid
 import com.example.data.repository.MarketplaceRepository
 import com.example.model.*
+import com.example.util.NotificationDeepLinkPayload
 import com.example.util.UserFriendlyErrorMapper
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -76,6 +78,31 @@ data class MarketplaceUiState(
 class MarketplaceViewModel(
     private val repository: MarketplaceRepository
 ) : ViewModel() {
+
+    private var activeSubscribedUserId: String? = null
+    private var notificationsJob: Job? = null
+
+    private fun startNotificationObserver(user: UserProfile) {
+        val currentJob = notificationsJob
+        if (activeSubscribedUserId == user.id && currentJob != null && currentJob.isActive) {
+            return
+        }
+        activeSubscribedUserId = user.id
+        currentJob?.cancel()
+        notificationsJob = viewModelScope.launch {
+            repository.getNotificationsForUser(user.id)
+                .catch { e -> handleNetworkOrSyncError(e, "getNotificationsForUser") }
+                .collect { list ->
+                    _uiState.update { it.copy(notifications = list) }
+                }
+        }
+    }
+
+    private fun stopNotificationObserver() {
+        activeSubscribedUserId = null
+        notificationsJob?.cancel()
+        notificationsJob = null
+    }
 
     private val _filterCriteria = MutableStateFlow(GoatFilterCriteria())
     val filterCriteria: StateFlow<GoatFilterCriteria> = _filterCriteria.asStateFlow()
@@ -277,6 +304,7 @@ class MarketplaceViewModel(
 
     fun loadRoleScopedData(user: UserProfile?) {
         if (user == null) {
+            stopNotificationObserver()
             _uiState.update {
                 it.copy(
                     allAdminGoats = emptyList(),
@@ -289,6 +317,8 @@ class MarketplaceViewModel(
             }
             return
         }
+
+        startNotificationObserver(user)
 
         val isSuperAdmin = user.role == UserRole.SUPER_ADMIN
         val isFarmAdmin = user.role == UserRole.FARM_ADMIN
@@ -346,14 +376,6 @@ class MarketplaceViewModel(
                     _uiState.update { it.copy(platformStats = stats) }
                 }
         }
-
-        viewModelScope.launch {
-            repository.getNotificationsForUser(user.id)
-                .catch { e -> handleNetworkOrSyncError(e, "getNotificationsForUser") }
-                .collect { list ->
-                    _uiState.update { it.copy(notifications = list) }
-                }
-        }
     }
 
     private fun loadFarmAdminData(user: UserProfile) {
@@ -373,25 +395,9 @@ class MarketplaceViewModel(
                     _uiState.update { it.copy(farmBookings = list, allBookings = list) }
                 }
         }
-
-        viewModelScope.launch {
-            repository.getNotificationsForUser(user.id)
-                .catch { e -> handleNetworkOrSyncError(e, "getNotificationsForUser") }
-                .collect { list ->
-                    _uiState.update { it.copy(notifications = list) }
-                }
-        }
     }
 
     private fun loadCustomerData(user: UserProfile) {
-        viewModelScope.launch {
-            repository.getNotificationsForUser(user.id)
-                .catch { e -> handleNetworkOrSyncError(e, "getNotificationsForUser") }
-                .collect { list ->
-                    _uiState.update { it.copy(notifications = list) }
-                }
-        }
-
         viewModelScope.launch {
             repository.getCustomerBookings(user.id)
                 .catch { e -> handleNetworkOrSyncError(e, "getCustomerBookings") }
@@ -628,6 +634,15 @@ class MarketplaceViewModel(
 
     fun selectGoat(goat: Goat?) {
         _uiState.update { it.copy(selectedGoat = goat) }
+    }
+
+    fun selectGoatById(goatId: String): Goat? {
+        if (goatId.isBlank()) return null
+        val goat = _uiState.value.goats.find { 
+            it.id == goatId || it.id.equals(goatId, ignoreCase = true)
+        }
+        _uiState.update { it.copy(selectedGoat = goat) }
+        return goat
     }
 
     fun selectFarm(farm: Farm?) {
@@ -1364,6 +1379,28 @@ class MarketplaceViewModel(
             repository.triggerSampleNotification(type)
             _uiState.update { it.copy(successMessage = "Notification created: ${type.name}") }
         }
+    }
+
+    // --- DEEP LINK NAVIGATION ---
+    private val _handledDeepLinkKeys = mutableSetOf<String>()
+    private val _pendingDeepLink = MutableStateFlow<NotificationDeepLinkPayload?>(null)
+    val pendingDeepLink: StateFlow<NotificationDeepLinkPayload?> = _pendingDeepLink.asStateFlow()
+
+    fun queueNotificationDeepLink(payload: NotificationDeepLinkPayload) {
+        if (payload.intentKey.isBlank() || _handledDeepLinkKeys.contains(payload.intentKey)) {
+            return
+        }
+        _handledDeepLinkKeys.add(payload.intentKey)
+
+        payload.notificationId?.takeIf { it.isNotBlank() }?.let { notifId ->
+            markNotificationAsRead(notifId)
+        }
+
+        _pendingDeepLink.value = payload
+    }
+
+    fun clearPendingDeepLink() {
+        _pendingDeepLink.value = null
     }
 
     // Concurrency protection: sequential lock per goatId to handle rapid repeated taps safely

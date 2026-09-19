@@ -472,17 +472,25 @@ data class NotificationDto(
     @SerialName("created_at") val createdAt: String? = null
 ) {
     fun toDomain(): AppNotification {
+        val parsedType = linkType?.let {
+            try { NotificationType.valueOf(it.uppercase()) } catch (_: Exception) { null }
+        } ?: NotificationType.SYSTEM_ALERT
+
+        val route = com.example.util.DeepLinkUtils.resolveDeepLinkRoute(parsedType, linkId)
+
+        val parsedTime = parseIsoTimestamp(createdAt) ?: System.currentTimeMillis()
+
         return AppNotification(
             id = id,
             recipientUserId = userId,
             targetRole = UserRole.CUSTOMER,
             title = title,
             message = body,
-            type = NotificationType.SYSTEM_ALERT,
-            timestamp = System.currentTimeMillis(),
+            type = parsedType,
+            timestamp = parsedTime,
             isRead = isRead,
             referenceId = linkId,
-            deepLinkRoute = null,
+            deepLinkRoute = route,
             eventKey = eventKey
         )
     }
@@ -495,6 +503,7 @@ data class NotificationDto(
                 userId = ensureValidUuid(domain.recipientUserId),
                 title = domain.title,
                 body = domain.message,
+                linkType = domain.type.name,
                 linkId = domain.referenceId,
                 eventKey = domain.eventKey,
                 isRead = domain.isRead,

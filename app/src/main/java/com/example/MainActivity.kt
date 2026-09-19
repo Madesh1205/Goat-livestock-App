@@ -1,10 +1,17 @@
 package com.example
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -16,11 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.core.firebase.FirebaseConfig
 import com.example.core.supabase.SupabaseConfig
 import com.example.model.AvailabilityStatus
 import com.example.model.UserRole
@@ -49,6 +58,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleIncomingNotificationIntent(intent)
         val app = application as AmmalFarmApplication
         val themeManager = app.container.themeManager
 
@@ -63,9 +73,41 @@ class MainActivity : ComponentActivity() {
                 val currentRoute = navBackStackEntry?.destination?.route
                 val context = LocalContext.current
 
-                // Sync AuthViewModel user with MarketplaceViewModel
+                val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    if (isGranted) {
+                        Log.d("MainActivity", "Notification permission granted")
+                    } else {
+                        Log.w("MainActivity", "Notification permission denied")
+                    }
+                }
+
+                // Sync AuthViewModel user with MarketplaceViewModel & handle FCM token registration + permission prompt
                 LaunchedEffect(authUiState.currentUser) {
-                    marketplaceViewModel.setUser(authUiState.currentUser)
+                    val user = authUiState.currentUser
+                    marketplaceViewModel.setUser(user)
+                    if (user != null) {
+                        val token = FirebaseConfig.deviceToken
+                        if (!token.isNullOrBlank()) {
+                            FirebaseConfig.registerTokenForUser(user.id, token)
+                        }
+
+                        // Request notification permission once on Android 13+ (Tiramisu)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            val prefs = context.getSharedPreferences("ammal_app_prefs", Context.MODE_PRIVATE)
+                            val hasPrompted = prefs.getBoolean("has_prompted_notif_perm", false)
+                            val hasPermission = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.POST_NOTIFICATIONS
+                            ) == PackageManager.PERMISSION_GRANTED
+
+                            if (!hasPermission && !hasPrompted) {
+                                prefs.edit().putBoolean("has_prompted_notif_perm", true).apply()
+                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    }
                 }
 
                 // Handle system / auth messages
@@ -91,6 +133,111 @@ class MainActivity : ComponentActivity() {
                         Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
                         marketplaceViewModel.clearMessages()
                     }
+                }
+
+                // Deep Link Navigation Handler
+                val pendingDeepLink by marketplaceViewModel.pendingDeepLink.collectAsStateWithLifecycle()
+
+                LaunchedEffect(pendingDeepLink, authUiState.isAuthenticated, authUiState.isLoading, uiState.goats, uiState.farms) {
+                    val payload = pendingDeepLink ?: return@LaunchedEffect
+
+                    // Wait for auth initialization to complete during cold-start
+                    if (authUiState.isLoading) return@LaunchedEffect
+
+                    val currentUser = authUiState.currentUser
+                    val activeUserId = currentUser?.id
+
+                    // Security: User Recipient Isolation
+                    if (!payload.recipientUserId.isNullOrBlank() && activeUserId != null && payload.recipientUserId != activeUserId) {
+                        Toast.makeText(context, "Access Denied: Notification is meant for a different account.", Toast.LENGTH_SHORT).show()
+                        marketplaceViewModel.clearPendingDeepLink()
+                        return@LaunchedEffect
+                    }
+
+                    // Auth requirement
+                    if (!authUiState.isAuthenticated && !payload.recipientUserId.isNullOrBlank()) {
+                        navController.navigate(Screen.Login.route)
+                        return@LaunchedEffect
+                    }
+
+                    val targetRoute = payload.route?.takeIf { it.isNotBlank() }
+                        ?: payload.notificationType?.let { com.example.util.DeepLinkUtils.resolveDeepLinkRoute(it, payload.referenceId) }
+                        ?: Screen.Marketplace.route
+
+                    val authoritativeRole = currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
+
+                    when (targetRoute) {
+                        Screen.GoatDetail.route, "goat_detail" -> {
+                            val refId = payload.referenceId
+                            if (!refId.isNullOrBlank()) {
+                                val goat = marketplaceViewModel.selectGoatById(refId)
+                                if (goat != null) {
+                                    navController.navigate(Screen.GoatDetail.route)
+                                } else {
+                                    Toast.makeText(context, "This goat listing is no longer available or was removed.", Toast.LENGTH_SHORT).show()
+                                    navController.navigate(Screen.Marketplace.route)
+                                }
+                            } else if (uiState.selectedGoat != null) {
+                                navController.navigate(Screen.GoatDetail.route)
+                            } else {
+                                navController.navigate(Screen.Marketplace.route)
+                            }
+                        }
+
+                        Screen.FarmDetail.route, "farm_detail" -> {
+                            val refId = payload.referenceId
+                            if (!refId.isNullOrBlank()) {
+                                val farm = marketplaceViewModel.selectFarmById(refId)
+                                if (farm != null && farm.verificationStatus == com.example.model.VerificationStatus.APPROVED) {
+                                    navController.navigate(Screen.FarmDetail.route)
+                                } else {
+                                    Toast.makeText(context, "This farm profile is no longer available.", Toast.LENGTH_SHORT).show()
+                                    navController.navigate(Screen.Marketplace.route)
+                                }
+                            } else if (uiState.selectedFarm != null) {
+                                navController.navigate(Screen.FarmDetail.route)
+                            } else {
+                                navController.navigate(Screen.Marketplace.route)
+                            }
+                        }
+
+                        Screen.MyBookings.route, "my_bookings" -> {
+                            navController.navigate(Screen.MyBookings.route)
+                        }
+
+                        Screen.FarmDashboard.route, "farm_dashboard" -> {
+                            if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
+                                navController.navigate(Screen.FarmDashboard.route)
+                            } else {
+                                Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
+                                navController.navigate(Screen.Marketplace.route)
+                            }
+                        }
+
+                        Screen.SuperAdminDashboard.route, "super_admin_dashboard" -> {
+                            if (authoritativeRole == UserRole.SUPER_ADMIN) {
+                                navController.navigate(Screen.SuperAdminDashboard.route)
+                            } else {
+                                Toast.makeText(context, "Access Denied: Super Admin authorization required.", Toast.LENGTH_SHORT).show()
+                                val safeRoute = if (authoritativeRole == UserRole.FARM_ADMIN) Screen.FarmDashboard.route else Screen.Marketplace.route
+                                navController.navigate(safeRoute)
+                            }
+                        }
+
+                        Screen.Notifications.route, "notifications" -> {
+                            navController.navigate(Screen.Notifications.route)
+                        }
+
+                        else -> {
+                            try {
+                                navController.navigate(targetRoute)
+                            } catch (_: Exception) {
+                                navController.navigate(Screen.Marketplace.route)
+                            }
+                        }
+                    }
+
+                    marketplaceViewModel.clearPendingDeepLink()
                 }
 
                 val currentRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
@@ -839,42 +986,24 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.clearAllNotifications()
                                 },
                                 onNavigateToRoute = { route ->
-                                    val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
-                                    when (route) {
-                                        "my_bookings" -> navController.navigate(Screen.MyBookings.route)
-                                        "farm_dashboard" -> {
-                                            if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
-                                                navController.navigate(Screen.FarmDashboard.route)
-                                            } else {
-                                                Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
-                                                navController.navigate(Screen.Marketplace.route)
-                                            }
-                                        }
-                                        "super_admin_dashboard" -> {
-                                            if (authoritativeRole == UserRole.SUPER_ADMIN) {
-                                                navController.navigate(Screen.SuperAdminDashboard.route)
-                                            } else {
-                                                Toast.makeText(context, "Access Denied: Super Admin authorization required.", Toast.LENGTH_SHORT).show()
-                                                val safeRoute = if (authoritativeRole == UserRole.FARM_ADMIN) Screen.FarmDashboard.route else Screen.Marketplace.route
-                                                navController.navigate(safeRoute)
-                                            }
-                                        }
-                                        "marketplace" -> navController.navigate(Screen.Marketplace.route)
-                                        "goat_detail" -> {
-                                            if (uiState.selectedGoat != null) {
-                                                navController.navigate(Screen.GoatDetail.route)
-                                            } else {
-                                                navController.navigate(Screen.Marketplace.route)
-                                            }
-                                        }
-                                        else -> {
-                                            try {
-                                                navController.navigate(route)
-                                            } catch (_: Exception) {
-                                                navController.navigate(Screen.Marketplace.route)
-                                            }
-                                        }
+                                    try {
+                                        navController.navigate(route)
+                                    } catch (_: Exception) {
+                                        navController.navigate(Screen.Marketplace.route)
                                     }
+                                },
+                                onNotificationClick = { notification ->
+                                    val route = notification.deepLinkRoute
+                                        ?: com.example.util.DeepLinkUtils.resolveDeepLinkRoute(notification.type, notification.referenceId)
+                                    val payload = com.example.util.NotificationDeepLinkPayload(
+                                        notificationId = notification.id,
+                                        route = route,
+                                        referenceId = notification.referenceId,
+                                        notificationType = notification.type,
+                                        recipientUserId = notification.recipientUserId,
+                                        intentKey = "inapp_${notification.id}_${System.currentTimeMillis()}"
+                                    )
+                                    marketplaceViewModel.queueNotificationDeepLink(payload)
                                 }
                             )
                         }
@@ -897,6 +1026,50 @@ class MainActivity : ComponentActivity() {
                 }
             }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingNotificationIntent(intent)
+    }
+
+    private fun handleIncomingNotificationIntent(intent: android.content.Intent?) {
+        if (intent == null) return
+
+        val notifId = intent.getStringExtra(com.example.core.notification.NotificationHelper.EXTRA_NOTIFICATION_ID)
+        val route = intent.getStringExtra(com.example.core.notification.NotificationHelper.EXTRA_DEEP_LINK_ROUTE)
+        val refId = intent.getStringExtra(com.example.core.notification.NotificationHelper.EXTRA_REFERENCE_ID)
+        val typeStr = intent.getStringExtra(com.example.core.notification.NotificationHelper.EXTRA_NOTIFICATION_TYPE)
+        val recipientId = intent.getStringExtra(com.example.core.notification.NotificationHelper.EXTRA_RECIPIENT_USER_ID)
+        val timestamp = intent.getLongExtra(com.example.core.notification.NotificationHelper.EXTRA_INTENT_TIMESTAMP, 0L)
+
+        val type = typeStr?.let {
+            try { com.example.model.NotificationType.valueOf(it) } catch (_: Exception) { null }
+        }
+
+        if (!notifId.isNullOrBlank() || !route.isNullOrBlank() || type != null || !refId.isNullOrBlank()) {
+            val key = notifId?.takeIf { it.isNotBlank() }
+                ?: "intent_${timestamp}_${route}_${refId}_${typeStr}"
+
+            val payload = com.example.util.NotificationDeepLinkPayload(
+                notificationId = notifId,
+                route = route,
+                referenceId = refId,
+                notificationType = type,
+                recipientUserId = recipientId,
+                intentKey = key
+            )
+
+            marketplaceViewModel.queueNotificationDeepLink(payload)
+
+            intent.removeExtra(com.example.core.notification.NotificationHelper.EXTRA_NOTIFICATION_ID)
+            intent.removeExtra(com.example.core.notification.NotificationHelper.EXTRA_DEEP_LINK_ROUTE)
+            intent.removeExtra(com.example.core.notification.NotificationHelper.EXTRA_REFERENCE_ID)
+            intent.removeExtra(com.example.core.notification.NotificationHelper.EXTRA_NOTIFICATION_TYPE)
+            intent.removeExtra(com.example.core.notification.NotificationHelper.EXTRA_RECIPIENT_USER_ID)
+            intent.removeExtra(com.example.core.notification.NotificationHelper.EXTRA_INTENT_TIMESTAMP)
         }
     }
 }

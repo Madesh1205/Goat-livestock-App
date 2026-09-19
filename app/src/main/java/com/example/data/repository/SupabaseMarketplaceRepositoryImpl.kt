@@ -10,10 +10,24 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.github.jan.supabase.realtime.RealtimeChannel
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.realtime
+import io.github.jan.supabase.realtime.decodeRecord
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import io.github.jan.supabase.postgrest.rpc
@@ -267,12 +281,25 @@ class SupabaseMarketplaceRepositoryImpl(
     // ==========================================
     // 9. Notifications
     // ==========================================
-    override fun getNotificationsForUser(userId: String): Flow<List<AppNotification>> = flow {
+    override fun getNotificationsForUser(userId: String): Flow<List<AppNotification>> = callbackFlow {
         if (!SupabaseConfig.isConfigured) {
-            emit(emptyList())
-            return@flow
+            trySend(emptyList())
+            close()
+            return@callbackFlow
         }
-        val validUserId = ensureValidUuid(userId)
+
+        val validUserId = try {
+            ensureValidUuid(userId)
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice: invalid user ID for notifications: ${e.message}")
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val notificationMap = ConcurrentHashMap<String, AppNotification>()
+
+        // 1. Initial snapshot from database
         try {
             val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS]
                 .select {
@@ -280,12 +307,81 @@ class SupabaseMarketplaceRepositoryImpl(
                         eq("user_id", validUserId)
                     }
                 }.decodeList<NotificationDto>()
-            val remote = dtos.map { it.toDomain() }
-            emit(remote)
+            dtos.forEach { dto ->
+                val notif = dto.toDomain()
+                notificationMap[notif.id] = notif
+            }
+            trySend(notificationMap.values.sortedByDescending { it.timestamp })
         } catch (e: Exception) {
             if (e is CancellationException) throw e
-            Log.w(TAG, "Notice: user notifications query notice: ${e.message}")
-            emit(emptyList())
+            Log.w(TAG, "Notice: initial notifications query notice: ${e.message}")
+            trySend(emptyList())
+        }
+
+        // 2. Realtime listener for live INSERT/UPDATE/DELETE events
+        var channel: RealtimeChannel? = null
+        var realtimeJob: Job? = null
+        try {
+            val channelName = "realtime_notifications_$validUserId"
+            channel = SupabaseModule.client.realtime.channel(channelName)
+            val changeFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                table = SupabaseConfig.TABLE_NOTIFICATIONS
+                filter("user_id", FilterOperator.EQ, validUserId)
+            }
+
+            realtimeJob = launch {
+                changeFlow.collect { action ->
+                    try {
+                        when (action) {
+                            is PostgresAction.Insert -> {
+                                val dto = action.decodeRecord<NotificationDto>()
+                                val newNotif = dto.toDomain()
+                                // Deduplicate by database ID
+                                if (!notificationMap.containsKey(newNotif.id)) {
+                                    notificationMap[newNotif.id] = newNotif
+                                    trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                                }
+                            }
+                            is PostgresAction.Update -> {
+                                val dto = action.decodeRecord<NotificationDto>()
+                                val updatedNotif = dto.toDomain()
+                                notificationMap[updatedNotif.id] = updatedNotif
+                                trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                            }
+                            is PostgresAction.Delete -> {
+                                val deletedId = action.oldRecord["id"]?.jsonPrimitive?.content
+                                if (deletedId != null && notificationMap.containsKey(deletedId)) {
+                                    notificationMap.remove(deletedId)
+                                    trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                                }
+                            }
+                            else -> {}
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        Log.w(TAG, "Notice: realtime notification processing notice: ${e.message}")
+                    }
+                }
+            }
+
+            channel.subscribe()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(TAG, "Notice: failed to subscribe to realtime notifications: ${e.message}")
+        }
+
+        awaitClose {
+            realtimeJob?.cancel()
+            channel?.let { ch ->
+                launch(NonCancellable) {
+                    try {
+                        ch.unsubscribe()
+                        SupabaseModule.client.realtime.removeChannel(ch)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Notice: error removing realtime notification channel: ${e.message}")
+                    }
+                }
+            }
         }
     }.flowOn(Dispatchers.IO)
 
@@ -319,6 +415,24 @@ class SupabaseMarketplaceRepositoryImpl(
             )
             val dto = NotificationDto.fromDomain(cleanNotification)
             SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].insert(dto)
+
+            // Trigger server-side push notification dispatch securely
+            try {
+                SupabaseModule.client.postgrest.rpc(
+                    "send_push_notification",
+                    buildJsonObject {
+                        put("p_notification_id", cleanNotification.id)
+                        put("p_recipient_user_id", cleanNotification.recipientUserId)
+                        put("p_title", cleanNotification.title)
+                        put("p_message", cleanNotification.message)
+                        put("p_type", cleanNotification.type.name)
+                        put("p_reference_id", cleanNotification.referenceId ?: "")
+                    }
+                )
+            } catch (e: Exception) {
+                Log.d(TAG, "Notice: push notification RPC or DB trigger notice: ${e.message}")
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to send notification: ${e.message}", e)

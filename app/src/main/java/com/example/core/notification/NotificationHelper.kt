@@ -26,6 +26,10 @@ object NotificationHelper {
 
     const val EXTRA_DEEP_LINK_ROUTE = "extra_deep_link_route"
     const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
+    const val EXTRA_NOTIFICATION_TYPE = "extra_notification_type"
+    const val EXTRA_REFERENCE_ID = "extra_reference_id"
+    const val EXTRA_RECIPIENT_USER_ID = "extra_recipient_user_id"
+    const val EXTRA_INTENT_TIMESTAMP = "extra_intent_timestamp"
 
     private val notificationCounter = AtomicInteger(1000)
 
@@ -90,6 +94,10 @@ object NotificationHelper {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_DEEP_LINK_ROUTE, notification.deepLinkRoute)
             putExtra(EXTRA_NOTIFICATION_ID, notification.id)
+            putExtra(EXTRA_NOTIFICATION_TYPE, notification.type.name)
+            putExtra(EXTRA_REFERENCE_ID, notification.referenceId)
+            putExtra(EXTRA_RECIPIENT_USER_ID, notification.recipientUserId)
+            putExtra(EXTRA_INTENT_TIMESTAMP, System.currentTimeMillis())
         }
 
         val pendingIntent = PendingIntent.getActivity(

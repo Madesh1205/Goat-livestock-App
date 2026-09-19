@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.example.core.firebase.FirebaseConfig
 import com.example.core.supabase.SupabaseConfig
 import com.example.core.supabase.SupabaseModule
 import com.example.core.util.FarmLocalCache
@@ -62,6 +63,7 @@ interface AuthRepository {
 class AuthRepositoryImpl(
     private val context: Context? = null
 ) : AuthRepository {
+    private val TAG = "AuthRepository"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val prefs: SharedPreferences? by lazy {
@@ -1241,6 +1243,14 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
+        val userToLogOut = _currentUser.value
+        if (userToLogOut != null) {
+            try {
+                FirebaseConfig.unregisterTokenForUser(userToLogOut.id)
+            } catch (e: Exception) {
+                Log.w(TAG, "Notice unregistering FCM token on logout: ${e.message}")
+            }
+        }
         try {
             SupabaseModule.auth.signOut()
         } catch (_: Exception) {}

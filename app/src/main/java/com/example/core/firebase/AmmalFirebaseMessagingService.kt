@@ -1,7 +1,6 @@
 package com.example.core.firebase
 
 import android.util.Log
-import com.example.AmmalFarmApplication
 import com.example.core.notification.NotificationHelper
 import com.example.model.AppNotification
 import com.example.model.NotificationType
@@ -21,21 +20,25 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         Log.d(TAG, "New Firebase Messaging Token registered: $token")
-        // Store or synchronize token with backend/Supabase profiles
         FirebaseConfig.deviceToken = token
+        val userId = FirebaseConfig.activeUserId
+        if (!userId.isNullOrBlank()) {
+            serviceScope.launch {
+                FirebaseConfig.registerTokenForUser(userId, token)
+            }
+        }
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
-        Log.d(TAG, "From: ${remoteMessage.from}")
+        Log.d(TAG, "FCM message received from: ${remoteMessage.from}")
 
         // 1. Extract data payload or notification payload
         val data = remoteMessage.data
-        val title = data["title"] ?: remoteMessage.notification?.title ?: "Ammal Farm Notification"
+        val title = data["title"] ?: remoteMessage.notification?.title ?: "Adu Santhai Notification"
         val message = data["message"] ?: data["body"] ?: remoteMessage.notification?.body ?: ""
         val typeStr = data["type"] ?: "SYSTEM_ALERT"
         val roleStr = data["target_role"] ?: "CUSTOMER"
-        val route = data["deep_link_route"]
         val referenceId = data["reference_id"]
         val recipientUserId = data["recipient_user_id"] ?: ""
 
@@ -45,15 +48,27 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
             NotificationType.SYSTEM_ALERT
         }
 
+        val route = data["deep_link_route"]?.takeIf { it.isNotBlank() }
+            ?: com.example.util.DeepLinkUtils.resolveDeepLinkRoute(type, referenceId)
+
         val targetRole = try {
             UserRole.valueOf(roleStr.uppercase())
         } catch (_: Exception) {
             UserRole.CUSTOMER
         }
 
+        // 2. Recipient isolation check
+        val activeUserId = FirebaseConfig.activeUserId
+        if (recipientUserId.isNotBlank() && !activeUserId.isNullOrBlank() && activeUserId != recipientUserId) {
+            Log.w(TAG, "Suppressing FCM notification meant for $recipientUserId (active user is $activeUserId)")
+            return
+        }
+
+        val notificationId = data["id"] ?: "fcm-${UUID.randomUUID().toString().take(8)}"
+
         val appNotification = AppNotification(
-            id = "fcm-${UUID.randomUUID().toString().take(8)}",
-            recipientUserId = recipientUserId,
+            id = notificationId,
+            recipientUserId = recipientUserId.ifBlank { activeUserId ?: "" },
             targetRole = targetRole,
             title = title,
             message = message,
@@ -64,23 +79,11 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
             deepLinkRoute = route
         )
 
-        // 2. Show native system notification tray banner
+        // 3. Show native system notification tray banner (works in background, closed app, and foreground)
         NotificationHelper.showSystemNotification(applicationContext, appNotification)
 
-        // 3. Persist into local In-App Notification Center / Supabase repository so user can view history
-        try {
-            val app = applicationContext as? AmmalFarmApplication
-            app?.container?.marketplaceRepository?.let { repo ->
-                serviceScope.launch {
-                    try {
-                        repo.sendNotification(appNotification)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to persist FCM notification into repo", e)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error recording notification to repository", e)
-        }
+        // Note: Stage 8A Supabase Realtime subscription handles in-app state flow and deduplication.
+        // We do NOT write to repo or database here to avoid duplicate entries or duplicate UI items.
     }
 }
+
