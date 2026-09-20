@@ -40,7 +40,6 @@ class MarketplaceSearchTest {
     private val approvedBoerSultan = Goat(
         id = "goat-approved-1",
         name = "Sultan",
-        tagNumber = "AF-001",
         breed = "Boer",
         gender = GoatGender.MALE,
         ageMonths = 24,
@@ -58,7 +57,6 @@ class MarketplaceSearchTest {
     private val approvedTellicherryRaja = Goat(
         id = "goat-approved-2",
         name = "Raja",
-        tagNumber = "AF-002",
         breed = "Tellicherry",
         gender = GoatGender.MALE,
         ageMonths = 18,
@@ -76,7 +74,6 @@ class MarketplaceSearchTest {
     private val approvedBarbariDaisy = Goat(
         id = "goat-approved-3",
         name = "Daisy",
-        tagNumber = "AF-003",
         breed = "Barbari",
         gender = GoatGender.FEMALE,
         ageMonths = 14,
@@ -94,7 +91,6 @@ class MarketplaceSearchTest {
     private val unapprovedBoerPending = Goat(
         id = "goat-unapproved-1",
         name = "Pending Sultan Junior",
-        tagNumber = "AF-004",
         breed = "Boer",
         gender = GoatGender.MALE,
         ageMonths = 6,
@@ -112,7 +108,6 @@ class MarketplaceSearchTest {
     private val rejectedGoat = Goat(
         id = "goat-rejected-1",
         name = "Rejected Boer",
-        tagNumber = "AF-005",
         breed = "Boer",
         gender = GoatGender.MALE,
         ageMonths = 12,
@@ -244,7 +239,10 @@ class MarketplaceSearchTest {
         override fun getFarmBookings(farmId: String): Flow<List<Booking>> = flowOf(emptyList())
         override fun getAllBookings(): Flow<List<Booking>> = flowOf(emptyList())
         override suspend fun createBooking(goatId: String, notes: String): Result<Booking> = Result.failure(NotImplementedError())
-        override suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus): Result<Unit> = Result.success(Unit)
+        override suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus, reason: String?): Result<Unit> = Result.success(Unit)
+        override suspend fun confirmBooking(bookingId: String): Result<Unit> = Result.success(Unit)
+        override suspend fun cancelBooking(bookingId: String, reason: String): Result<Unit> = Result.success(Unit)
+        override suspend fun completeBooking(bookingId: String): Result<Unit> = Result.success(Unit)
 
         override fun getAllFarms(): Flow<List<Farm>> = flowOf(farmList)
         override fun getFarmById(farmId: String): Flow<Farm?> = flowOf(null)

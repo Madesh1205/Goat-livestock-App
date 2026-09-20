@@ -81,7 +81,43 @@ fun SuperAdminScreen(
     var selectedTab by remember { mutableIntStateOf(0) }
     val stats = uiState.platformStats
 
-    val pendingGoatsCount = uiState.allAdminGoats.count { it.approvalStatus == ApprovalStatus.PENDING_APPROVAL }
+    val allPlatformGoats = remember(uiState.allAdminGoats, uiState.goats) {
+        (uiState.allAdminGoats + uiState.goats).distinctBy { it.id }
+    }
+
+    val resolvedAllBookings = remember(uiState.allBookings, allPlatformGoats, uiState.farms) {
+        val baseList = uiState.allBookings
+        val existingBookingGoatIds = baseList.mapNotNull { it.goatId.takeIf { id -> id.isNotBlank() } }.toSet()
+        val missingReservedGoats = allPlatformGoats.filter { goat ->
+            (goat.availabilityStatus == AvailabilityStatus.RESERVED || goat.availabilityStatus == AvailabilityStatus.BOOKING_PENDING) &&
+            !existingBookingGoatIds.contains(goat.id)
+        }
+        val syntheticBookings = missingReservedGoats.map { goat ->
+            val farm = uiState.farms.find { it.id == goat.farmId }
+            val effectiveFarmName = goat.farmName.ifBlank { farm?.name ?: "Ammal Farm" }
+            Booking(
+                id = "res-" + goat.id,
+                goatId = goat.id,
+                goatCode = goat.goatCode,
+                farmId = goat.farmId,
+                customerId = "",
+                customerName = "Customer Reservation / Hold",
+                customerPhone = "Contact Farm Admin",
+                goatName = goat.name,
+                goatBreed = goat.breed,
+                goatPhoto = goat.photos.firstOrNull() ?: "",
+                farmName = effectiveFarmName,
+                amount = goat.finalPrice,
+                status = goat.availabilityStatus,
+                bookingDate = goat.createdAt,
+                reservationExpiryDate = goat.createdAt + (24 * 3600 * 1000L),
+                notes = "Active reservation hold on ${goat.name}"
+            )
+        }
+        (baseList + syntheticBookings).distinctBy { it.id }
+    }
+
+    val pendingGoatsCount = allPlatformGoats.count { it.approvalStatus == ApprovalStatus.PENDING_APPROVAL }
     val pendingFarmsCount = uiState.farms.count { it.verificationStatus == VerificationStatus.PENDING }
     val pendingReportsCount = uiState.allReports.count { it.status == ReportStatus.PENDING || it.status == ReportStatus.UNDER_INVESTIGATION }
 
@@ -242,7 +278,7 @@ fun SuperAdminScreen(
                     onClick = { selectedTab = 2 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Goats (${uiState.allAdminGoats.size})")
+                            Text("Goats (${allPlatformGoats.size})")
                             if (pendingGoatsCount > 0) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Badge(containerColor = MaterialTheme.colorScheme.error) {
@@ -256,7 +292,7 @@ fun SuperAdminScreen(
                 Tab(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    text = { Text("Bookings (${uiState.allBookings.size})") },
+                    text = { Text("Bookings (${resolvedAllBookings.size})") },
                     icon = { Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 )
                 Tab(
@@ -293,6 +329,8 @@ fun SuperAdminScreen(
                 when (selectedTab) {
                     0 -> SuperAdminOverviewTab(
                         uiState = uiState,
+                        allBookings = resolvedAllBookings,
+                        allGoats = allPlatformGoats,
                         onNavigateToTab = { selectedTab = it },
                         onNavigateToAmmalFarm = onNavigateToAmmalFarm
                     )
@@ -307,7 +345,7 @@ fun SuperAdminScreen(
                         onNavigateToAmmalFarm = onNavigateToAmmalFarm
                     )
                     2 -> SuperAdminGoatsTab(
-                        goats = uiState.allAdminGoats,
+                        goats = allPlatformGoats,
                         onApproveGoat = onApproveGoat,
                         onRejectGoat = onRejectGoat,
                         onSuspendGoat = onSuspendGoat,
@@ -318,12 +356,12 @@ fun SuperAdminScreen(
                         onEditGoat = { goatToEdit = it }
                     )
                     3 -> SuperAdminBookingsTab(
-                        bookings = uiState.allBookings,
+                        bookings = resolvedAllBookings,
                         onUpdateBookingStatus = onUpdateBookingStatus
                     )
                     4 -> SuperAdminCustomersTab(
                         customers = uiState.allCustomers,
-                        bookings = uiState.allBookings,
+                        bookings = resolvedAllBookings,
                         onUpdateUserSuspension = onUpdateUserSuspension
                     )
                     5 -> SuperAdminReportsTab(
@@ -333,7 +371,7 @@ fun SuperAdminScreen(
                     )
                     6 -> SuperAdminListingFeesTab(
                         payments = uiState.listingPayments,
-                        goats = uiState.allAdminGoats,
+                        goats = allPlatformGoats,
                         stats = uiState.platformStats
                     )
                 }
@@ -425,18 +463,24 @@ fun SuperAdminScreen(
 @Composable
 private fun SuperAdminOverviewTab(
     uiState: MarketplaceUiState,
+    allBookings: List<Booking> = uiState.allBookings,
+    allGoats: List<Goat> = uiState.allAdminGoats,
     onNavigateToTab: (Int) -> Unit,
     onNavigateToAmmalFarm: () -> Unit = {}
 ) {
     val stats = uiState.platformStats
+    val activeBookingsCount = allBookings.count {
+        it.status == AvailabilityStatus.RESERVED || it.status == AvailabilityStatus.BOOKING_PENDING || it.status == AvailabilityStatus.CONFIRMED
+    }
     val ammalFarm = uiState.farms.find { it.isAmmalOwnFarm }
-    val ammalGoats = uiState.allAdminGoats.filter {
+    val ammalGoats = allGoats.filter {
         (ammalFarm != null && it.farmId == ammalFarm.id) ||
         (ammalFarm != null && it.farmName.equals(ammalFarm.name, ignoreCase = true)) ||
         it.listingFeeAmount == 0.0
     }
-    val ammalBookings = uiState.allBookings.filter {
-        ammalFarm != null && it.farmId == ammalFarm.id
+    val ammalBookings = allBookings.filter {
+        (ammalFarm != null && it.farmId == ammalFarm.id) ||
+        ammalGoats.any { g -> g.id == it.goatId }
     }
 
     LazyColumn(
@@ -596,7 +640,7 @@ private fun SuperAdminOverviewTab(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     KpiStatCard(
                         title = "Total Goats",
-                        value = "${stats.totalGoats}",
+                        value = "${maxOf(stats.totalGoats, allGoats.size)}",
                         subtitle = "${stats.pendingListings} Pending approval",
                         icon = Icons.Default.Pets,
                         color = if (stats.pendingListings > 0) Color(0xFFE65100) else Color(0xFF5E35B1),
@@ -605,8 +649,8 @@ private fun SuperAdminOverviewTab(
                     )
                     KpiStatCard(
                         title = "Bookings",
-                        value = "${stats.totalBookings}",
-                        subtitle = "${stats.activeBookings} Active Holds",
+                        value = "${maxOf(stats.totalBookings, allBookings.size)}",
+                        subtitle = "${maxOf(stats.activeBookings, activeBookingsCount)} Active Holds",
                         icon = Icons.Default.ReceiptLong,
                         color = Color(0xFF00897B),
                         modifier = Modifier.weight(1f),
@@ -1066,7 +1110,7 @@ private fun SuperAdminGoatsTab(
             val matchesQuery = searchQuery.isBlank() ||
                     goat.name.contains(searchQuery, ignoreCase = true) ||
                     goat.breed.contains(searchQuery, ignoreCase = true) ||
-                    goat.tagNumber.contains(searchQuery, ignoreCase = true) ||
+                    goat.goatCode.contains(searchQuery, ignoreCase = true) ||
                     goat.farmName.contains(searchQuery, ignoreCase = true)
             val matchesFilter = selectedFilter == null || goat.approvalStatus == selectedFilter
             matchesQuery && matchesFilter
@@ -1082,7 +1126,7 @@ private fun SuperAdminGoatsTab(
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search by goat name, breed, tag, or farm...") },
+                    placeholder = { Text("Search by goat name, breed, code, or farm...") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
@@ -1210,8 +1254,8 @@ private fun GoatAdminCard(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(goat.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text("Tag: ${goat.tagNumber} • ${goat.breed}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Farm: ${goat.farmName}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        Text("Code: ${goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }} • ${goat.breed}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Farm: ${goat.farmName} (${goat.farmCode.ifBlank { "FARM-001" }})", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                         Text("${goat.gender.name} • ${goat.ageMonths} mos • ${goat.weightKg} kg", fontSize = 11.sp, color = Color.Gray)
                     }
                 }
@@ -3127,7 +3171,7 @@ private fun SuperAdminListingFeesTab(
             }
             val matchesSearch = searchQuery.isBlank() ||
                 payment.goatName.contains(searchQuery, ignoreCase = true) ||
-                payment.goatTag.contains(searchQuery, ignoreCase = true) ||
+                payment.goatCode.contains(searchQuery, ignoreCase = true) ||
                 (payment.receiptNumber?.contains(searchQuery, ignoreCase = true) == true) ||
                 (payment.orderId?.contains(searchQuery, ignoreCase = true) == true) ||
                 (payment.razorpayPaymentId?.contains(searchQuery, ignoreCase = true) == true)
@@ -3332,7 +3376,7 @@ private fun SuperAdminListingFeesTab(
                                     fontSize = 14.sp
                                 )
                                 Text(
-                                    text = "Goat: ${payment.goatName.ifBlank { "Tag ${payment.goatTag}" }} (Tag: ${payment.goatTag})",
+                                    text = "Goat: ${payment.goatName.ifBlank { payment.goatCode.ifBlank { "Listing" } }}",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

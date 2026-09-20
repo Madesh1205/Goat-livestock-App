@@ -39,7 +39,6 @@ class Stage11MHardeningTest {
         return Goat(
             id = id,
             name = name,
-            tagNumber = "TAG-" + id.take(6).uppercase(),
             breed = "Salem Black",
             gender = GoatGender.MALE,
             ageMonths = 18,
@@ -72,12 +71,12 @@ class Stage11MHardeningTest {
             ownerId: String,
             role: UserRole,
             isAmmalClaim: Boolean = false,
-            requestedLimit: Int = 10
+            requestedLimit: Int = 2
         ): Farm {
             // Stage 11M Trigger: enforce_farm_metadata_integrity on INSERT
             val isSuperAdmin = (role == UserRole.SUPER_ADMIN)
             val effectiveIsAmmal = isSuperAdmin && (farmId == SEED_AMMAL_FARM_UUID || isAmmalClaim)
-            val effectiveLimit = if (isSuperAdmin && effectiveIsAmmal) 9999 else if (isSuperAdmin) requestedLimit else 10
+            val effectiveLimit = if (isSuperAdmin && effectiveIsAmmal) 9999 else if (isSuperAdmin) requestedLimit else 2
             val effectiveStatus = if (isSuperAdmin) VerificationStatus.APPROVED else VerificationStatus.PENDING
 
             val farm = Farm(
@@ -367,11 +366,11 @@ class Stage11MHardeningTest {
     // 6. Partner Farm Quota = 10 by Default
     // -------------------------------------------------------------------------
     @Test
-    fun testPartnerFarmDefaultQuotaIsTen() {
+    fun testPartnerFarmDefaultQuotaIsTwo() {
         val engine = HardenedPlatformEngine()
         val farm = engine.registerFarm("farm-partner", "Salem Partner", "breeder-1", UserRole.FARM_ADMIN)
 
-        assertEquals(10, farm.goatListingLimit)
+        assertEquals(2, farm.goatListingLimit)
         assertFalse(farm.isAmmalOwnFarm)
         assertEquals(VerificationStatus.PENDING, farm.verificationStatus)
     }
@@ -384,18 +383,18 @@ class Stage11MHardeningTest {
         val engine = HardenedPlatformEngine()
         val farm = engine.registerFarm("farm-partner", "Salem Partner", "breeder-1", UserRole.FARM_ADMIN)
 
-        // Add 10 goats (reaches limit)
-        for (i in 1..10) {
+        // Add 2 goats (reaches default limit 2)
+        for (i in 1..2) {
             val goat = createTestGoat(id = "goat-$i", farmId = farm.id)
             val res = engine.addGoat(goat, UserRole.FARM_ADMIN, "breeder-1")
             assertTrue("Goat $i should be added within quota", res.isSuccess)
         }
 
-        // Try to add 11th goat
-        val goat11 = createTestGoat(id = "goat-11", farmId = farm.id)
-        val res11 = engine.addGoat(goat11, UserRole.FARM_ADMIN, "breeder-1")
-        assertTrue("11th goat insertion must be rejected by quota trigger", res11.isFailure)
-        assertTrue(res11.exceptionOrNull()?.message?.contains("Listing limit reached") == true)
+        // Try to add 3rd goat
+        val goat3 = createTestGoat(id = "goat-3", farmId = farm.id)
+        val res3 = engine.addGoat(goat3, UserRole.FARM_ADMIN, "breeder-1")
+        assertTrue("3rd goat insertion must be rejected by quota trigger when limit is 2", res3.isFailure)
+        assertTrue(res3.exceptionOrNull()?.message?.contains("Listing limit reached") == true)
     }
 
     // -------------------------------------------------------------------------
@@ -450,6 +449,6 @@ class Stage11MHardeningTest {
         )
 
         assertFalse("Fake farm must NOT receive Ammal Own Farm designation", fakeAmmalFarm.isAmmalOwnFarm)
-        assertEquals("Fake farm must receive default limit 10, not requested 9999", 10, fakeAmmalFarm.goatListingLimit)
+        assertEquals("Fake farm must receive default limit 2, not requested 9999", 2, fakeAmmalFarm.goatListingLimit)
     }
 }

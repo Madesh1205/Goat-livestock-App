@@ -44,7 +44,6 @@ class Stage4AmmalFarmFixesTest {
         return Goat(
             id = id,
             name = "Boer Stud Goat",
-            tagNumber = "TAG-001",
             breed = "Boer",
             gender = GoatGender.MALE,
             ageMonths = 18,
@@ -222,7 +221,7 @@ class Stage4AmmalFarmFixesTest {
     }
 
     @Test
-    fun `Rule 3 - Partner farm listing quota default is 10 and Ammal Farm is exempt`() {
+    fun `Rule 3 - Partner farm listing quota default is 2 and Ammal Farm is exempt`() {
         val partnerFarm = Farm(
             id = "farm-partner",
             name = "Coimbatore Goat Farm",
@@ -234,7 +233,7 @@ class Stage4AmmalFarmFixesTest {
             email = "info@coimbatoregoat.com",
             description = "High quality native breeds",
             isAmmalOwnFarm = false,
-            goatListingLimit = 10
+            goatListingLimit = 2
         )
         val ammalFarm = Farm(
             id = "farm-ammal",
@@ -250,8 +249,8 @@ class Stage4AmmalFarmFixesTest {
             goatListingLimit = 1000
         )
 
-        assertEquals("Default partner listing limit must be 10", 10, partnerFarm.goatListingLimit)
-        assertTrue("Partner farm is subject to quota", partnerFarm.goatListingLimit == 10)
+        assertEquals("Default partner listing limit must be 2", 2, partnerFarm.goatListingLimit)
+        assertTrue("Partner farm is subject to quota", partnerFarm.goatListingLimit == 2)
         assertEquals("Ammal Farm is exempt with hub limit 1000", 1000, ammalFarm.goatListingLimit)
         assertTrue("Ammal Farm is marked as own farm", ammalFarm.isAmmalOwnFarm)
     }

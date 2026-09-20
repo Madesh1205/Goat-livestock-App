@@ -207,7 +207,6 @@ class AddGoatFormValidationTest {
             val goat = Goat(
                 id = "g1",
                 name = "Sultan",
-                tagNumber = "AF-101",
                 breed = "Boer",
                 gender = GoatGender.MALE,
                 ageMonths = 12,
@@ -258,7 +257,6 @@ class AddGoatFormValidationTest {
             val goat = Goat(
                 id = "g100",
                 name = "Sultan Stud",
-                tagNumber = "AF-100",
                 breed = "Boer",
                 gender = GoatGender.MALE,
                 ageMonths = "14".toInt(),

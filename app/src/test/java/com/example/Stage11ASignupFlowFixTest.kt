@@ -115,7 +115,7 @@ class Stage11ASignupFlowFixTest {
         assertEquals("Kongu Pedigree Farm", dbFarm.name)
         assertEquals("Verification status must be PENDING", "PENDING", dbFarm.status)
         assertFalse("Farm must NOT be Ammal Own Farm", dbFarm.isAmmalOwnFarm)
-        assertEquals("Partner listing limit must default to 10", 10, dbFarm.goatListingLimit)
+        assertEquals("Partner listing limit must default to 2", 2, dbFarm.goatListingLimit)
 
         // Check AuthState
         val state = simulatedSystem.authState.value
@@ -358,7 +358,7 @@ class Stage11ASignupFlowFixTest {
                 contactEmail = cleanEmail,
                 status = "PENDING",
                 isAmmalOwnFarm = false,
-                goatListingLimit = 10
+                goatListingLimit = 2
             )
             farmsTable[farmId] = dbFarm
 

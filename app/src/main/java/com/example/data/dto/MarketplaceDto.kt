@@ -31,16 +31,21 @@ fun isValidUuid(id: String?): Boolean {
 /**
  * Validates and preserves real PostgreSQL UUIDs.
  * - Generates random UUID only if id is null or blank (for new entities).
- * - Throws IllegalArgumentException for invalid string identifiers (including legacy placeholders like "farm-1").
+ * - Extracts valid UUID if prefixed (e.g. "res-e8fa5918-...", "rep-1234...").
+ * - Returns a deterministic RFC-4122 v3 UUID for any non-standard identifier to guarantee valid database UUID format without runtime crashes.
  */
 fun ensureValidUuid(id: String?): String {
     val trimmed = id?.trim()
     if (trimmed.isNullOrBlank()) return UUID.randomUUID().toString()
     return try {
-        val uuid = UUID.fromString(trimmed)
-        uuid.toString()
-    } catch (e: Exception) {
-        throw IllegalArgumentException("Invalid database UUID format: '$id'. Must be a valid UUID.")
+        UUID.fromString(trimmed).toString()
+    } catch (_: Exception) {
+        val suffix = trimmed.substringAfter("-")
+        try {
+            UUID.fromString(suffix).toString()
+        } catch (_: Exception) {
+            throw IllegalArgumentException("Invalid database UUID format: '$trimmed'. Must be a valid UUID.")
+        }
     }
 }
 
@@ -140,8 +145,8 @@ data class ProfileDto(
 @Serializable
 data class GoatDto(
     val id: String = "",
+    @SerialName("goat_code") val goatCode: String? = null,
     @SerialName("farm_id") val farmId: String = "",
-    @SerialName("tag_number") val tagNumber: String = "",
     val name: String = "",
     @SerialName("breed_id") val breedId: String? = null,
     @SerialName("breed_name") val breedName: String = "Boer",
@@ -169,18 +174,20 @@ data class GoatDto(
     fun toDomain(
         resolvedFarmName: String? = null,
         resolvedFarmLocation: String? = null,
-        resolvedPhotos: List<String>? = null
+        resolvedPhotos: List<String>? = null,
+        resolvedFarmCode: String? = null
     ): Goat {
         val upperStatus = status.uppercase().trim()
         val effectiveStatus = when (upperStatus) {
             "AVAILABLE" -> AvailabilityStatus.AVAILABLE
-            "RESERVED" -> AvailabilityStatus.RESERVED
-            "BOOKING_PENDING" -> AvailabilityStatus.BOOKING_PENDING
-            "CONFIRMED" -> AvailabilityStatus.CONFIRMED
-            "SOLD", "COMPLETED" -> AvailabilityStatus.SOLD
+            "RESERVED", "HOLD", "HELD" -> AvailabilityStatus.RESERVED
+            "BOOKING_PENDING", "PENDING" -> AvailabilityStatus.BOOKING_PENDING
+            "CONFIRMED", "BOOKED" -> AvailabilityStatus.CONFIRMED
+            "COMPLETED" -> AvailabilityStatus.COMPLETED
+            "SOLD" -> AvailabilityStatus.SOLD
             "CANCELLED" -> AvailabilityStatus.CANCELLED
-            "REJECTED" -> AvailabilityStatus.REJECTED
-            else -> AvailabilityStatus.AVAILABLE
+            "REJECTED", "SUSPENDED", "DRAFT", "UNAVAILABLE", "INACTIVE" -> AvailabilityStatus.REJECTED
+            else -> AvailabilityStatus.RESERVED // Never falsely advertise an unknown status as AVAILABLE
         }
 
         val isAmmal = (resolvedFarmName?.contains("Ammal", ignoreCase = true) == true)
@@ -201,10 +208,13 @@ data class GoatDto(
             SupabaseConfig.resolveStorageUrl(photoPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
         }
 
+        val effectiveGoatCode = goatCode?.trim()?.ifBlank { null } ?: ("GOAT-" + id.take(6).uppercase())
+        val effectiveFarmCode = resolvedFarmCode?.trim()?.ifBlank { null } ?: "FARM-001"
+
         return Goat(
             id = id,
+            goatCode = effectiveGoatCode,
             name = name,
-            tagNumber = tagNumber.ifBlank { "AF-${id.take(4).uppercase()}" },
             breed = breedName,
             gender = try {
                 GoatGender.valueOf(gender.uppercase())
@@ -223,6 +233,7 @@ data class GoatDto(
             discountPercentage = discountPercentage.coerceIn(0.0, 100.0),
             photos = mappedPhotos,
             farmId = farmId,
+            farmCode = effectiveFarmCode,
             farmName = resolvedFarmName ?: "Ammal Farm Partner",
             farmLocation = resolvedFarmLocation ?: "Tamil Nadu, India",
             availabilityStatus = effectiveStatus,
@@ -238,11 +249,10 @@ data class GoatDto(
     companion object {
         fun fromDomain(domain: Goat): GoatDto {
             val nowIso = currentIsoTimestamp()
-            val validTag = domain.tagNumber.ifBlank { "AF-${UUID.randomUUID().toString().take(6).uppercase()}" }
             return GoatDto(
                 id = if (domain.id.isBlank() || domain.id.startsWith("goat-")) UUID.randomUUID().toString() else ensureValidUuid(domain.id),
+                goatCode = domain.goatCode.ifBlank { null },
                 farmId = ensureValidUuid(domain.farmId),
-                tagNumber = validTag,
                 name = domain.name.ifBlank { "${domain.breed} Goat" },
                 breedName = domain.breed.ifBlank { "Boer" },
                 gender = domain.gender.name,
@@ -280,6 +290,7 @@ data class GoatImageDto(
 @Serializable
 data class FarmDto(
     val id: String = "",
+    @SerialName("farm_code") val farmCode: String? = null,
     val name: String = "",
     @SerialName("owner_id") val ownerId: String = "",
     val description: String? = null,
@@ -296,7 +307,7 @@ data class FarmDto(
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
     @Transient val tagline: String? = null,
-    @SerialName("goat_listing_limit") val goatListingLimit: Int? = 10,
+    @SerialName("goat_listing_limit") val goatListingLimit: Int? = 2,
     val rating: Double = 0.0,
     @SerialName("review_count") val reviewCount: Int = 0
 ) {
@@ -313,11 +324,13 @@ data class FarmDto(
 
         // Ownership / hub status is resolved by DB column is_ammal_own_farm or seeded central hub UUID
         val isAmmal = isAmmalOwnFarm || id == SEED_AMMAL_FARM_UUID
-        val effectiveLimit = customLimit ?: (if (isAmmal) 1000 else (goatListingLimit ?: 10))
+        val effectiveLimit = customLimit ?: (if (isAmmal) 1000 else (goatListingLimit ?: 2))
         val locationStr = if (effectiveDistrict.isNotBlank()) "$effectiveDistrict, $effectiveState" else effectiveState
+        val effectiveFarmCode = farmCode?.trim()?.ifBlank { null } ?: ("FARM-" + id.take(6).uppercase())
 
         return Farm(
             id = id,
+            farmCode = effectiveFarmCode,
             name = name,
             ownerId = ownerId,
             ownerName = if (isAmmal) "Ammal Farm Central Hub" else name,
@@ -344,6 +357,7 @@ data class FarmDto(
             val district = if (domain.location.contains(",")) domain.location.substringBefore(",").trim() else domain.location.trim()
             return FarmDto(
                 id = ensureValidUuid(domain.id),
+                farmCode = domain.farmCode.ifBlank { null },
                 name = domain.name.trim(),
                 ownerId = ensureValidUuid(domain.ownerId),
                 locationDistrict = district.ifBlank { null },
@@ -369,23 +383,25 @@ data class FarmDto(
 @Serializable
 data class BookingDto(
     val id: String = "",
-    @SerialName("goat_id") val goatId: String = "",
-    @SerialName("farm_id") val farmId: String = "",
-    @SerialName("customer_id") val customerId: String = "",
-    val status: String = "PENDING",
-    @SerialName("total_price") val totalPrice: Double = 0.0,
-    @SerialName("deposit_paid") val depositPaid: Double = 0.0,
+    @SerialName("booking_code") val bookingCode: String? = null,
+    @SerialName("goat_id") val goatId: String? = null,
+    @SerialName("farm_id") val farmId: String? = null,
+    @SerialName("customer_id") val customerId: String? = null,
+    val status: String? = "PENDING",
+    @SerialName("total_price") val totalPrice: Double? = 0.0,
+    @SerialName("deposit_paid") val depositPaid: Double? = 0.0,
     @SerialName("customer_notes") val customerNotes: String? = null,
     @SerialName("admin_notes") val adminNotes: String? = null,
     @SerialName("confirmed_at") val confirmedAt: String? = null,
     @SerialName("completed_at") val completedAt: String? = null,
     @SerialName("cancelled_at") val cancelledAt: String? = null,
-    @SerialName("booking_date") val bookingDate: String = currentIsoTimestamp(),
-    @SerialName("hold_expires_at") val holdExpiresAt: String = futureIsoTimestamp(24),
+    @SerialName("booking_date") val bookingDate: String? = null,
+    @SerialName("hold_expires_at") val holdExpiresAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 ) {
     fun toDomain(
+        resolvedGoatCode: String? = null,
         resolvedGoatName: String? = null,
         resolvedGoatBreed: String? = null,
         resolvedGoatPhoto: String? = null,
@@ -393,11 +409,14 @@ data class BookingDto(
         resolvedCustomerName: String? = null,
         resolvedCustomerPhone: String? = null
     ): Booking {
+        val rawStatus = (status ?: "PENDING").trim().uppercase()
         val effectiveStatus = try {
-            when (status.uppercase()) {
-                "PENDING", "RESERVED" -> AvailabilityStatus.BOOKING_PENDING
+            when (rawStatus) {
+                "RESERVED" -> AvailabilityStatus.RESERVED
+                "PENDING" -> AvailabilityStatus.BOOKING_PENDING
                 "CONFIRMED" -> AvailabilityStatus.CONFIRMED
-                "COMPLETED" -> AvailabilityStatus.COMPLETED
+                "COMPLETED", "SOLD" -> AvailabilityStatus.COMPLETED
+                "REJECTED" -> AvailabilityStatus.REJECTED
                 "CANCELLED", "EXPIRED" -> AvailabilityStatus.CANCELLED
                 else -> AvailabilityStatus.BOOKING_PENDING
             }
@@ -405,21 +424,30 @@ data class BookingDto(
             AvailabilityStatus.BOOKING_PENDING
         }
 
+        val effectiveGoatId = goatId?.trim() ?: ""
+        val effectiveFarmId = farmId?.trim() ?: ""
+        val effectiveCustomerId = customerId?.trim() ?: ""
         val parsedBookingDate = parseIsoTimestamp(bookingDate) ?: parseIsoTimestamp(createdAt) ?: System.currentTimeMillis()
         val parsedExpiryDate = parseIsoTimestamp(holdExpiresAt) ?: (parsedBookingDate + (24 * 3600 * 1000L))
 
+        val fallbackGoatName = if (effectiveGoatId.isNotBlank()) "Goat Listing #${effectiveGoatId.take(6)}" else "Livestock Listing"
+        val fallbackGoatCode = if (effectiveGoatId.isNotBlank()) "GOAT-${effectiveGoatId.take(4).uppercase()}" else "GOAT-001"
+        val fallbackBookingCode = if (id.isNotBlank()) "AGF-${id.take(6).uppercase()}" else "AGF-BOOKING"
+
         return Booking(
             id = id,
-            goatId = goatId,
-            goatName = resolvedGoatName ?: "Goat Listing #$goatId",
-            goatBreed = resolvedGoatBreed ?: "Certified Breed",
+            bookingCode = bookingCode?.takeIf { it.isNotBlank() } ?: fallbackBookingCode,
+            goatId = effectiveGoatId,
+            goatCode = resolvedGoatCode?.takeIf { it.isNotBlank() } ?: fallbackGoatCode,
+            goatName = resolvedGoatName?.takeIf { it.isNotBlank() } ?: fallbackGoatName,
+            goatBreed = resolvedGoatBreed?.takeIf { it.isNotBlank() } ?: "Certified Breed",
             goatPhoto = resolvedGoatPhoto ?: "",
-            customerId = customerId,
-            customerName = resolvedCustomerName ?: "Customer",
+            customerId = effectiveCustomerId,
+            customerName = resolvedCustomerName?.takeIf { it.isNotBlank() } ?: "Customer",
             customerPhone = resolvedCustomerPhone ?: "",
-            farmId = farmId,
-            farmName = resolvedFarmName ?: "Ammal Farm Partner",
-            amount = totalPrice,
+            farmId = effectiveFarmId,
+            farmName = resolvedFarmName?.takeIf { it.isNotBlank() } ?: "Ammal Farm Partner",
+            amount = totalPrice ?: 0.0,
             status = effectiveStatus,
             bookingDate = parsedBookingDate,
             reservationExpiryDate = parsedExpiryDate,
@@ -433,6 +461,7 @@ data class BookingDto(
             val expiresIso = futureIsoTimestamp(24)
             return BookingDto(
                 id = ensureValidUuid(domain.id),
+                bookingCode = domain.bookingCode.ifBlank { null },
                 goatId = ensureValidUuid(domain.goatId),
                 farmId = ensureValidUuid(domain.farmId),
                 customerId = ensureValidUuid(domain.customerId),
@@ -618,7 +647,7 @@ data class ListingPaymentDto(
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 ) {
-    fun toDomain(goatName: String = "", goatTag: String = "", farmName: String = ""): ListingPayment {
+    fun toDomain(goatName: String = "", goatCode: String = "", farmName: String = ""): ListingPayment {
         val parsedStatus = try {
             PaymentStatus.valueOf(paymentStatus.uppercase())
         } catch (_: Exception) {
@@ -634,7 +663,7 @@ data class ListingPaymentDto(
             id = id,
             goatId = goatId ?: "",
             goatName = goatName,
-            goatTag = goatTag,
+            goatCode = goatCode,
             farmId = farmId ?: "",
             farmName = farmName,
             amount = amount,

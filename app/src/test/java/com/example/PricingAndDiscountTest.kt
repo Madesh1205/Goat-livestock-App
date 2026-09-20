@@ -245,7 +245,6 @@ class PricingAndDiscountTest {
 
         assertFalse("Serialized JSON must not contain listing_fee_paid", json.contains("listing_fee_paid"))
         assertFalse("Serialized JSON must not contain listing_fee_amount", json.contains("listing_fee_amount"))
-        assertTrue("Serialized JSON must contain tag_number", json.contains("tag_number"))
         assertTrue("Serialized JSON must contain farm_id", json.contains("farm_id"))
         assertTrue("Serialized JSON must contain is_approved_by_admin", json.contains("is_approved_by_admin"))
     }
@@ -257,7 +256,7 @@ class PricingAndDiscountTest {
             {
                 "id": "8cc677e1-b501-4816-9e49-2b92c6b6c20c",
                 "farm_id": "00000000-0000-0000-0000-000000000001",
-                "tag_number": "AF-7618",
+                "goat_code": "GOAT-001",
                 "name": "Kodi",
                 "breed_id": null,
                 "breed_name": "Kodi aadu",
@@ -277,7 +276,7 @@ class PricingAndDiscountTest {
 
         val parsed = Json.decodeFromString(GoatDto.serializer(), rawDbJson)
         assertEquals("8cc677e1-b501-4816-9e49-2b92c6b6c20c", parsed.id)
-        assertEquals("AF-7618", parsed.tagNumber)
+        assertEquals("GOAT-001", parsed.goatCode)
         assertTrue(parsed.isApprovedByAdmin)
 
         val domain = parsed.toDomain(resolvedFarmName = "Ammal Farm")
@@ -290,7 +289,6 @@ class PricingAndDiscountTest {
         return Goat(
             id = UUID.randomUUID().toString(),
             name = "Champion Boer",
-            tagNumber = "AF-101",
             breed = "Boer",
             gender = GoatGender.MALE,
             ageMonths = 14,

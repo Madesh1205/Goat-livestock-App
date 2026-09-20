@@ -109,7 +109,6 @@ class Stage12CImageDefaultsAndStorageIntegrationTest {
         val newGoat = Goat(
             id = goatId,
             name = "Champion Stud",
-            tagNumber = "AF-TAG-101",
             farmId = farmId,
             farmName = "Salem Boer Farm",
             farmLocation = "Salem",
@@ -156,7 +155,6 @@ class Stage12CImageDefaultsAndStorageIntegrationTest {
         val goat = Goat(
             id = goatId,
             name = "Existing Champion",
-            tagNumber = "AF-TAG-202",
             farmId = farmId,
             farmName = "Salem Farm",
             farmLocation = "Salem",

@@ -78,7 +78,7 @@ class Stage5BMumbaiSecurityHardeningTest {
             name = "Coimbatore Breeders",
             status = VerificationStatus.PENDING,
             isAmmalOwnFarm = false,
-            quota = 10
+            quota = 2
         )
 
         val updatedFarm = dbEngine.evaluateFarmUpdate(
@@ -92,7 +92,7 @@ class Stage5BMumbaiSecurityHardeningTest {
 
         assertEquals("Status must remain PENDING", VerificationStatus.PENDING, updatedFarm.verificationStatus)
         assertFalse("is_ammal_own_farm must remain false", updatedFarm.isAmmalOwnFarm)
-        assertEquals("Quota must remain 10", 10, updatedFarm.goatListingLimit)
+        assertEquals("Quota must remain 2", 2, updatedFarm.goatListingLimit)
         assertEquals("owner_id cannot be tampered with", farmAdmin.id, updatedFarm.ownerId)
     }
 

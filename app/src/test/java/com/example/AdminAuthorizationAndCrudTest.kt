@@ -217,7 +217,6 @@ class AdminAuthorizationAndCrudTest {
         return Goat(
             id = UUID.randomUUID().toString(),
             name = name,
-            tagNumber = "TAG-" + UUID.randomUUID().toString().take(6).uppercase(),
             breed = "Salem Black",
             gender = GoatGender.MALE,
             ageMonths = 24,

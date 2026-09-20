@@ -28,7 +28,10 @@ interface MarketplaceRepository {
     fun getFarmBookings(farmId: String): Flow<List<Booking>>
     fun getAllBookings(): Flow<List<Booking>>
     suspend fun createBooking(goatId: String, notes: String): Result<Booking>
-    suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus): Result<Unit>
+    suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus, reason: String? = null): Result<Unit>
+    suspend fun confirmBooking(bookingId: String): Result<Unit>
+    suspend fun cancelBooking(bookingId: String, reason: String = "Cancelled by user"): Result<Unit>
+    suspend fun completeBooking(bookingId: String): Result<Unit>
 
     // Farms
     fun getAllFarms(): Flow<List<Farm>>

@@ -84,7 +84,8 @@ class FcmNotificationsTest {
 
     @Test
     fun testNoSecretsExposedInClient() {
-        val buildFileContent = java.io.File("app/build.gradle.kts").readText()
+        val buildFile = java.io.File("app/build.gradle.kts").takeIf { it.exists() } ?: java.io.File("build.gradle.kts")
+        val buildFileContent = if (buildFile.exists()) buildFile.readText() else ""
         assertFalse("APK/Build file must not contain service_account private key", buildFileContent.contains("private_key"))
         assertFalse("APK/Build file must not contain service_role key", buildFileContent.contains("service_role"))
     }

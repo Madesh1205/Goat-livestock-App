@@ -47,7 +47,6 @@ class Stage3ASupabaseCronExpirationTest {
         return Goat(
             id = id,
             name = name,
-            tagNumber = "TAG-" + id.take(6).uppercase(),
             breed = "Salem Black",
             gender = GoatGender.MALE,
             ageMonths = 20,

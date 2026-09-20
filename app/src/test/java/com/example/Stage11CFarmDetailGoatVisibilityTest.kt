@@ -51,7 +51,6 @@ class Stage11CFarmDetailGoatVisibilityTest {
         return Goat(
             id = id,
             name = name,
-            tagNumber = "TAG-${id.take(4)}",
             breed = breed,
             gender = GoatGender.MALE,
             ageMonths = 12,

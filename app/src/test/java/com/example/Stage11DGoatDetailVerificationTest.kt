@@ -53,7 +53,6 @@ class Stage11DGoatDetailVerificationTest {
         return Goat(
             id = id,
             name = name,
-            tagNumber = "TAG-7788",
             breed = breed,
             gender = GoatGender.MALE,
             ageMonths = 14,

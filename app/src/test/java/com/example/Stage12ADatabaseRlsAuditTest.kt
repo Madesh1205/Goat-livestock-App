@@ -113,7 +113,7 @@ class Stage12ADatabaseRlsAuditTest {
             name = "Salem Partner",
             status = VerificationStatus.PENDING,
             isAmmalOwnFarm = false,
-            quota = 10
+            quota = 2
         )
 
         // Attempt privilege escalation: approve own farm & become Ammal Own Farm & raise limit to 1000
@@ -128,7 +128,7 @@ class Stage12ADatabaseRlsAuditTest {
 
         assertEquals("Status must remain PENDING", VerificationStatus.PENDING, updatedFarm.verificationStatus)
         assertFalse("isAmmalOwnFarm must remain false", updatedFarm.isAmmalOwnFarm)
-        assertEquals("Quota must remain 10", 10, updatedFarm.goatListingLimit)
+        assertEquals("Quota must remain 2", 2, updatedFarm.goatListingLimit)
         assertEquals("Owner ID cannot be changed", farmAdmin.id, updatedFarm.ownerId)
     }
 

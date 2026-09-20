@@ -60,7 +60,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val goat = Goat(
             id = "33333333-3333-3333-3333-333333333301",
             name = "Test Goat B",
-            tagNumber = "AF-1001",
             breed = "Boer",
             gender = GoatGender.MALE,
             ageMonths = 12,
@@ -111,7 +110,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val goat = Goat(
             id = "33333333-3333-3333-3333-333333333302",
             name = "Final Goat",
-            tagNumber = "AF-2001",
             breed = "Tellicherry",
             gender = GoatGender.FEMALE,
             ageMonths = 10,
@@ -163,7 +161,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val updatedGoat = Goat(
             id = "goat-edit-retain",
             name = "Updated Existing Goat",
-            tagNumber = existingGoat.tagNumber,
             breed = existingGoat.breedName,
             gender = GoatGender.MALE,
             ageMonths = 14,
@@ -208,7 +205,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val updatedGoat = Goat(
             id = "goat-replace",
             name = "Goat With Replaced Image",
-            tagNumber = "AF-3001",
             breed = "Sirohi",
             gender = GoatGender.MALE,
             ageMonths = 18,
@@ -248,7 +244,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val goat = Goat(
             id = "goat-fail-upload",
             name = "Failed Upload Goat",
-            tagNumber = "AF-4001",
             breed = "Jamunapari",
             gender = GoatGender.MALE,
             ageMonths = 8,
@@ -285,7 +280,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val goat = Goat(
             id = "goat-fail-db",
             name = "Failed DB Goat",
-            tagNumber = "AF-5001",
             breed = "Beetal",
             gender = GoatGender.FEMALE,
             ageMonths = 11,
@@ -324,7 +318,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val goat = Goat(
             id = "33333333-3333-3333-3333-333333333307",
             name = "Clean Storage Goat",
-            tagNumber = "AF-6001",
             breed = "Kanni Aadu",
             gender = GoatGender.MALE,
             ageMonths = 15,
@@ -370,7 +363,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val updateRequest = Goat(
             id = "goat-farm-1",
             name = "Hacked Goat",
-            tagNumber = "AF-7001",
             breed = "Boer",
             gender = GoatGender.MALE,
             ageMonths = 12,
@@ -415,7 +407,6 @@ class Stage6CSecureDeferredImageUploadTest {
         val updateRequest = Goat(
             id = "goat-farm-2",
             name = "Super Admin Managed Goat",
-            tagNumber = "AF-8001",
             breed = "Beetal",
             gender = GoatGender.MALE,
             ageMonths = 20,

@@ -52,7 +52,9 @@ class MockRlsDatabaseEngine {
         val customerId: String?,
         val totalPrice: Double,
         val status: String,
-        val customerNotes: String? = null
+        val customerNotes: String? = null,
+        val bookingDate: Long = System.currentTimeMillis(),
+        val holdExpiresAt: Long = System.currentTimeMillis() + 24 * 60 * 60 * 1000L
     )
 
     data class ReportDto(
@@ -129,6 +131,57 @@ class MockRlsDatabaseEngine {
         val id = UUID.randomUUID().toString()
         bookings[id] = BookingDto(id, goatId, farmId, customerId, price, "PENDING")
         return id
+    }
+
+    fun getBookingById(bookingId: String): BookingDto? = bookings[bookingId]
+
+    fun updateGoatStatus(goatId: String, status: String) {
+        val goat = goats[goatId] ?: return
+        goats[goatId] = goat.copy(status = status)
+    }
+
+    fun updateGoatPrice(goatId: String, price: Double) {
+        val goat = goats[goatId] ?: return
+        goats[goatId] = goat.copy(price = price)
+    }
+
+    fun createBookingHold(caller: UserProfile, goatId: String, notes: String? = null): Result<String> {
+        val goat = goats[goatId] ?: return Result.failure(IllegalArgumentException("Goat not found"))
+        if (!goat.isApprovedByAdmin) {
+            return Result.failure(IllegalStateException("Goat is not approved for marketplace listing"))
+        }
+        if (goat.status != "AVAILABLE") {
+            return Result.failure(IllegalStateException("Goat is not available for booking (status: ${goat.status})"))
+        }
+        val farm = farms[goat.farmId] ?: return Result.failure(IllegalArgumentException("Farm not found"))
+
+        // Farm admin cannot book own farm goats
+        if (caller.role == UserRole.FARM_ADMIN && (farm.ownerId == caller.id || farm.id == caller.farmId)) {
+            return Result.failure(SecurityException("You cannot book goats listed by your own farm."))
+        }
+
+        // Active duplicate check
+        val hasActive = bookings.values.any { it.goatId == goatId && it.status in listOf("PENDING", "RESERVED") }
+        if (hasActive) {
+            return Result.failure(IllegalStateException("This goat has already been reserved by another customer."))
+        }
+
+        val bookingId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val booking = BookingDto(
+            id = bookingId,
+            goatId = goatId,
+            farmId = goat.farmId,
+            customerId = caller.id,
+            totalPrice = goat.price,
+            status = "RESERVED",
+            customerNotes = notes,
+            bookingDate = now,
+            holdExpiresAt = now + 24 * 60 * 60 * 1000L
+        )
+        bookings[bookingId] = booking
+        goats[goatId] = goat.copy(status = "RESERVED")
+        return Result.success(bookingId)
     }
 
     fun createReport(id: String, reporterId: String, reason: String, status: String) {
@@ -629,7 +682,6 @@ class MockRlsDatabaseEngine {
 
         val updatedDto = existingGoat.copy(
             name = goat.name,
-            tagNumber = goat.tagNumber,
             breedName = goat.breed,
             gender = goat.gender.name,
             ageMonths = goat.ageMonths,

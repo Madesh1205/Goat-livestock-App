@@ -329,7 +329,8 @@ object ImageUploadHelper {
 
     /**
      * Uploads compressed image bytes for a goat to Supabase Storage with local fallback.
-     * Path structure: goat-images/farm/{farmId}/goat/{goatId}/{imageFileName} or goat-images/goat/{goatId}/{imageFileName}
+     * Standardized path structure: goat-images/{farmCode}/{goatCode}/{01.ext}
+     * Example: FARM-001/GOAT-001/01.jpg
      */
     suspend fun uploadGoatImage(
         context: Context,
@@ -337,25 +338,30 @@ object ImageUploadHelper {
         goatId: String,
         customFileName: String? = null,
         photoIndex: Int? = null,
-        farmId: String? = null
+        farmId: String? = null,
+        farmCode: String? = null,
+        goatCode: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (bytes.isEmpty() || bytes.size > MAX_FILE_SIZE_BYTES) {
                 return@withContext Result.failure(IllegalArgumentException("Image payload is empty or exceeds size limit."))
             }
 
-            val sanitizedGoatId = goatId.replace(Regex("[^a-zA-Z0-9_-]"), "").ifBlank { "goat-${UUID.randomUUID().toString().take(6)}" }
-            val sanitizedFarmId = farmId?.replace(Regex("[^a-zA-Z0-9_-]"), "")?.ifBlank { null }
-            val fileName = generateProperFileName(
-                prefix = "goat_photo",
-                customName = customFileName,
-                index = photoIndex
-            )
+            val effectiveFarmCode = farmCode?.trim()?.ifBlank { null }
+                ?: (if (farmId != null && farmId.startsWith("FARM-")) farmId else "FARM-001")
+            val effectiveGoatCode = goatCode?.trim()?.ifBlank { null }
+                ?: (if (goatId.startsWith("GOAT-")) goatId else null)
 
-            val storagePath = if (sanitizedFarmId != null) {
-                "farm/$sanitizedFarmId/goat/$sanitizedGoatId/$fileName"
+            val ext = if (customFileName?.contains(".") == true) "." + customFileName.substringAfterLast(".") else ".jpg"
+            val posVal = if (photoIndex != null && photoIndex > 0) photoIndex else 1
+            val posStr = String.format(java.util.Locale.US, "%02d", posVal)
+            val fileName = "$posStr$ext"
+
+            val storagePath = if (effectiveGoatCode != null) {
+                "$effectiveFarmCode/$effectiveGoatCode/$fileName"
             } else {
-                "goat/$sanitizedGoatId/$fileName"
+                val cleanGoatId = goatId.ifBlank { UUID.randomUUID().toString() }
+                "goat/$cleanGoatId/$fileName"
             }
 
             // 1. Try Supabase Storage SDK upload with primary bucket
@@ -380,7 +386,7 @@ object ImageUploadHelper {
             }
 
             // Fallback to local storage if remote upload failed
-            val localUrl = saveImageLocally(context, bytes, "goat_$sanitizedGoatId", fileName)
+            val localUrl = saveImageLocally(context, bytes, "goat_$effectiveGoatCode", fileName)
             Log.w(TAG, "Fallback saved goat image locally: $localUrl")
             Result.success(localUrl)
         } catch (e: Exception) {

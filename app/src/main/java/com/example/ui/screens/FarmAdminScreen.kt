@@ -69,6 +69,7 @@ fun FarmAdminScreen(
     onSyncRole: () -> Unit = {},
     onNavigateToLogin: () -> Unit = {},
     onNavigateToRegisterFarm: () -> Unit = {},
+    onNavigateToBookings: () -> Unit = {},
     onNavigateBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -171,12 +172,48 @@ fun FarmAdminScreen(
             }
         }
     }
-    val myBookings = remember(uiState.allBookings, myFarmId, myFarm) {
-        if (myFarmId.isBlank()) {
-            emptyList()
+    val myGoatIds = remember(myGoats) { myGoats.map { it.id }.toSet() }
+
+    val myBookings = remember(uiState.farmBookings, uiState.allBookings, myFarmId, myFarm, myGoats, myGoatIds, isAmmalFarm) {
+        val baseList = (uiState.farmBookings + uiState.allBookings).distinctBy { it.id }
+        val matched = if (myFarmId.isNotBlank() || myGoatIds.isNotEmpty()) {
+            baseList.filter { b ->
+                (myFarmId.isNotBlank() && b.farmId == myFarmId) ||
+                (myFarm != null && b.farmId == myFarm.id) ||
+                (b.goatId.isNotBlank() && myGoatIds.contains(b.goatId)) ||
+                (isAmmalFarm && (b.farmId == SEED_AMMAL_FARM_UUID || b.farmName.contains("Ammal", ignoreCase = true)))
+            }
         } else {
-            uiState.allBookings.filter { it.farmId == myFarmId || (myFarm != null && it.farmId == myFarm.id) }
+            baseList
         }
+
+        // Synthesize fallback booking views for any reserved goats lacking explicit booking records
+        val existingBookingGoatIds = matched.mapNotNull { it.goatId.takeIf { id -> id.isNotBlank() } }.toSet()
+        val missingReservedGoats = myGoats.filter { goat ->
+            (goat.availabilityStatus == AvailabilityStatus.RESERVED || goat.availabilityStatus == AvailabilityStatus.BOOKING_PENDING) &&
+            !existingBookingGoatIds.contains(goat.id)
+        }
+        val syntheticBookings = missingReservedGoats.map { goat ->
+            Booking(
+                id = "res-" + goat.id,
+                goatId = goat.id,
+                goatCode = goat.goatCode,
+                farmId = goat.farmId.ifBlank { myFarmId },
+                customerId = "",
+                customerName = "Customer Reservation",
+                customerPhone = "Contact Farm Admin",
+                goatName = goat.name,
+                goatBreed = goat.breed,
+                goatPhoto = goat.photos.firstOrNull() ?: "",
+                farmName = goat.farmName.ifBlank { farmName ?: "Farm" },
+                amount = goat.finalPrice,
+                status = AvailabilityStatus.RESERVED,
+                bookingDate = goat.createdAt,
+                reservationExpiryDate = goat.createdAt + (24 * 3600 * 1000L),
+                notes = "Active reservation hold on ${goat.name}"
+            )
+        }
+        (matched + syntheticBookings).distinctBy { it.id }
     }
     val myNotifications = uiState.notifications.filter {
         it.targetRole == UserRole.FARM_ADMIN || (myFarmId.isNotBlank() && it.recipientUserId == myFarmId) || it.recipientUserId == uiState.currentUser?.id
@@ -189,7 +226,7 @@ fun FarmAdminScreen(
     val activeBookings = myBookings.count { it.status == AvailabilityStatus.BOOKING_PENDING || it.status == AvailabilityStatus.RESERVED }
 
     // Limit and Auto-Approval computations
-    val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else 10)
+    val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else 2)
     val isLimitReached = !isAmmalFarm && !isSuperAdmin && myGoats.size >= goatListingLimit
     var showLimitReachedAlert by remember { mutableStateOf(false) }
 
@@ -556,9 +593,9 @@ fun FarmAdminScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = if (isLimitReached) {
-                                            "Listing limit reached. Contact Super Admin to increase your listing limit."
+                                            "Your goat listing limit has been reached.\nContact +91 63808 98358 for approval to add more goats."
                                         } else {
-                                            "Current limit: $goatListingLimit goats • ${myGoats.size} goats listed • $remainingSlots slot${if (remainingSlots == 1) "" else "s"} remaining"
+                                            "Current limit: $goatListingLimit goats • Used: ${myGoats.size} • Remaining: $remainingSlots • Contact: +91 63808 98358"
                                         },
                                         fontSize = 11.sp,
                                         fontWeight = if (isLimitReached) FontWeight.SemiBold else FontWeight.Normal,
@@ -686,6 +723,37 @@ fun FarmAdminScreen(
                 1 -> {
                     // --- TAB 1: BOOKINGS MANAGEMENT ---
                     Column(modifier = Modifier.fillMaxSize()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Dedicated Bookings Portal", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                    Text("Search orders, view buyer details, and manage 24h holds", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = onNavigateToBookings,
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Open Page", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
                         // Filter row
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
@@ -983,13 +1051,13 @@ fun FarmAdminScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Listing limit reached. Contact Super Admin to increase your listing limit.",
+                        text = "Your goat listing limit has been reached.\nContact +91 63808 98358 for approval to add more goats.",
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Your farm currently has ${myGoats.size} / $goatListingLimit goats listed.\n\nShow contact options:\n• WhatsApp: +91 63808 98358\n• Call: +91 63808 98358\n\nPayment for increasing the limit is handled directly with us outside the app.",
+                        text = "Current limit: $goatListingLimit goats\nUsed slots: ${myGoats.size}\nRemaining slots: 0\n\nContact options:\n• WhatsApp: +91 63808 98358\n• Call: +91 63808 98358\n\nApproval and limit increases are managed manually outside the app.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
@@ -1085,7 +1153,7 @@ fun FarmAdminScreen(
             icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("Remove Goat Listing") },
             text = {
-                Text("Are you sure you want to remove '${goat.name}' (${goat.tagNumber}) from your farm catalogue? This action cannot be undone.")
+                Text("Are you sure you want to remove '${goat.name}' (${goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }}) from your farm catalogue? This action cannot be undone.")
             },
             confirmButton = {
                 Button(
@@ -1605,7 +1673,7 @@ private fun FarmGoatCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "Tag: ${goat.tagNumber}",
+                        "Code: ${goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1901,7 +1969,6 @@ private fun AddEditGoatDialog(
     val goatId = remember { existingGoat?.id ?: UUID.randomUUID().toString() }
 
     var name by remember { mutableStateOf(existingGoat?.name ?: "") }
-    var tagNumber by remember { mutableStateOf(existingGoat?.tagNumber ?: "AF-${UUID.randomUUID().toString().take(4).uppercase()}") }
     var breed by remember { mutableStateOf(existingGoat?.breed ?: "") }
     var gender by remember { mutableStateOf(existingGoat?.gender ?: GoatGender.MALE) }
     var age by remember { mutableStateOf(existingGoat?.ageMonths?.toString() ?: "") }
@@ -2523,7 +2590,6 @@ private fun AddEditGoatDialog(
 
                         val goat = existingGoat?.copy(
                             name = finalName,
-                            tagNumber = tagNumber.ifBlank { existingGoat.tagNumber },
                             breed = finalBreed,
                             gender = gender,
                             ageMonths = finalAgeVal,
@@ -2535,11 +2601,12 @@ private fun AddEditGoatDialog(
                             photos = photos,
                             farmId = existingGoat.farmId,
                             farmName = existingGoat.farmName,
-                            farmLocation = existingGoat.farmLocation
+                            farmLocation = existingGoat.farmLocation,
+                            farmCode = existingGoat.farmCode,
+                            goatCode = existingGoat.goatCode
                         ) ?: Goat(
                             id = goatId,
                             name = finalName,
-                            tagNumber = tagNumber,
                             breed = finalBreed,
                             gender = gender,
                             ageMonths = finalAgeVal,
@@ -2711,7 +2778,7 @@ private fun FarmListingPaymentsTab(
                         ) {
                             Column {
                                 Text(payment.receiptNumber ?: "RCPT-${payment.id.take(8).uppercase()}", fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                Text("Goat: ${payment.goatName.ifBlank { "Tag ${payment.goatTag}" }}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Goat: ${payment.goatName.ifBlank { payment.goatCode.ifBlank { "Listing" } }}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Surface(
                                 shape = RoundedCornerShape(4.dp),

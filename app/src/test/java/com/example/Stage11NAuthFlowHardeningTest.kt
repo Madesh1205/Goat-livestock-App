@@ -88,7 +88,7 @@ class Stage11NAuthFlowHardeningTest {
     }
 
     @Test
-    fun testFarmAdminSignup_CreatesPendingPartnerFarm_WithLimit10() = runBlocking {
+    fun testFarmAdminSignup_CreatesPendingPartnerFarm_WithLimit2() = runBlocking {
         val result = authEngine.registerFarmAdmin(
             name = "Suresh Partner",
             email = "suresh@partnerfarm.com",
@@ -107,7 +107,7 @@ class Stage11NAuthFlowHardeningTest {
         assertNotNull(farm)
         assertEquals(profile.id, farm!!.ownerId)
         assertEquals(VerificationStatus.PENDING, farm.verificationStatus)
-        assertEquals(10, farm.goatListingLimit)
+        assertEquals(2, farm.goatListingLimit)
         assertFalse("Partner farm cannot be Ammal Farm own farm", farm.isAmmalOwnFarm)
     }
 
@@ -336,7 +336,7 @@ class Stage11NAuthFlowHardeningTest {
                 description = farmDescription.trim(),
                 verificationStatus = VerificationStatus.PENDING,
                 isAmmalOwnFarm = false,
-                goatListingLimit = 10
+                goatListingLimit = 2
             )
             dbFarms[farmId] = partnerFarm
 

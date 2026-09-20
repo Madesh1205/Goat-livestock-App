@@ -126,6 +126,73 @@ class Stage6ASecureAccountDeletionTest {
     }
 
     @Test
+    fun testFarmAdminWithHistoricalBookingsCanDeleteAccountSafely() {
+        // Setup farm admin with active goat, sold goat, and historical completed/cancelled bookings
+        val activeGoatId = UUID.randomUUID().toString()
+        val soldGoatId = UUID.randomUUID().toString()
+        dbEngine.createGoat(activeGoatId, partnerFarm.id, "Active Breeder", 25000.0, true, "AVAILABLE")
+        dbEngine.createGoat(soldGoatId, partnerFarm.id, "Champion Sire", 40000.0, true, "SOLD")
+
+        // Create a completed booking (historical record)
+        val completedBookingId = dbEngine.createBooking(soldGoatId, partnerFarm.id, customer.id, 40000.0)
+        dbEngine.evaluateBookingUpdate(
+            callerId = superAdmin.id,
+            bookingId = completedBookingId,
+            attemptedPrice = 40000.0,
+            attemptedStatus = "COMPLETED"
+        )
+
+        // Create a cancelled booking (historical record)
+        val cancelledBookingId = dbEngine.createBooking(activeGoatId, partnerFarm.id, customer2.id, 25000.0)
+        dbEngine.evaluateBookingUpdate(
+            callerId = superAdmin.id,
+            bookingId = cancelledBookingId,
+            attemptedPrice = 25000.0,
+            attemptedStatus = "CANCELLED"
+        )
+
+        // Verify pre-deletion state
+        assertNotNull("Farm admin profile exists", dbEngine.getProfile(farmAdmin.id))
+        assertEquals(2, dbEngine.getAllBookings().filter { it.farmId == partnerFarm.id }.size)
+
+        // Execute FARM_ADMIN account deletion
+        val deletionSuccess = dbEngine.executeAccountDeletion(callerId = farmAdmin.id, targetUserId = farmAdmin.id)
+        assertTrue("Account deletion must succeed for FARM_ADMIN with transaction history", deletionSuccess)
+
+        // 1. Auth & profile cleanup
+        assertNull("Farm Admin profile must be removed", dbEngine.getProfile(farmAdmin.id))
+
+        // 2. Historical bookings MUST be preserved with full pricing and audit integrity
+        val completedBooking = dbEngine.getAllBookings().first { it.id == completedBookingId }
+        assertEquals("COMPLETED status must be preserved", "COMPLETED", completedBooking.status)
+        assertEquals("Historical price must remain intact", 40000.0, completedBooking.totalPrice, 0.001)
+        assertEquals("Farm ID foreign key must remain intact", partnerFarm.id, completedBooking.farmId)
+
+        val cancelledBooking = dbEngine.getAllBookings().first { it.id == cancelledBookingId }
+        assertEquals("CANCELLED status must be preserved", "CANCELLED", cancelledBooking.status)
+        assertEquals("Historical price must remain intact", 25000.0, cancelledBooking.totalPrice, 0.001)
+
+        // 3. Farm is suspended and personal metadata redacted
+        val farm = dbEngine.getFarm(partnerFarm.id)
+        assertNotNull("Farm record remains for historical transaction foreign key integrity", farm)
+        assertEquals(VerificationStatus.SUSPENDED, farm?.verificationStatus)
+        assertEquals("REDACTED", farm?.contactNumber)
+        assertEquals("", farm?.ownerId)
+
+        // 4. Goats state: active goats become INACTIVE, already SOLD goats remain SOLD
+        val activeGoat = dbEngine.getGoat(activeGoatId)
+        val soldGoat = dbEngine.getGoat(soldGoatId)
+        assertEquals("Active goat becomes INACTIVE", "INACTIVE", activeGoat?.status)
+        assertEquals("SOLD goat remains SOLD", "SOLD", soldGoat?.status)
+
+        // 5. Unrelated users/farms/goats unaffected
+        assertNotNull("Customer profile intact", dbEngine.getProfile(customer.id))
+        assertNotNull("Customer 2 profile intact", dbEngine.getProfile(customer2.id))
+        assertNotNull("Super admin intact", dbEngine.getProfile(superAdmin.id))
+        assertNotNull("Ammal farm intact", dbEngine.getFarm(ammalFarm.id))
+    }
+
+    @Test
     fun testUserCannotDeleteAnotherUserAccount() {
         // Customer 1 tries to delete Customer 2's account
         val deleted = dbEngine.executeAccountDeletion(callerId = customer.id, targetUserId = customer2.id)

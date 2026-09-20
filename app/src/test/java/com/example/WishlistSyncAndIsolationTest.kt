@@ -40,7 +40,6 @@ class WishlistSyncAndIsolationTest {
         return Goat(
             id = id,
             name = name,
-            tagNumber = "TAG-101",
             breed = "Salem Black",
             gender = GoatGender.MALE,
             ageMonths = 24,

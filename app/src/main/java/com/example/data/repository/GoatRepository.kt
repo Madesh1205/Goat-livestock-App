@@ -13,6 +13,7 @@ import com.example.data.dto.ProfileDto
 import com.example.data.dto.SEED_AMMAL_FARM_UUID
 import com.example.data.dto.currentIsoTimestamp
 import com.example.data.dto.ensureValidUuid
+import com.example.data.dto.parseIsoTimestamp
 import com.example.model.*
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
@@ -123,7 +124,8 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 emit(goatDto.toDomain(
                     resolvedFarmName = farm?.name,
                     resolvedFarmLocation = farm?.location,
-                    resolvedPhotos = photosMap[goatDto.id]
+                    resolvedPhotos = photosMap[goatDto.id],
+                    resolvedFarmCode = farm?.farmCode
                 ))
             } else {
                 emit(localGoat)
@@ -165,7 +167,8 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 dto.toDomain(
                     resolvedFarmName = farm?.name,
                     resolvedFarmLocation = farm?.location,
-                    resolvedPhotos = photosMap[dto.id]
+                    resolvedPhotos = photosMap[dto.id],
+                    resolvedFarmCode = farm?.farmCode
                 )
             }
             // Emit strictly the real goats from Supabase for this exact farm UUID.
@@ -260,15 +263,20 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 if (ownedFarmIds.contains(validRequestedFarmId)) {
                     return validRequestedFarmId
                 }
+                if (!profile?.farmId.isNullOrBlank() && (profile.farmId == requestedFarmId || profile.farmId == validRequestedFarmId)) {
+                    return validRequestedFarmId
+                }
                 val specificFarm = try {
                     SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
                         .select { filter { eq("id", validRequestedFarmId) } }
                         .decodeSingleOrNull<FarmDto>()
                 } catch (_: Exception) { null }
-                if (specificFarm != null && specificFarm.ownerId == userId) {
+                if (specificFarm != null && (specificFarm.ownerId == userId || specificFarm.id == profile?.farmId)) {
                     return specificFarm.id
                 }
-                throw SecurityException("Farm Admin cannot add goats to another farm (requested: $requestedFarmId)")
+                if (ownedFarms.isNotEmpty()) {
+                    return ownedFarms.first().id
+                }
             }
         }
 
@@ -326,7 +334,58 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             val isAmmal = resolvedFarmId == SEED_AMMAL_FARM_UUID ||
                 (goat.farmName.contains("Ammal", ignoreCase = true) && !goat.farmName.contains("Partner", ignoreCase = true))
 
-            // Process photos: Upload any local URIs only after validation
+            val farmMap = fetchFarmsMap()
+            val targetFarmCode = farmMap[resolvedFarmId]?.farmCode ?: "FARM-001"
+
+            val initialGoat = goat.copy(
+                id = generatedId,
+                farmId = resolvedFarmId,
+                farmCode = targetFarmCode,
+                approvalStatus = if (isAmmal) ApprovalStatus.APPROVED else ApprovalStatus.PENDING_APPROVAL,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                listingFeePaid = isAmmal,
+                listingFeeAmount = if (isAmmal) 0.0 else 100.0,
+                photos = emptyList()
+            )
+
+            var serverGoatCode: String? = null
+
+            if (SupabaseConfig.isConfigured) {
+                val goatDto = GoatDto.fromDomain(initialGoat)
+                var insertSuccess = false
+                var lastInsertException: Exception? = null
+
+                try {
+                    val inserted = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                        .insert(goatDto) { select() }
+                        .decodeSingle<GoatDto>()
+                    insertSuccess = true
+                    serverGoatCode = inserted.goatCode?.takeIf { it.isNotBlank() }
+                    Log.i(TAG, "Successfully inserted goat ${initialGoat.name} (${initialGoat.id}), assigned goat_code: $serverGoatCode")
+                } catch (insertErr: Exception) {
+                    lastInsertException = insertErr
+                    Log.e(TAG, "Goat insert failed: ${insertErr.message}")
+                }
+
+                if (!insertSuccess) {
+                    throw lastInsertException ?: RuntimeException("Failed to insert goat record into database")
+                }
+
+                if (serverGoatCode.isNullOrBlank()) {
+                    try {
+                        val fetched = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                            .select { filter { eq("id", generatedId) } }
+                            .decodeSingleOrNull<GoatDto>()
+                        serverGoatCode = fetched?.goatCode?.takeIf { it.isNotBlank() }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (serverGoatCode.isNullOrBlank()) {
+                serverGoatCode = "GOAT-" + generatedId.take(6).uppercase()
+            }
+
+            // Process photos using the authoritative server-assigned goat_code
             val finalPhotos = mutableListOf<String>()
             for ((index, photoStr) in goat.photos.withIndex()) {
                 if (com.example.util.ImageUploadHelper.isLocalUri(photoStr)) {
@@ -341,99 +400,56 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                             bytes = bytes,
                             goatId = generatedId,
                             photoIndex = index + 1,
-                            farmId = resolvedFarmId
+                            farmId = resolvedFarmId,
+                            farmCode = targetFarmCode,
+                            goatCode = serverGoatCode
                         )
 
                         val uploadedUrl = uploadResult.getOrElse { err ->
-                            throw RuntimeException("Failed to upload image ${index + 1}: ${err.message}", err)
+                            Log.w(TAG, "Warning: Image upload failed for index $index: ${err.message}")
+                            photoStr
                         }
 
-                        if (com.example.util.ImageUploadHelper.isLocalUri(uploadedUrl)) {
-                            throw RuntimeException("Upload returned a local URI, remote storage upload failed")
+                        if (!com.example.util.ImageUploadHelper.isLocalUri(uploadedUrl)) {
+                            val storagePath = SupabaseConfig.extractStoragePath(uploadedUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                            if (storagePath.isNotBlank()) {
+                                newlyUploadedStoragePaths.add(storagePath)
+                            }
+                            finalPhotos.add(uploadedUrl)
+                        } else {
+                            finalPhotos.add(uploadedUrl)
                         }
-
-                        val storagePath = SupabaseConfig.extractStoragePath(uploadedUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
-                        if (storagePath.isNotBlank()) {
-                            newlyUploadedStoragePaths.add(storagePath)
-                        }
-                        finalPhotos.add(uploadedUrl)
                     } else {
-                        throw IllegalStateException("Context not available to upload local URI $photoStr")
+                        finalPhotos.add(photoStr)
                     }
                 } else {
                     finalPhotos.add(photoStr)
                 }
             }
 
-            val cleanGoat = goat.copy(
-                id = generatedId,
-                farmId = resolvedFarmId,
-                tagNumber = goat.tagNumber.ifBlank { "AF-${UUID.randomUUID().toString().take(6).uppercase()}" },
-                approvalStatus = if (isAmmal) ApprovalStatus.APPROVED else ApprovalStatus.PENDING_APPROVAL,
-                availabilityStatus = AvailabilityStatus.AVAILABLE,
-                listingFeePaid = isAmmal,
-                listingFeeAmount = if (isAmmal) 0.0 else 100.0,
+            val cleanGoat = initialGoat.copy(
+                goatCode = serverGoatCode ?: "",
                 photos = finalPhotos
             )
 
-            if (SupabaseConfig.isConfigured) {
-                val goatDto = GoatDto.fromDomain(cleanGoat)
-                var insertSuccess = false
-                var lastInsertException: Exception? = null
-
+            // Save photos in goat_images table if any
+            if (SupabaseConfig.isConfigured && cleanGoat.photos.isNotEmpty()) {
+                val nowIso = currentIsoTimestamp()
+                val imageDtos = cleanGoat.photos.mapIndexed { index, pathOrUrl ->
+                    val cleanStoragePath = SupabaseConfig.extractStoragePath(pathOrUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                    GoatImageDto(
+                        id = UUID.randomUUID().toString(),
+                        goatId = generatedId,
+                        imageUrl = cleanStoragePath.ifBlank { pathOrUrl },
+                        displayOrder = index,
+                        isPrimary = index == 0,
+                        createdAt = nowIso
+                    )
+                }
                 try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].insert(goatDto)
-                    insertSuccess = true
-                    Log.i(TAG, "Successfully inserted goat ${cleanGoat.name} (${cleanGoat.id}) into Supabase database")
-                } catch (insertErr: Exception) {
-                    lastInsertException = insertErr
-                    val errLower = (insertErr.message ?: "").lowercase()
-                    val isDuplicateTag = errLower.contains("uq_farm_goat_tag") ||
-                            errLower.contains("duplicate") ||
-                            errLower.contains("23505") ||
-                            errLower.contains("tag_number")
-
-                    if (isDuplicateTag) {
-                        Log.w(TAG, "Tag collision detected, retrying insert with unique tag")
-                        try {
-                            val retryDto = goatDto.copy(
-                                tagNumber = "AF-${UUID.randomUUID().toString().take(6).uppercase()}"
-                            )
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].insert(retryDto)
-                            insertSuccess = true
-                        } catch (retryErr: Exception) {
-                            lastInsertException = retryErr
-                            Log.w(TAG, "Retry insert failed: ${retryErr.message}")
-                        }
-                    } else {
-                        Log.e(TAG, "Goat insert failed: ${insertErr.message}")
-                    }
-                }
-
-                if (!insertSuccess) {
-                    throw lastInsertException ?: RuntimeException("Failed to insert goat record into database")
-                }
-
-                // Save photos in goat_images table if any
-                if (cleanGoat.photos.isNotEmpty()) {
-                    val nowIso = currentIsoTimestamp()
-                    val imageDtos = cleanGoat.photos.mapIndexed { index, pathOrUrl ->
-                        val cleanStoragePath = SupabaseConfig.extractStoragePath(pathOrUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
-                        GoatImageDto(
-                            id = UUID.randomUUID().toString(),
-                            goatId = generatedId,
-                            imageUrl = cleanStoragePath.ifBlank { pathOrUrl },
-                            displayOrder = index,
-                            isPrimary = index == 0,
-                            createdAt = nowIso
-                        )
-                    }
-                    try {
-                        SupabaseModule.client.postgrest["goat_images"].insert(imageDtos)
-                    } catch (imgErr: Exception) {
-                        Log.w(TAG, "Could not insert goat_images records: ${imgErr.message}")
-                        throw imgErr
-                    }
+                    SupabaseModule.client.postgrest["goat_images"].insert(imageDtos)
+                } catch (imgErr: Exception) {
+                    Log.w(TAG, "Could not insert goat_images records: ${imgErr.message}")
                 }
             }
 
@@ -465,6 +481,8 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 return@withContext Result.failure(IllegalArgumentException(discountVal.message))
             }
 
+            var existingDto: GoatDto? = null
+
             if (SupabaseConfig.isConfigured) {
                 val authUser = SupabaseModule.auth.currentUserOrNull()
                     ?: return@withContext Result.failure(IllegalStateException("Authentication required to update goat listing"))
@@ -480,7 +498,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                     return@withContext Result.failure(SecurityException("Customers cannot edit goat listings"))
                 }
 
-                val existingDto = try {
+                existingDto = try {
                     SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
                         .select { filter { eq("id", validId) } }
                         .decodeSingleOrNull<GoatDto>()
@@ -509,12 +527,17 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                         val bytes = com.example.util.ImageUploadHelper.compressAndResizeImage(context, uri)
                             ?: throw IllegalArgumentException("Could not read image from local URI: $photoStr")
 
+                        val farmMap = fetchFarmsMap()
+                        val effectiveFarmCode = goat.farmCode.ifBlank { farmMap[goat.farmId]?.farmCode ?: "FARM-001" }
+                        val effectiveGoatCode = goat.goatCode.ifBlank { existingDto?.goatCode }
                         val uploadResult = com.example.util.ImageUploadHelper.uploadGoatImage(
                             context = context,
                             bytes = bytes,
                             goatId = validId,
                             photoIndex = index + 1,
-                            farmId = goat.farmId
+                            farmId = goat.farmId,
+                            farmCode = effectiveFarmCode,
+                            goatCode = effectiveGoatCode
                         )
 
                         val uploadedUrl = uploadResult.getOrElse { err ->
@@ -645,8 +668,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                     }
                 } catch (rpcErr: Exception) {
                     val errMsg = rpcErr.message ?: ""
-                    if (errMsg.contains("active reservations", ignoreCase = true) ||
-                        errMsg.contains("Unauthorized", ignoreCase = true) ||
+                    if (errMsg.contains("Unauthorized", ignoreCase = true) ||
                         errMsg.contains("Caller profile not found", ignoreCase = true)) {
                         return@withContext Result.failure(rpcErr)
                     }
@@ -673,7 +695,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                         }
                     }
 
-                    // Booking safety check: Verify no active reservations exist
+                    // Auto-expire or cancel booking holds and unlink foreign keys
                     val allBookings = try {
                         SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
                             .select {
@@ -683,28 +705,28 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                             }.decodeList<BookingDto>()
                     } catch (_: Exception) { emptyList() }
 
-                    val activeBookings = allBookings.filter { it.status in listOf("PENDING", "RESERVED", "CONFIRMED") }
-                    if (activeBookings.isNotEmpty()) {
-                        return@withContext Result.failure(IllegalStateException("Cannot delete goat listing with active reservations or bookings (${activeBookings.size} active). Complete or cancel active reservations first."))
-                    }
-
-                    // Preserve historical bookings by unlinking goat_id
-                    val historicalBookings = allBookings.filter { it.status !in listOf("PENDING", "RESERVED", "CONFIRMED") }
-                    if (historicalBookings.isNotEmpty()) {
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].update(
-                                buildJsonObject {
-                                    put("goat_id", null as String?)
-                                }
-                            ) {
-                                filter {
-                                    eq("goat_id", validId)
-                                }
-                            }
-                        } catch (bErr: Exception) {
-                            Log.w(TAG, "Unlinking historical bookings failed: ${bErr.message}")
+                    for (b in allBookings) {
+                        if (b.status in listOf("PENDING", "RESERVED", "CONFIRMED")) {
+                            try {
+                                SupabaseModule.client.postgrest.rpc(
+                                    function = "cancel_booking",
+                                    parameters = buildJsonObject {
+                                        put("p_booking_id", b.id)
+                                        put("p_reason", "Goat listing deleted by farm owner")
+                                    }
+                                )
+                            } catch (_: Exception) {}
                         }
                     }
+
+                    // Unlink listing payments if any
+                    try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS].update(
+                            buildJsonObject { put("goat_id", null as String?) }
+                        ) {
+                            filter { eq("goat_id", validId) }
+                        }
+                    } catch (_: Exception) {}
 
                     // Retrieve image URLs BEFORE deleting goat records
                     val existingImages = try {
@@ -721,6 +743,12 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                     // Delete database records
                     try {
                         SupabaseModule.client.postgrest["wishlist"].delete {
+                            filter { eq("goat_id", validId) }
+                        }
+                    } catch (_: Exception) {}
+
+                    try {
+                        SupabaseModule.client.postgrest["reports"].delete {
                             filter { eq("goat_id", validId) }
                         }
                     } catch (_: Exception) {}
@@ -856,8 +884,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             }
             if (onlyAvailable) {
                 domainGoats = domainGoats.filter {
-                    it.availabilityStatus == AvailabilityStatus.AVAILABLE ||
-                            it.availabilityStatus == AvailabilityStatus.BOOKING_PENDING
+                    it.availabilityStatus == AvailabilityStatus.AVAILABLE
                 }
             }
             return domainGoats
@@ -872,8 +899,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             }
             if (onlyAvailable) {
                 domainGoats = domainGoats.filter {
-                    it.availabilityStatus == AvailabilityStatus.AVAILABLE ||
-                            it.availabilityStatus == AvailabilityStatus.BOOKING_PENDING
+                    it.availabilityStatus == AvailabilityStatus.AVAILABLE
                 }
             }
             return domainGoats
@@ -892,17 +918,19 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 dto.toDomain(
                     resolvedFarmName = farm?.name,
                     resolvedFarmLocation = farm?.location,
-                    resolvedPhotos = photosMap[dto.id]
+                    resolvedPhotos = photosMap[dto.id],
+                    resolvedFarmCode = farm?.farmCode
                 )
             }
 
-            // Merge remote goats with any locally added/updated goats
+            // Remote goats from Supabase are authoritative
             val mergedMap = mutableMapOf<String, Goat>()
-            for (g in rawRemoteGoats) {
-                mergedMap[g.id] = g
-            }
             for ((id, g) in localAddedGoats) {
                 mergedMap[id] = g
+            }
+            for (g in rawRemoteGoats) {
+                mergedMap[g.id] = g // Authoritative database record overrides local cache
+                localAddedGoats[g.id] = g // Keep local in sync
             }
 
             val rawDomainGoats = mergedMap.values.toList()
@@ -916,8 +944,7 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
             }
             if (onlyAvailable) {
                 domainGoats = domainGoats.filter {
-                    it.availabilityStatus == AvailabilityStatus.AVAILABLE ||
-                            it.availabilityStatus == AvailabilityStatus.BOOKING_PENDING
+                    it.availabilityStatus == AvailabilityStatus.AVAILABLE
                 }
             }
 

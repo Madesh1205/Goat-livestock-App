@@ -177,7 +177,7 @@ fun FarmDetailScreen(
             val matchesBreed = selectedBreedFilter == null || goat.breed.equals(selectedBreedFilter, ignoreCase = true)
             val matchesQuery = searchQuery.isBlank() ||
                     goat.name.contains(searchQuery, ignoreCase = true) ||
-                    goat.tagNumber.contains(searchQuery, ignoreCase = true) ||
+                    goat.goatCode.contains(searchQuery, ignoreCase = true) ||
                     goat.breed.contains(searchQuery, ignoreCase = true) ||
                     goat.description.contains(searchQuery, ignoreCase = true)
             matchesBreed && matchesQuery

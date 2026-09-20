@@ -36,6 +36,8 @@ object SupabaseModule {
 
     fun createCustomOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
+            .retryOnConnectionFailure(true)
+            .pingInterval(20, TimeUnit.SECONDS)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

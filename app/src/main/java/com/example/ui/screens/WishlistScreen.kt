@@ -62,7 +62,7 @@ fun WishlistScreen(
                     goat.name.contains(searchQuery, ignoreCase = true) ||
                     goat.breed.contains(searchQuery, ignoreCase = true) ||
                     goat.farmName.contains(searchQuery, ignoreCase = true) ||
-                    goat.tagNumber.contains(searchQuery, ignoreCase = true)
+                    goat.goatCode.contains(searchQuery, ignoreCase = true)
 
             val matchesBreed = selectedBreedFilter == null || goat.breed.equals(selectedBreedFilter, ignoreCase = true)
             matchesQuery && matchesBreed
@@ -264,8 +264,10 @@ fun WishlistScreen(
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(filteredGoats, key = { it.id }) { goat ->
+                        val userFarm = uiState.farms.find { it.ownerId == uiState.currentUser?.id || (uiState.currentUser?.farmId != null && it.id == uiState.currentUser.farmId) }
+                        val userFarmId = uiState.currentUser?.farmId ?: userFarm?.id
                         val isOwnFarm = isFarmAdmin && (
-                            (uiState.currentUser?.farmId != null && uiState.currentUser.farmId == goat.farmId) ||
+                            (userFarmId != null && userFarmId == goat.farmId) ||
                             uiState.farms.find { it.id == goat.farmId }?.ownerId == uiState.currentUser?.id
                         )
                         WishlistGoatCard(

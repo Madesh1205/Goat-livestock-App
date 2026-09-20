@@ -90,8 +90,8 @@ object UserFriendlyErrorMapper {
         }
 
         // 5. Listing Limit Reached
-        if (msg.contains("listing limit") || msg.contains("goat_listing_limit") || msg.contains("limit of")) {
-            return "Farm listing limit reached. Contact Super Admin to increase your limit."
+        if (msg.contains("listing limit") || msg.contains("goat_listing_limit") || msg.contains("limit of") || msg.contains("limit reached")) {
+            return "Your goat listing limit has been reached. Contact +91 63808 98358 for approval to add more goats."
         }
 
         // 6. Database / Server / PostgREST Internal Error
@@ -118,7 +118,9 @@ object UserFriendlyErrorMapper {
      */
     fun forBooking(throwable: Throwable?): String {
         if (throwable == null) return "Unable to complete booking. Please try again."
-        val msg = (throwable.message ?: "").lowercase()
+        val rawMsg = throwable.message ?: ""
+        val extracted = extractEmbeddedMessage(rawMsg)
+        val msg = extracted.lowercase()
 
         // Network check
         if (isNetworkFailure(throwable, msg)) {
@@ -144,6 +146,11 @@ object UserFriendlyErrorMapper {
         }
 
         // Booking conflict / already reserved
+        if (msg.contains("this goat has already been reserved by another customer") ||
+            msg.contains("already been reserved by another customer")
+        ) {
+            return "This goat has already been reserved by another customer."
+        }
         if (msg.contains("duplicate") ||
             msg.contains("23505") ||
             msg.contains("idx_single_active_goat_booking") ||
@@ -154,6 +161,9 @@ object UserFriendlyErrorMapper {
         }
 
         // Goat no longer available
+        if (msg.contains("goat is no longer available for booking")) {
+            return "Goat is no longer available for booking."
+        }
         if (msg.contains("not available") ||
             msg.contains("status: reserved") ||
             msg.contains("status: sold") ||
@@ -169,6 +179,12 @@ object UserFriendlyErrorMapper {
         }
 
         return sanitize(throwable.message, "Unable to create the booking right now. Please try again.")
+    }
+
+    private fun extractEmbeddedMessage(raw: String): String {
+        if (raw.isBlank()) return raw
+        val match = Regex(""""message"\s*:\s*"([^"]+)"""").find(raw)
+        return match?.groupValues?.get(1) ?: raw
     }
 
     /**
@@ -202,7 +218,7 @@ object UserFriendlyErrorMapper {
             return "Unable to connect. Please check your internet connection and try again."
         }
         if (msg.contains("listing limit") || msg.contains("limit reached") || msg.contains("goat_listing_limit")) {
-            return "Cannot add goat: Farm listing limit reached. Contact Super Admin to increase your limit."
+            return "Your goat listing limit has been reached. Contact +91 63808 98358 for approval to add more goats."
         }
         if (isPermissionFailure(msg)) {
             return "You do not have permission to add or modify this goat listing."

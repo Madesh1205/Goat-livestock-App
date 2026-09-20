@@ -12,6 +12,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -120,13 +122,28 @@ class SupabaseMarketplaceRepositoryImpl(
     override fun getAllBookings(): Flow<List<Booking>> = bookingRepository.getAllBookings()
 
     override suspend fun createBooking(goatId: String, notes: String): Result<Booking> {
-        val currentUser = authRepository.currentUser.value
-        val customerId = currentUser?.id ?: "usr-customer"
+        val currentUser = authRepository.currentUser.value ?: authRepository.checkExistingSession().getOrNull()
+        val customerId = currentUser?.id ?: try {
+            SupabaseModule.auth.currentUserOrNull()?.id
+        } catch (_: Exception) { null }
+
+        if (customerId.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("User not authenticated."))
+        }
         return bookingRepository.createBooking(goatId, customerId, notes)
     }
 
-    override suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus): Result<Unit> =
-        bookingRepository.updateBookingStatus(bookingId, status)
+    override suspend fun confirmBooking(bookingId: String): Result<Unit> =
+        bookingRepository.confirmBooking(bookingId)
+
+    override suspend fun cancelBooking(bookingId: String, reason: String): Result<Unit> =
+        bookingRepository.cancelBooking(bookingId, reason)
+
+    override suspend fun completeBooking(bookingId: String): Result<Unit> =
+        bookingRepository.completeBooking(bookingId)
+
+    override suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus, reason: String?): Result<Unit> =
+        bookingRepository.updateBookingStatus(bookingId, status, reason)
 
     // ==========================================
     // 5. Farms
@@ -321,6 +338,8 @@ class SupabaseMarketplaceRepositoryImpl(
         // 2. Realtime listener for live INSERT/UPDATE/DELETE events
         var channel: RealtimeChannel? = null
         var realtimeJob: Job? = null
+        var pollingJob: Job? = null
+
         try {
             val channelName = "realtime_notifications_$validUserId"
             channel = SupabaseModule.client.realtime.channel(channelName)
@@ -330,48 +349,92 @@ class SupabaseMarketplaceRepositoryImpl(
             }
 
             realtimeJob = launch {
-                changeFlow.collect { action ->
-                    try {
-                        when (action) {
-                            is PostgresAction.Insert -> {
-                                val dto = action.decodeRecord<NotificationDto>()
-                                val newNotif = dto.toDomain()
-                                // Deduplicate by database ID
-                                if (!notificationMap.containsKey(newNotif.id)) {
-                                    notificationMap[newNotif.id] = newNotif
+                try {
+                    changeFlow.collect { action ->
+                        try {
+                            when (action) {
+                                is PostgresAction.Insert -> {
+                                    val dto = action.decodeRecord<NotificationDto>()
+                                    val newNotif = dto.toDomain()
+                                    // Deduplicate by database ID
+                                    if (!notificationMap.containsKey(newNotif.id)) {
+                                        notificationMap[newNotif.id] = newNotif
+                                        trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                                    }
+                                }
+                                is PostgresAction.Update -> {
+                                    val dto = action.decodeRecord<NotificationDto>()
+                                    val updatedNotif = dto.toDomain()
+                                    notificationMap[updatedNotif.id] = updatedNotif
                                     trySend(notificationMap.values.sortedByDescending { it.timestamp })
                                 }
-                            }
-                            is PostgresAction.Update -> {
-                                val dto = action.decodeRecord<NotificationDto>()
-                                val updatedNotif = dto.toDomain()
-                                notificationMap[updatedNotif.id] = updatedNotif
-                                trySend(notificationMap.values.sortedByDescending { it.timestamp })
-                            }
-                            is PostgresAction.Delete -> {
-                                val deletedId = action.oldRecord["id"]?.jsonPrimitive?.content
-                                if (deletedId != null && notificationMap.containsKey(deletedId)) {
-                                    notificationMap.remove(deletedId)
-                                    trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                                is PostgresAction.Delete -> {
+                                    val deletedId = action.oldRecord["id"]?.jsonPrimitive?.content
+                                    if (deletedId != null && notificationMap.containsKey(deletedId)) {
+                                        notificationMap.remove(deletedId)
+                                        trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                                    }
                                 }
+                                else -> {}
                             }
-                            else -> {}
+                        } catch (e: Exception) {
+                            if (e is CancellationException) throw e
+                            Log.w(TAG, "Notice: realtime notification processing notice: ${e.message}")
                         }
-                    } catch (e: Exception) {
-                        if (e is CancellationException) throw e
-                        Log.w(TAG, "Notice: realtime notification processing notice: ${e.message}")
                     }
+                } catch (e: Throwable) {
+                    if (e is CancellationException) throw e
+                    Log.w(TAG, "Notice: realtime notification changeFlow ended gracefully: ${e.message}")
                 }
             }
 
             channel.subscribe()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             if (e is CancellationException) throw e
             Log.w(TAG, "Notice: failed to subscribe to realtime notifications: ${e.message}")
         }
 
+        // 3. Fallback periodic refresh (every 30s) to keep notifications updated
+        pollingJob = launch {
+            var pollingIntervalMs = 30_000L
+            while (isActive) {
+                delay(pollingIntervalMs)
+                try {
+                    val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS]
+                        .select {
+                            filter {
+                                eq("user_id", validUserId)
+                            }
+                        }.decodeList<NotificationDto>()
+
+                    notificationMap.clear()
+                    dtos.forEach { dto ->
+                        val notif = dto.toDomain()
+                        notificationMap[notif.id] = notif
+                    }
+                    trySend(notificationMap.values.sortedByDescending { it.timestamp })
+                    pollingIntervalMs = 30_000L // Reset backoff on success
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    val msg = e.message ?: ""
+                    val isNetworkError = msg.contains("resolve host", ignoreCase = true) ||
+                            msg.contains("SocketException", ignoreCase = true) ||
+                            msg.contains("Software caused connection abort", ignoreCase = true) ||
+                            msg.contains("timeout", ignoreCase = true) ||
+                            msg.contains("ConnectException", ignoreCase = true)
+                    if (isNetworkError) {
+                        Log.d(TAG, "Notice: offline/network retry for notifications: $msg")
+                        pollingIntervalMs = (pollingIntervalMs * 2).coerceAtMost(60_000L)
+                    } else {
+                        Log.w(TAG, "Notice: notification polling check notice: $msg")
+                    }
+                }
+            }
+        }
+
         awaitClose {
             realtimeJob?.cancel()
+            pollingJob?.cancel()
             channel?.let { ch ->
                 launch(NonCancellable) {
                     try {
@@ -567,10 +630,10 @@ class SupabaseMarketplaceRepositoryImpl(
             val pendingFarms = allFarms.count { it.status.equals("PENDING", ignoreCase = true) }
             val suspendedFarms = allFarms.count { it.status.equals("SUSPENDED", ignoreCase = true) }
             val totalBookings = allBookingsList.size
-            val activeBookings = allBookingsList.count { it.status.uppercase() in listOf("PENDING", "CONFIRMED") }
-            val completedBookings = allBookingsList.count { it.status.uppercase() == "COMPLETED" }
+            val activeBookings = allBookingsList.count { (it.status ?: "").uppercase() in listOf("PENDING", "CONFIRMED", "RESERVED") }
+            val completedBookings = allBookingsList.count { (it.status ?: "").uppercase() in listOf("COMPLETED", "SOLD") }
             val pendingReports = allReportsList.count { it.status.uppercase() in listOf("NEW", "PENDING", "UNDER_REVIEW") }
-            val totalRevenue = allBookingsList.sumOf { it.totalPrice }
+            val totalRevenue = allBookingsList.sumOf { it.totalPrice ?: 0.0 }
             val totalListingFees = try {
                 val paidListingPayments = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS]
                     .select(Columns.list("amount", "payment_status")) {

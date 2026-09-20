@@ -128,8 +128,14 @@ fun GoatDetailScreen(
 
     val isSuperAdmin = uiState.currentUser?.role == UserRole.SUPER_ADMIN
     val isFarmAdmin = uiState.currentUser?.role == UserRole.FARM_ADMIN
+    val userFarm = remember(uiState.farms, uiState.currentUser) {
+        if (uiState.currentUser == null) null
+        else uiState.farms.find { it.ownerId == uiState.currentUser.id || (uiState.currentUser.farmId != null && it.id == uiState.currentUser.farmId) }
+    }
+    val userFarmId = uiState.currentUser?.farmId ?: userFarm?.id
+
     val isOwnFarmGoat = isFarmAdmin && (
-        (uiState.currentUser?.farmId != null && uiState.currentUser.farmId == goat.farmId) ||
+        (userFarmId != null && userFarmId == goat.farmId) ||
         (resolvedFarm != null && resolvedFarm.ownerId == uiState.currentUser?.id)
     )
 
@@ -1631,8 +1637,8 @@ fun GoatDetailScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Goat Tag:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(goat.tagNumber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Goat Code:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1817,7 +1823,7 @@ fun GoatDetailScreen(
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
-                        text = "Help us maintain authentic, verified livestock on the marketplace. Please select the primary reason for reporting ${goat.name} (${goat.tagNumber}):",
+                        text = "Help us maintain authentic, verified livestock on the marketplace. Please select the primary reason for reporting ${goat.name} (${goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }}):",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp
@@ -1880,7 +1886,7 @@ fun GoatDetailScreen(
                         onSubmitReport(
                             "GOAT_LISTING",
                             goat.id,
-                            "${goat.name} (${goat.tagNumber})",
+                            "${goat.name} (${goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }})",
                             reportSelectedReason,
                             desc,
                             photo

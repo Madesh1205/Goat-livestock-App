@@ -311,7 +311,6 @@ class Stage10NotificationsReviewsModerationAuditTest {
         testGoat = Goat(
             id = "goat-1",
             name = "Salem Black Stud",
-            tagNumber = "TAG-001",
             breed = "Salem Black",
             gender = GoatGender.MALE,
             ageMonths = 24,
@@ -334,7 +333,6 @@ class Stage10NotificationsReviewsModerationAuditTest {
         otherGoat = Goat(
             id = "goat-2",
             name = "Kanni Master",
-            tagNumber = "TAG-002",
             breed = "Kanni",
             gender = GoatGender.MALE,
             ageMonths = 18,

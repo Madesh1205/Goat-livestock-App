@@ -176,7 +176,6 @@ class FarmIdentityAndOwnershipTest {
         val goat = Goat(
             id = "",
             name = "Test Champion",
-            tagNumber = "AF-001",
             breed = "Boer",
             gender = GoatGender.MALE,
             ageMonths = 12,
@@ -199,7 +198,6 @@ class FarmIdentityAndOwnershipTest {
         val goat = Goat(
             id = goatUuid,
             name = "Test Champion",
-            tagNumber = "AF-001",
             breed = "Boer",
             gender = GoatGender.MALE,
             ageMonths = 12,

@@ -33,7 +33,7 @@ class Stage11KListingLimitEnforcementTest {
             isAmmalOwnFarm = false
         )
 
-        assertEquals("Default partner farm listing limit must be 10", 10, partnerFarm.goatListingLimit)
+        assertEquals("Default partner farm listing limit must be 2", 2, partnerFarm.goatListingLimit)
         assertFalse("Partner farm should not be Ammal own farm", partnerFarm.isAmmalOwnFarm)
     }
 
@@ -124,7 +124,6 @@ class Stage11KListingLimitEnforcementTest {
             farmName = "Trichy Goat Farm",
             farmLocation = "Trichy",
             name = "Trichy Champion Buck",
-            tagNumber = "TAG-TRICHY-01",
             breed = "Jamnapari",
             ageMonths = 14,
             weightKg = 45.0,

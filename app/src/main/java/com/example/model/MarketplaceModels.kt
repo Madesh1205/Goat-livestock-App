@@ -82,6 +82,7 @@ data class UserProfile(
 
 data class Farm(
     val id: String,
+    val farmCode: String = "",
     val name: String,
     val ownerId: String,
     val ownerName: String,
@@ -97,14 +98,14 @@ data class Farm(
     val rating: Double = 0.0,
     val totalReviews: Int = 0,
     val totalGoatsListed: Int = 0,
-    val goatListingLimit: Int = 10,
+    val goatListingLimit: Int = 2,
     val createdAt: Long = System.currentTimeMillis()
 )
 
 data class Goat(
     val id: String,
+    val goatCode: String = "",
     val name: String,
-    val tagNumber: String,
     val breed: String,
     val gender: GoatGender,
     val ageMonths: Int,
@@ -115,6 +116,7 @@ data class Goat(
     val discountPercentage: Double = 0.0,
     val photos: List<String> = emptyList(),
     val farmId: String,
+    val farmCode: String = "",
     val farmName: String,
     val farmLocation: String,
     val availabilityStatus: AvailabilityStatus = AvailabilityStatus.AVAILABLE,
@@ -154,7 +156,9 @@ data class Goat(
 
 data class Booking(
     val id: String,
+    val bookingCode: String = "",
     val goatId: String,
+    val goatCode: String = "",
     val goatName: String,
     val goatBreed: String,
     val goatPhoto: String,
@@ -169,6 +173,16 @@ data class Booking(
     val reservationExpiryDate: Long = System.currentTimeMillis() + (24 * 3600 * 1000L), // 24h hold
     val notes: String = ""
 ) {
+    val displayBookingCode: String
+        get() = if (bookingCode.isNotBlank()) bookingCode else "AMM-${id.take(6).uppercase()}"
+
+    val displayGoatCode: String
+        get() = if (goatCode.isNotBlank()) goatCode else "GOAT-${goatId.take(4).uppercase()}"
+
+    val isHoldExpired: Boolean
+        get() = (status == AvailabilityStatus.BOOKING_PENDING || status == AvailabilityStatus.RESERVED) &&
+                System.currentTimeMillis() > reservationExpiryDate
+
     val formattedAmount: String
         get() = PriceUtils.formatCurrency(amount)
 }
@@ -224,7 +238,7 @@ data class ListingPayment(
     val id: String,
     val goatId: String,
     val goatName: String,
-    val goatTag: String = "",
+    val goatCode: String = "",
     val farmId: String,
     val farmName: String,
     val amount: Double = 0.0,
@@ -401,14 +415,14 @@ data class GoatFilterCriteria(
                 sortBy == SortOption.RELEVANCE
 
     fun matches(goat: Goat): Boolean {
-        // Search query across goat name, breed, farm name, tag number, description, farm location
+        // Search query across goat name, breed, farm name, goat code, description, farm location
         if (searchQuery.isNotBlank()) {
             val terms = searchQuery.trim().lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
             val matchesSearch = terms.all { term ->
                 goat.name.lowercase().contains(term) ||
                         goat.breed.lowercase().contains(term) ||
                         goat.farmName.lowercase().contains(term) ||
-                        goat.tagNumber.lowercase().contains(term) ||
+                        goat.goatCode.lowercase().contains(term) ||
                         goat.description.lowercase().contains(term) ||
                         goat.farmLocation.lowercase().contains(term)
             }

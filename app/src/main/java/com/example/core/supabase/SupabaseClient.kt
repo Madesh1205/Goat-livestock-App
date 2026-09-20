@@ -147,6 +147,7 @@ class SupabaseClient(
 
         fun createCustomOkHttpClient(): OkHttpClient {
             return OkHttpClient.Builder()
+                .retryOnConnectionFailure(true)
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)

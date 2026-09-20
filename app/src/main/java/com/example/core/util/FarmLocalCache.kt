@@ -182,7 +182,7 @@ object FarmLocalCache {
                 rating = obj.optDouble("rating", 5.0),
                 totalReviews = obj.optInt("totalReviews", 0),
                 totalGoatsListed = obj.optInt("totalGoatsListed", 0),
-                goatListingLimit = obj.optInt("goatListingLimit", 100)
+                goatListingLimit = obj.optInt("goatListingLimit", 2)
             )
             if (!isValidFarm(farm)) {
                 removeCachedFarm(targetId, context)
@@ -309,7 +309,7 @@ object FarmLocalCache {
                     rating = obj.optDouble("rating", 5.0),
                     totalReviews = obj.optInt("totalReviews", 0),
                     totalGoatsListed = obj.optInt("totalGoatsListed", 0),
-                    goatListingLimit = obj.optInt("goatListingLimit", 100)
+                    goatListingLimit = obj.optInt("goatListingLimit", 2)
                 )
                 if (isValidFarm(farm)) {
                     list.add(farm)

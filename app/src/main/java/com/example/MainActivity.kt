@@ -256,6 +256,9 @@ class MainActivity : ComponentActivity() {
                     Screen.MyBookings.route,
                     Screen.Profile.route,
                     Screen.FarmDashboard.route,
+                    Screen.FarmBookings.route,
+                    "farm_bookings",
+                    "farm_admin_bookings",
                     Screen.SuperAdminDashboard.route,
                     Screen.Wishlist.route
                 )
@@ -418,6 +421,21 @@ class MainActivity : ComponentActivity() {
                                             onClick = { navController.navigate(Screen.FarmDashboard.route) },
                                             icon = { Icon(Icons.Default.Agriculture, contentDescription = "My Farm") },
                                             label = { Text("My Farm", fontWeight = if (isFarmPortal) FontWeight.Bold else FontWeight.Medium) },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        )
+
+                                        val isFarmBookings = currentRoute == Screen.FarmBookings.route || currentRoute == "farm_bookings" || currentRoute == "farm_admin_bookings"
+                                        NavigationBarItem(
+                                            selected = isFarmBookings,
+                                            onClick = { navController.navigate(Screen.FarmBookings.route) },
+                                            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Bookings") },
+                                            label = { Text("Bookings", fontWeight = if (isFarmBookings) FontWeight.Bold else FontWeight.Medium) },
                                             colors = NavigationBarItemDefaults.colors(
                                                 selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                                 selectedTextColor = MaterialTheme.colorScheme.onSurface,
@@ -644,14 +662,16 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.removeFromWishlist(goatId)
                                 },
                                 onBookGoat = { goat ->
-                                    val currentUser = authUiState.currentUser
+                                    val currentUser = authUiState.currentUser ?: uiState.currentUser
+                                    val userFarm = uiState.farms.find { it.ownerId == currentUser?.id || (currentUser?.farmId != null && it.id == currentUser.farmId) }
+                                    val userFarmId = currentUser?.farmId ?: userFarm?.id
                                     val isOwnFarm = currentUser?.role == UserRole.FARM_ADMIN && (
-                                        (currentUser.farmId != null && currentUser.farmId == goat.farmId) ||
+                                        (userFarmId != null && userFarmId == goat.farmId) ||
                                         uiState.farms.find { it.id == goat.farmId }?.ownerId == currentUser.id
                                     )
                                     if (isOwnFarm) {
                                         Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
-                                    } else if (authUiState.isAuthenticated) {
+                                    } else if (authUiState.isAuthenticated || currentUser != null) {
                                         marketplaceViewModel.createBooking(goat.id, "Wishlist direct reservation") {
                                             Toast.makeText(context, "24-Hour Reservation Placed for ${goat.name}!", Toast.LENGTH_LONG).show()
                                             navController.navigate(Screen.MyBookings.route)
@@ -742,14 +762,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onBookGoat = { goatId, notes ->
-                                        val currentUser = authUiState.currentUser
+                                        val currentUser = authUiState.currentUser ?: uiState.currentUser
+                                        val userFarm = uiState.farms.find { it.ownerId == currentUser?.id || (currentUser?.farmId != null && it.id == currentUser.farmId) }
+                                        val userFarmId = currentUser?.farmId ?: userFarm?.id
                                         val isOwnFarm = currentUser?.role == UserRole.FARM_ADMIN && (
-                                            (currentUser.farmId != null && currentUser.farmId == goat.farmId) ||
+                                            (userFarmId != null && userFarmId == goat.farmId) ||
                                             uiState.farms.find { it.id == goat.farmId }?.ownerId == currentUser.id
                                         )
                                         if (isOwnFarm) {
                                             Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
-                                        } else if (authUiState.isAuthenticated) {
+                                        } else if (authUiState.isAuthenticated || currentUser != null) {
                                             marketplaceViewModel.createBooking(goatId, notes) {
                                                 Toast.makeText(context, "24-Hour Reservation Placed! Farm breeder notified.", Toast.LENGTH_LONG).show()
                                                 navController.navigate(Screen.MyBookings.route)
@@ -857,10 +879,63 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToRegisterFarm = {
                                     navController.navigate(Screen.Register.route)
                                 },
+                                onNavigateToBookings = {
+                                    navController.navigate(Screen.FarmBookings.route)
+                                },
                                 onNavigateBack = {
                                     navController.navigateUp()
                                 }
                             )
+                            }
+                        }
+
+                        // --- FARM ADMIN BOOKINGS ROUTE (GUARDED) ---
+                        composable(Screen.FarmBookings.route) {
+                            val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
+                            if (authoritativeRole == UserRole.CUSTOMER) {
+                                LaunchedEffect(Unit) {
+                                    Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
+                                    navController.navigate(Screen.Marketplace.route) {
+                                        popUpTo(Screen.FarmBookings.route) { inclusive = true }
+                                    }
+                                }
+                                com.example.ui.screens.FarmAdminAccessDeniedView(
+                                    currentRole = authoritativeRole.name,
+                                    onNavigateBack = {
+                                        navController.navigate(Screen.Marketplace.route) {
+                                            popUpTo(Screen.FarmBookings.route) { inclusive = true }
+                                        }
+                                    },
+                                    onNavigateToMarketplace = {
+                                        navController.navigate(Screen.Marketplace.route) {
+                                            popUpTo(Screen.FarmBookings.route) { inclusive = true }
+                                        }
+                                    },
+                                    onSyncRole = {
+                                        authViewModel.refreshUserProfile()
+                                        marketplaceViewModel.refreshMarketplace()
+                                    }
+                                )
+                            } else {
+                                FarmAdminBookingsScreen(
+                                    uiState = uiState,
+                                    onNavigateBack = { navController.navigateUp() },
+                                    onConfirmBooking = { bookingId ->
+                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CONFIRMED)
+                                    },
+                                    onRejectBooking = { bookingId ->
+                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.REJECTED)
+                                    },
+                                    onCompleteBooking = { bookingId ->
+                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.COMPLETED)
+                                    },
+                                    onCancelBooking = { bookingId ->
+                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED)
+                                    },
+                                    onRefresh = {
+                                        marketplaceViewModel.refreshMarketplace()
+                                    }
+                                )
                             }
                         }
 
