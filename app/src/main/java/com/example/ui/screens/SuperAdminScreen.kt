@@ -55,6 +55,9 @@ fun SuperAdminScreen(
     onRejectFarm: (String) -> Unit,
     onSuspendFarm: (String) -> Unit,
     onReactivateFarm: (String) -> Unit = onApproveFarm,
+    onApproveFarmWithPayment: (String, Double, String, String) -> Unit = { _, _, _, _ -> },
+    onIncreaseFarmQuota: (String, Int, Double, String, String) -> Unit = { _, _, _, _, _ -> },
+    onUpdatePlatformPricing: (Double, Double) -> Unit = { _, _ -> },
     onUpdateFarmListingLimit: (String, Int) -> Unit = { _, _ -> },
     onUpdateUserSuspension: (String, Boolean) -> Unit = { _, _ -> },
     onUpdateReportStatus: (String, ReportStatus, String?) -> Unit = { _, _, _ -> },
@@ -123,6 +126,10 @@ fun SuperAdminScreen(
 
     var farmDetailToView by remember { mutableStateOf<Farm?>(null) }
     var farmToSetLimit by remember { mutableStateOf<Farm?>(null) }
+    var farmToApproveWithPayment by remember { mutableStateOf<Farm?>(null) }
+    var farmToAddQuota by remember { mutableStateOf<Farm?>(null) }
+    var paymentReceiptToView by remember { mutableStateOf<ListingPayment?>(null) }
+    var showPricingConfigDialog by remember { mutableStateOf(false) }
     var goatToEdit by remember { mutableStateOf<Goat?>(null) }
     var reportToInvestigate by remember { mutableStateOf<PlatformReport?>(null) }
     var itemToDeleteConfirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
@@ -336,12 +343,16 @@ fun SuperAdminScreen(
                     )
                     1 -> SuperAdminFarmsTab(
                         farms = uiState.farms,
-                        onApproveFarm = onApproveFarm,
+                        onApproveFarm = { farmId ->
+                            val farm = uiState.farms.find { it.id == farmId }
+                            if (farm != null) farmToApproveWithPayment = farm else onApproveFarm(farmId)
+                        },
                         onRejectFarm = onRejectFarm,
                         onSuspendFarm = onSuspendFarm,
                         onReactivateFarm = onReactivateFarm,
                         onViewDetails = { farmDetailToView = it },
                         onSetListingLimit = { farmToSetLimit = it },
+                        onAddQuota = { farmToAddQuota = it },
                         onNavigateToAmmalFarm = onNavigateToAmmalFarm
                     )
                     2 -> SuperAdminGoatsTab(
@@ -372,7 +383,10 @@ fun SuperAdminScreen(
                     6 -> SuperAdminListingFeesTab(
                         payments = uiState.listingPayments,
                         goats = allPlatformGoats,
-                        stats = uiState.platformStats
+                        stats = uiState.platformStats,
+                        pricing = uiState.platformPricing,
+                        onOpenPricingConfig = { showPricingConfigDialog = true },
+                        onViewReceipt = { paymentReceiptToView = it }
                     )
                 }
             }
@@ -384,10 +398,53 @@ fun SuperAdminScreen(
             farm = farm,
             goats = uiState.allAdminGoats.filter { it.farmId == farm.id },
             onDismiss = { farmDetailToView = null },
-            onApprove = { onApproveFarm(farm.id); farmDetailToView = null },
+            onApprove = { farmToApproveWithPayment = farm; farmDetailToView = null },
             onSuspend = { onSuspendFarm(farm.id); farmDetailToView = null },
             onReactivate = { onReactivateFarm(farm.id); farmDetailToView = null },
-            onSetListingLimit = { farmDetailToView = null; farmToSetLimit = farm }
+            onSetListingLimit = { farmDetailToView = null; farmToSetLimit = farm },
+            onAddQuota = { farmDetailToView = null; farmToAddQuota = farm }
+        )
+    }
+
+    farmToApproveWithPayment?.let { farm ->
+        SuperAdminApproveFarmDialog(
+            farm = farm,
+            defaultApprovalPrice = uiState.platformPricing.farmApprovalPrice,
+            onDismiss = { farmToApproveWithPayment = null },
+            onConfirm = { amount, paymentRef, notes ->
+                onApproveFarmWithPayment(farm.id, amount, paymentRef, notes)
+                farmToApproveWithPayment = null
+            }
+        )
+    }
+
+    farmToAddQuota?.let { farm ->
+        SuperAdminAddQuotaDialog(
+            farm = farm,
+            slotPrice = uiState.platformPricing.additionalSlotPrice,
+            onDismiss = { farmToAddQuota = null },
+            onConfirm = { slotsToAdd, amount, paymentRef, notes ->
+                onIncreaseFarmQuota(farm.id, slotsToAdd, amount, paymentRef, notes)
+                farmToAddQuota = null
+            }
+        )
+    }
+
+    paymentReceiptToView?.let { payment ->
+        SuperAdminReceiptDetailDialog(
+            payment = payment,
+            onDismiss = { paymentReceiptToView = null }
+        )
+    }
+
+    if (showPricingConfigDialog) {
+        SuperAdminPricingConfigDialog(
+            currentPricing = uiState.platformPricing,
+            onDismiss = { showPricingConfigDialog = false },
+            onSave = { approvalPrice, slotPrice ->
+                onUpdatePlatformPricing(approvalPrice, slotPrice)
+                showPricingConfigDialog = false
+            }
         )
     }
 
@@ -738,6 +795,7 @@ private fun SuperAdminFarmsTab(
     onReactivateFarm: (String) -> Unit,
     onViewDetails: (Farm) -> Unit,
     onSetListingLimit: (Farm) -> Unit = {},
+    onAddQuota: (Farm) -> Unit = {},
     onNavigateToAmmalFarm: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -831,6 +889,7 @@ private fun SuperAdminFarmsTab(
                         onReactivate = { onReactivateFarm(farm.id) },
                         onViewDetails = { onViewDetails(farm) },
                         onSetListingLimit = { onSetListingLimit(farm) },
+                        onAddQuota = { onAddQuota(farm) },
                         onNavigateToAmmalFarm = onNavigateToAmmalFarm
                     )
                 }
@@ -848,6 +907,7 @@ private fun FarmAdminCard(
     onReactivate: () -> Unit,
     onViewDetails: () -> Unit,
     onSetListingLimit: () -> Unit = {},
+    onAddQuota: () -> Unit = {},
     onNavigateToAmmalFarm: () -> Unit = {}
 ) {
     val isAmmal = farm.isAmmalOwnFarm
@@ -979,21 +1039,35 @@ private fun FarmAdminCard(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
-                                    text = "Auto-approved up to limit • Add locked at limit",
+                                    text = if (farm.verificationStatus == VerificationStatus.APPROVED) "Approved • 2 Free slots included" else "Approval & payment required to list",
                                     fontSize = 10.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                        FilledTonalButton(
-                            onClick = onSetListingLimit,
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(28.dp)
-                        ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(12.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Set Limit", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (farm.verificationStatus == VerificationStatus.APPROVED) {
+                                Button(
+                                    onClick = onAddQuota,
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(12.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("+ Slots", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            FilledTonalButton(
+                                onClick = onSetListingLimit,
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Limit", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -2073,7 +2147,8 @@ private fun SuperAdminFarmDetailDialog(
     onApprove: () -> Unit,
     onSuspend: () -> Unit,
     onReactivate: () -> Unit,
-    onSetListingLimit: () -> Unit = {}
+    onSetListingLimit: () -> Unit = {},
+    onAddQuota: () -> Unit = {}
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -3152,7 +3227,10 @@ private fun MetricMiniItem(label: String, value: String, color: Color) {
 private fun SuperAdminListingFeesTab(
     payments: List<com.example.model.ListingPayment>,
     goats: List<com.example.model.Goat>,
-    stats: com.example.model.PlatformStats
+    stats: com.example.model.PlatformStats,
+    pricing: com.example.model.PlatformPricing = com.example.model.PlatformPricing(),
+    onOpenPricingConfig: () -> Unit = {},
+    onViewReceipt: (com.example.model.ListingPayment) -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterStatus by remember { mutableStateOf("ALL") }
@@ -3172,6 +3250,7 @@ private fun SuperAdminListingFeesTab(
             val matchesSearch = searchQuery.isBlank() ||
                 payment.goatName.contains(searchQuery, ignoreCase = true) ||
                 payment.goatCode.contains(searchQuery, ignoreCase = true) ||
+                payment.farmName.contains(searchQuery, ignoreCase = true) ||
                 (payment.receiptNumber?.contains(searchQuery, ignoreCase = true) == true) ||
                 (payment.orderId?.contains(searchQuery, ignoreCase = true) == true) ||
                 (payment.razorpayPaymentId?.contains(searchQuery, ignoreCase = true) == true)
@@ -3185,6 +3264,75 @@ private fun SuperAdminListingFeesTab(
         verticalArrangement = Arrangement.spacedBy(12.dp),
         modifier = Modifier.fillMaxSize()
     ) {
+        // Platform Pricing & Quota Controls Card
+        item {
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Platform Pricing & Quota Config", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        Button(
+                            onClick = onOpenPricingConfig,
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Configure Fees", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Farm Approval Price", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("₹${pricing.farmApprovalPrice.toInt()}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                Text("Includes 2 free listing slots", fontSize = 9.sp, color = Color(0xFF2E7D32))
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Additional Slot Price", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text("₹${pricing.additionalSlotPrice.toInt()}", fontSize = 18.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                Text("Per goat listing quota slot", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Platform Listing Fee Metrics
         item {
             Card(
@@ -3202,14 +3350,15 @@ private fun SuperAdminListingFeesTab(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Payments, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Partner Listing Fee Ledger", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("Partner Receipts & Fee Ledger", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
+                        val totalPaid = payments.filter { it.status == com.example.model.PaymentStatus.PAID }.sumOf { it.amount }
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.primary
                         ) {
                             Text(
-                                "Total: ₹${stats.totalListingFeesCollected.toInt()}",
+                                "Total: ₹${totalPaid.toInt()}",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -3243,9 +3392,9 @@ private fun SuperAdminListingFeesTab(
                             modifier = Modifier.weight(1f)
                         ) {
                             Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Verified Paid", fontSize = 10.sp, color = Color(0xFF00695C), fontWeight = FontWeight.SemiBold)
+                                Text("Verified Receipts", fontSize = 10.sp, color = Color(0xFF00695C), fontWeight = FontWeight.SemiBold)
                                 Text("${payments.count { it.status == com.example.model.PaymentStatus.PAID }}", fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color(0xFF00695C))
-                                Text("₹100 / listing", fontSize = 9.sp, color = Color.Gray)
+                                Text("All partner receipts", fontSize = 9.sp, color = Color.Gray)
                             }
                         }
 
@@ -3258,7 +3407,7 @@ private fun SuperAdminListingFeesTab(
                             Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Pending", fontSize = 10.sp, color = Color(0xFFE65100), fontWeight = FontWeight.SemiBold)
                                 Text("${payments.count { it.status == com.example.model.PaymentStatus.PENDING }}", fontSize = 14.sp, fontWeight = FontWeight.Black, color = Color(0xFFE65100))
-                                Text("Awaiting payment", fontSize = 9.sp, color = Color.Gray)
+                                Text("Awaiting approval", fontSize = 9.sp, color = Color.Gray)
                             }
                         }
                     }
@@ -3271,7 +3420,7 @@ private fun SuperAdminListingFeesTab(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search by receipt, goat, tag, or payment ID...", fontSize = 12.sp) },
+                placeholder = { Text("Search by receipt #, farm, type, or payment ref...", fontSize = 12.sp) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
@@ -3306,29 +3455,6 @@ private fun SuperAdminListingFeesTab(
             }
         }
 
-        // Security Notice Banner
-        item {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFFECEFF1),
-                border = BorderStroke(1.dp, Color(0xFFB0BEC5)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF37474F), modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "Audit Note: Listing payments are verified atomically on the server. Super Admin approval is blocked until the ₹100 partner fee is verified.",
-                        fontSize = 11.sp,
-                        color = Color(0xFF37474F)
-                    )
-                }
-            }
-        }
-
         if (filteredPayments.isEmpty()) {
             item {
                 Box(
@@ -3348,7 +3474,7 @@ private fun SuperAdminListingFeesTab(
                         Text("No payment records found", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            if (searchQuery.isNotBlank()) "Try clearing your search query." else "Listing fee payments from partner farms will appear here.",
+                            if (searchQuery.isNotBlank()) "Try clearing your search query." else "Approval and quota receipts from partner farms will appear here.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -3361,7 +3487,9 @@ private fun SuperAdminListingFeesTab(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onViewReceipt(payment) }
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(
@@ -3375,8 +3503,13 @@ private fun SuperAdminListingFeesTab(
                                     fontWeight = FontWeight.Black,
                                     fontSize = 14.sp
                                 )
+                                val subtitleText = when (payment.paymentType) {
+                                    com.example.model.PaymentType.FARM_APPROVAL -> "Farm Approval • 2 Free Slots"
+                                    com.example.model.PaymentType.ADDITIONAL_QUOTA -> "Quota Increase (+${payment.slotsAdded} slots)"
+                                    else -> if (payment.goatName.isNotBlank()) "Goat: ${payment.goatName}" else "Listing Fee"
+                                }
                                 Text(
-                                    text = "Goat: ${payment.goatName.ifBlank { payment.goatCode.ifBlank { "Listing" } }}",
+                                    text = "${payment.farmName.ifBlank { "Partner Farm" }} — $subtitleText",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -3415,7 +3548,7 @@ private fun SuperAdminListingFeesTab(
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                "Order: ${payment.orderId?.takeLast(12) ?: "N/A"}",
+                                "Method: ${payment.paymentMethod}",
                                 fontSize = 11.sp,
                                 color = Color.Gray
                             )
@@ -3424,35 +3557,374 @@ private fun SuperAdminListingFeesTab(
                         if (!payment.razorpayPaymentId.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "Payment Ref: ${payment.razorpayPaymentId}",
+                                "Ref / UTR: ${payment.razorpayPaymentId}",
                                 fontSize = 11.sp,
                                 color = Color.Gray
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Surface(
-                            color = Color(0xFFF1F8E9),
-                            shape = RoundedCornerShape(4.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.VerifiedUser, contentDescription = null, tint = Color(0xFF33691E), modifier = Modifier.size(12.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    "Server-Authoritative Atomic Supabase RPC",
-                                    fontSize = 10.sp,
-                                    color = Color(0xFF33691E),
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                        if (!payment.notes.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Note: ${payment.notes}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun SuperAdminPricingConfigDialog(
+    currentPricing: com.example.model.PlatformPricing,
+    onDismiss: () -> Unit,
+    onSave: (approvalPrice: Double, slotPrice: Double) -> Unit
+) {
+    var approvalPriceText by remember { mutableStateOf(currentPricing.farmApprovalPrice.toInt().toString()) }
+    var slotPriceText by remember { mutableStateOf(currentPricing.additionalSlotPrice.toInt().toString()) }
+
+    val approvalPrice = approvalPriceText.toDoubleOrNull()
+    val slotPrice = slotPriceText.toDoubleOrNull()
+    val isValid = approvalPrice != null && approvalPrice >= 0 && slotPrice != null && slotPrice >= 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Configure Platform Pricing", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Set dynamic fees for partner farm approvals and additional listing slots. (Changes only apply to new payments/registrations; existing accounts remain untouched).",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                OutlinedTextField(
+                    value = approvalPriceText,
+                    onValueChange = { approvalPriceText = it },
+                    label = { Text("Partner Farm Approval Price (₹)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    supportingText = { Text("Includes 2 initial free listing slots") }
+                )
+
+                OutlinedTextField(
+                    value = slotPriceText,
+                    onValueChange = { slotPriceText = it },
+                    label = { Text("Additional Listing Slot Price (₹/slot)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    supportingText = { Text("Price per goat listing slot above 2") }
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid && approvalPrice != null && slotPrice != null) {
+                        onSave(approvalPrice, slotPrice)
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text("Save Pricing")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SuperAdminApproveFarmDialog(
+    farm: Farm,
+    defaultApprovalPrice: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (amount: Double, paymentRef: String, notes: String) -> Unit
+) {
+    var amountText by remember { mutableStateOf(defaultApprovalPrice.toInt().toString()) }
+    var paymentRef by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("Initial partner farm registration fee paid. 2 free slots activated.") }
+
+    val amount = amountText.toDoubleOrNull()
+    val isValid = amount != null && amount >= 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Approve Farm & Issue Receipt", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text("Farm: ${farm.name}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Owner: ${farm.ownerName}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Location: ${farm.location}, ${farm.state}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("★ On approval, this farm receives 2 FREE goat listing slots.", fontSize = 11.sp, color = Color(0xFF1B5E20), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = it },
+                    label = { Text("Approval Payment Amount (₹)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                OutlinedTextField(
+                    value = paymentRef,
+                    onValueChange = { paymentRef = it },
+                    label = { Text("Payment Ref / UTR / Cash Memo (Optional)") },
+                    placeholder = { Text("e.g. UPI-928374 or Cash") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Admin Notes / Receipt Memo") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid && amount != null) {
+                        onConfirm(amount, paymentRef, notes)
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text("Approve & Generate Receipt")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SuperAdminAddQuotaDialog(
+    farm: Farm,
+    slotPrice: Double,
+    onDismiss: () -> Unit,
+    onConfirm: (slotsToAdd: Int, amount: Double, paymentRef: String, notes: String) -> Unit
+) {
+    var slotsToAddText by remember { mutableStateOf("3") }
+    var paymentRef by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf("") }
+
+    val slotsToAdd = slotsToAddText.toIntOrNull() ?: 0
+    val totalAmount = slotsToAdd * slotPrice
+    var customAmountText by remember(slotsToAdd) { mutableStateOf(totalAmount.toInt().toString()) }
+
+    val customAmount = customAmountText.toDoubleOrNull()
+    val isValid = slotsToAdd > 0 && customAmount != null && customAmount >= 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Listing Slots to Farm", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text("Farm: ${farm.name}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Current Limit: ${farm.goatListingLimit} slots (Listed: ${farm.totalGoatsListed})", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("New Limit will be: ${farm.goatListingLimit + slotsToAdd} slots", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(1, 2, 3, 5, 10).forEach { count ->
+                        FilterChip(
+                            selected = slotsToAdd == count,
+                            onClick = { slotsToAddText = count.toString() },
+                            label = { Text("+$count", fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = slotsToAddText,
+                    onValueChange = { slotsToAddText = it },
+                    label = { Text("Number of Slots to Add") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                OutlinedTextField(
+                    value = customAmountText,
+                    onValueChange = { customAmountText = it },
+                    label = { Text("Total Payment Amount (₹)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    supportingText = { Text("₹${slotPrice.toInt()} per slot × $slotsToAdd slots") }
+                )
+
+                OutlinedTextField(
+                    value = paymentRef,
+                    onValueChange = { paymentRef = it },
+                    label = { Text("Payment Ref / UTR / Cash Memo (Optional)") },
+                    placeholder = { Text("e.g. GPay / Cash / Transfer Ref") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Notes (Optional)") },
+                    placeholder = { Text("e.g. Direct manual payment received") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (isValid && customAmount != null) {
+                        onConfirm(slotsToAdd, customAmount, paymentRef, notes)
+                    }
+                },
+                enabled = isValid
+            ) {
+                Text("Confirm & Add $slotsToAdd Slots")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun SuperAdminReceiptDetailDialog(
+    payment: com.example.model.ListingPayment,
+    onDismiss: () -> Unit
+) {
+    val dateStr = try {
+        java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(payment.createdAt))
+    } catch (_: Exception) {
+        "N/A"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Receipt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Payment Receipt", fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(payment.receiptNumber ?: "RCPT-${payment.id.take(8).uppercase()}", fontWeight = FontWeight.Black, fontSize = 16.sp)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("₹${payment.amount.toInt()} ${payment.currency}", fontSize = 22.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = when (payment.status) {
+                                com.example.model.PaymentStatus.PAID -> Color(0xFF13663C)
+                                com.example.model.PaymentStatus.PENDING -> Color(0xFFD48B06)
+                                com.example.model.PaymentStatus.FAILED -> Color(0xFFC62828)
+                                else -> Color.Gray
+                            }
+                        ) {
+                            Text(
+                                payment.status.name,
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                Divider()
+
+                ReceiptRow(label = "Farm Name", value = payment.farmName.ifBlank { "Partner Farm" })
+                ReceiptRow(
+                    label = "Payment Type",
+                    value = when (payment.paymentType) {
+                        com.example.model.PaymentType.FARM_APPROVAL -> "Farm Approval (2 Free Slots Included)"
+                        com.example.model.PaymentType.ADDITIONAL_QUOTA -> "Additional Quota (+${payment.slotsAdded} Slots)"
+                        else -> "Goat Listing Fee"
+                    }
+                )
+                ReceiptRow(label = "Date & Time", value = dateStr)
+                ReceiptRow(label = "Payment Method", value = payment.paymentMethod)
+                if (!payment.razorpayPaymentId.isNullOrBlank()) {
+                    ReceiptRow(label = "Ref / UTR #", value = payment.razorpayPaymentId)
+                }
+                if (!payment.notes.isNullOrBlank()) {
+                    ReceiptRow(label = "Notes / Memo", value = payment.notes)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ReceiptRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }

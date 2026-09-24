@@ -202,6 +202,10 @@ enum class NotificationType {
     LISTING_PAYMENT_FAILED,
     LISTING_APPROVED,
     LISTING_REJECTED,
+    FARM_APPROVED,
+    FARM_APPROVAL_PAYMENT_CONFIRMED,
+    LISTING_QUOTA_INCREASED,
+    RECEIPT_AVAILABLE,
     // Super Admin
     NEW_FARM_APPLICATION,
     NEW_LISTING_PENDING,
@@ -225,6 +229,18 @@ data class AppNotification(
     val eventKey: String? = null
 )
 
+data class PlatformPricing(
+    val farmApprovalPrice: Double = 500.0,
+    val additionalSlotPrice: Double = 150.0,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+object PaymentType {
+    const val FARM_APPROVAL = "FARM_APPROVAL"
+    const val ADDITIONAL_QUOTA = "ADDITIONAL_QUOTA"
+    const val LISTING_FEE = "LISTING_FEE"
+}
+
 enum class PaymentStatus {
     PENDING,
     AUTHORIZED,
@@ -236,17 +252,21 @@ enum class PaymentStatus {
 
 data class ListingPayment(
     val id: String,
-    val goatId: String,
-    val goatName: String,
+    val goatId: String = "",
+    val goatName: String = "",
     val goatCode: String = "",
     val farmId: String,
     val farmName: String,
     val amount: Double = 0.0,
     val currency: String = "INR",
+    val paymentType: String = "FARM_APPROVAL", // "FARM_APPROVAL", "ADDITIONAL_QUOTA", "LISTING_FEE"
+    val slotsAdded: Int = 0,
     val status: PaymentStatus = PaymentStatus.PAID,
     val orderId: String? = null,
     val razorpayPaymentId: String? = null,
     val receiptNumber: String? = null,
+    val paymentMethod: String = "Manual Payment",
+    val notes: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )
 

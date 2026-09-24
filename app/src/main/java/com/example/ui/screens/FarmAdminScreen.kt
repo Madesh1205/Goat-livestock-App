@@ -219,15 +219,26 @@ fun FarmAdminScreen(
         it.targetRole == UserRole.FARM_ADMIN || (myFarmId.isNotBlank() && it.recipientUserId == myFarmId) || it.recipientUserId == uiState.currentUser?.id
     }
 
+    val myPayments = remember(uiState.listingPayments, myFarm, myFarmId) {
+        uiState.listingPayments.filter { payment ->
+            (myFarmId.isNotBlank() && payment.farmId == myFarmId) ||
+            (myFarm != null && (payment.farmId == myFarm.id || payment.farmName.equals(myFarm.name, ignoreCase = true)))
+        }
+    }
+    var selectedPaymentReceipt by remember { mutableStateOf<com.example.model.ListingPayment?>(null) }
+
     // Calculated metrics
     val totalGoats = myGoats.size
     val availableGoats = myGoats.count { it.availabilityStatus == AvailabilityStatus.AVAILABLE && (it.approvalStatus == ApprovalStatus.APPROVED || isAmmalFarm) }
     val pendingListings = myGoats.count { it.approvalStatus == ApprovalStatus.PENDING_APPROVAL }
     val activeBookings = myBookings.count { it.status == AvailabilityStatus.BOOKING_PENDING || it.status == AvailabilityStatus.RESERVED }
 
-    // Limit and Auto-Approval computations
-    val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else 2)
-    val isLimitReached = !isAmmalFarm && !isSuperAdmin && myGoats.size >= goatListingLimit
+    // Limit and Auto-Approval computations (permanent slot consumption)
+    val consumedListingSlots = remember(myGoats, myFarmId, totalGoats) {
+        com.example.core.util.FarmLocalCache.getConsumedListingSlots(myFarmId, totalGoats)
+    }
+    val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else if (isFarmApproved) 2 else 0)
+    val isLimitReached = !isAmmalFarm && !isSuperAdmin && (consumedListingSlots >= goatListingLimit || !isFarmApproved)
     var showLimitReachedAlert by remember { mutableStateOf(false) }
 
     // Filtered Goats
@@ -533,7 +544,7 @@ fun FarmAdminScreen(
                 Tab(
                     selected = selectedTab == 4,
                     onClick = { selectedTab = 4 },
-                    text = { Text("Fee Receipts (${uiState.listingPayments.size})") }
+                    text = { Text("Receipts (${myPayments.size})") }
                 )
             }
 
@@ -543,7 +554,7 @@ fun FarmAdminScreen(
                     Column(modifier = Modifier.fillMaxSize()) {
                         // Listing Quota & Auto-Approval Status Card (for Partner Farms)
                         if (!isAmmalFarm) {
-                            val remainingSlots = (goatListingLimit - myGoats.size).coerceAtLeast(0)
+                            val remainingSlots = (goatListingLimit - consumedListingSlots).coerceAtLeast(0)
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
                                 color = if (isLimitReached) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
@@ -567,14 +578,14 @@ fun FarmAdminScreen(
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = if (isLimitReached) "Listing Limit Reached" else "Listing Quota",
+                                                text = if (isLimitReached) "Listing Quota Exhausted" else "Listing Quota",
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isLimitReached) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                                             )
                                         }
                                         Text(
-                                            text = "${myGoats.size} / $goatListingLimit Limit",
+                                            text = "$consumedListingSlots / $goatListingLimit Slots",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = if (isLimitReached) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
@@ -582,7 +593,7 @@ fun FarmAdminScreen(
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     LinearProgressIndicator(
-                                        progress = { (myGoats.size.toFloat() / goatListingLimit.toFloat()).coerceIn(0f, 1f) },
+                                        progress = { (consumedListingSlots.toFloat() / (if (goatListingLimit > 0) goatListingLimit.toFloat() else 1f)).coerceIn(0f, 1f) },
                                         color = if (isLimitReached) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                                         trackColor = MaterialTheme.colorScheme.surfaceVariant,
                                         modifier = Modifier
@@ -593,9 +604,9 @@ fun FarmAdminScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = if (isLimitReached) {
-                                            "Your goat listing limit has been reached.\nContact +91 63808 98358 for approval to add more goats."
+                                            "Your goat listing quota has been fully consumed ($consumedListingSlots / $goatListingLimit slots).\nContact Super Admin to purchase additional listing slots."
                                         } else {
-                                            "Current limit: $goatListingLimit goats • Used: ${myGoats.size} • Remaining: $remainingSlots • Contact: +91 63808 98358"
+                                            "Current limit: $goatListingLimit slots • Consumed: $consumedListingSlots • Remaining: $remainingSlots • Contact: +91 63808 98358"
                                         },
                                         fontSize = 11.sp,
                                         fontWeight = if (isLimitReached) FontWeight.SemiBold else FontWeight.Normal,
@@ -737,7 +748,7 @@ fun FarmAdminScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Dedicated Bookings Portal", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                    Text("Dedicated Orders Portal", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                                     Text("Search orders, view buyer details, and manage 24h holds", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -749,7 +760,7 @@ fun FarmAdminScreen(
                                 ) {
                                     Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Open Page", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Open Orders", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1011,13 +1022,21 @@ fun FarmAdminScreen(
                 4 -> {
                     // --- TAB 4: LISTING FEE RECEIPTS & TRANSACTIONS ---
                     FarmListingPaymentsTab(
-                        payments = uiState.listingPayments,
+                        payments = myPayments,
                         isAmmalFarm = isAmmalFarm,
-                        myGoats = myGoats
+                        myGoats = myGoats,
+                        onViewReceipt = { selectedPaymentReceipt = it }
                     )
                 }
             }
         }
+    }
+
+    selectedPaymentReceipt?.let { payment ->
+        SuperAdminReceiptDetailDialog(
+            payment = payment,
+            onDismiss = { selectedPaymentReceipt = null }
+        )
     }
 
     // --- PENDING ALERT MODAL ---
@@ -1044,20 +1063,20 @@ fun FarmAdminScreen(
             properties = DialogProperties(usePlatformDefaultWidth = false),
             modifier = Modifier.fillMaxWidth(0.92f),
             icon = { Icon(Icons.Default.Block, contentDescription = null, tint = Color(0xFFC62828)) },
-            title = { Text("Listing Limit Reached", fontWeight = FontWeight.Bold) },
+            title = { Text("Listing Quota Exhausted", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Your goat listing limit has been reached.\nContact +91 63808 98358 for approval to add more goats.",
+                        text = "Your goat listing quota has been fully consumed ($consumedListingSlots / $goatListingLimit slots).\nContact Super Admin to purchase additional listing slots.",
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Current limit: $goatListingLimit goats\nUsed slots: ${myGoats.size}\nRemaining slots: 0\n\nContact options:\n• WhatsApp: +91 63808 98358\n• Call: +91 63808 98358\n\nApproval and limit increases are managed manually outside the app.",
+                        text = "Current limit: $goatListingLimit slots\nConsumed slots: $consumedListingSlots\nRemaining slots: 0\n\nContact options:\n• WhatsApp: +91 63808 98358\n• Call: +91 63808 98358\n\nQuota increases are managed manually by Super Admin.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
@@ -2679,7 +2698,8 @@ private fun MetricCard(title: String, value: String, icon: ImageVector, modifier
 private fun FarmListingPaymentsTab(
     payments: List<com.example.model.ListingPayment>,
     isAmmalFarm: Boolean,
-    myGoats: List<Goat> = emptyList()
+    myGoats: List<Goat> = emptyList(),
+    onViewReceipt: (com.example.model.ListingPayment) -> Unit = {}
 ) {
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -2702,14 +2722,14 @@ private fun FarmListingPaymentsTab(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Receipt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Listing Records & Receipts", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("Official Receipts & Quota Ledger", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         }
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.primary
                         ) {
                             Text(
-                                if (isAmmalFarm) "₹0 Fee Waiver" else "Partner Listing Quota",
+                                if (isAmmalFarm) "₹0 Fee Waiver" else "${payments.count { it.status == com.example.model.PaymentStatus.PAID }} Verified Receipts",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
@@ -2722,7 +2742,7 @@ private fun FarmListingPaymentsTab(
                         if (isAmmalFarm) {
                             "As the Ammal Farm seed owner, your goat listings enjoy a 100% platform waiver (₹0 fee) and are automatically approved."
                         } else {
-                            "Partner farms have a default listing limit of 10 goats. When the limit is reached, contact Super Admin to increase your listing limit.\n\nWhatsApp: +91 63808 98358\nCall: +91 63808 98358\n\nPayment for increasing the limit is handled directly with us outside the app."
+                            "Official receipts issued for your farm registration approval and listing quota increases. Tapping a receipt opens the verified breakdown.\n\nTo purchase additional listing slots, contact Super Admin:\nWhatsApp: +91 63808 98358 | Call: +91 63808 98358"
                         },
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2755,7 +2775,7 @@ private fun FarmListingPaymentsTab(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Any receipts will appear here.",
+                            "Verified receipts issued by Super Admin will appear here.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2768,7 +2788,9 @@ private fun FarmListingPaymentsTab(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onViewReceipt(payment) }
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(
@@ -2778,7 +2800,12 @@ private fun FarmListingPaymentsTab(
                         ) {
                             Column {
                                 Text(payment.receiptNumber ?: "RCPT-${payment.id.take(8).uppercase()}", fontWeight = FontWeight.Black, fontSize = 14.sp)
-                                Text("Goat: ${payment.goatName.ifBlank { payment.goatCode.ifBlank { "Listing" } }}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val subtitleText = when (payment.paymentType) {
+                                    com.example.model.PaymentType.FARM_APPROVAL -> "Farm Approval • 2 Free Slots"
+                                    com.example.model.PaymentType.ADDITIONAL_QUOTA -> "Quota Increase (+${payment.slotsAdded} slots)"
+                                    else -> if (payment.goatName.isNotBlank()) "Goat: ${payment.goatName}" else "Listing Fee"
+                                }
+                                Text(subtitleText, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Surface(
                                 shape = RoundedCornerShape(4.dp),
@@ -2805,9 +2832,9 @@ private fun FarmListingPaymentsTab(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Amount: ₹${payment.amount.toInt()}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                            Text("Amount: ₹${payment.amount.toInt()} ${payment.currency}", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
                             Text(
-                                "Order: ${payment.orderId?.takeLast(10) ?: "Direct"}",
+                                "Method: ${payment.paymentMethod}",
                                 fontSize = 11.sp,
                                 color = Color.Gray
                             )

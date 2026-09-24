@@ -217,8 +217,11 @@ object UserFriendlyErrorMapper {
         if (isNetworkFailure(throwable, msg)) {
             return "Unable to connect. Please check your internet connection and try again."
         }
-        if (msg.contains("listing limit") || msg.contains("limit reached") || msg.contains("goat_listing_limit")) {
-            return "Your goat listing limit has been reached. Contact +91 63808 98358 for approval to add more goats."
+        if (msg.contains("must be approved") || msg.contains("approval fee") || msg.contains("farm registration is pending")) {
+            return "Your partner farm must be approved by Super Admin before you can add goats.\nPlease complete the initial approval fee payment."
+        }
+        if (msg.contains("quota") || msg.contains("listing limit") || msg.contains("limit reached") || msg.contains("consumed") || msg.contains("goat_listing_limit")) {
+            return "Your goat listing quota has been fully consumed. Contact Super Admin (+91 63808 98358) to purchase additional listing slots."
         }
         if (isPermissionFailure(msg)) {
             return "You do not have permission to add or modify this goat listing."

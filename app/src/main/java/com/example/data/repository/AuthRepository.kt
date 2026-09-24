@@ -983,7 +983,7 @@ class AuthRepositoryImpl(
                         description = cleanDescription,
                         verificationStatus = VerificationStatus.PENDING,
                         isAmmalOwnFarm = false,
-                        goatListingLimit = 2
+                        goatListingLimit = 0
                     )
                     _currentFarm.value = fallbackFarm
                     FarmLocalCache.saveFarmProfile(fallbackFarm)
@@ -1104,7 +1104,7 @@ class AuthRepositoryImpl(
                                         contactEmail = cleanEmail.ifBlank { null },
                                         status = "PENDING",
                                         isAmmalOwnFarm = false,
-                                        goatListingLimit = 2,
+                                        goatListingLimit = 0,
                                         rating = 5.0,
                                         reviewCount = 0,
                                         createdAt = nowIso,
@@ -1274,11 +1274,7 @@ class AuthRepositoryImpl(
     override suspend fun logout() {
         val userToLogOut = _currentUser.value
         if (userToLogOut != null) {
-            try {
-                FirebaseConfig.unregisterTokenForUser(userToLogOut.id)
-            } catch (e: Exception) {
-                Log.w(TAG, "Notice unregistering FCM token on logout: ${e.message}")
-            }
+            FirebaseConfig.activeUserId = null
         }
         try {
             SupabaseModule.auth.signOut()

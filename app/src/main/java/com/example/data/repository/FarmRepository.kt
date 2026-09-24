@@ -126,8 +126,11 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
             val cleanFarm = farm.copy(
                 id = validFarmId,
                 ownerId = validOwnerId,
-                verificationStatus = VerificationStatus.PENDING
+                verificationStatus = VerificationStatus.PENDING,
+                goatListingLimit = 0
             )
+            localFarmLimits[validFarmId] = 0
+            localFarmLimits[farm.id] = 0
             FarmLocalCache.saveFarmProfile(cleanFarm)
 
             if (SupabaseConfig.isConfigured) {
@@ -312,6 +315,21 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
                 SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(updatePayload) {
                     filter {
                         eq("id", validFarmId)
+                    }
+                }
+
+                if (status == VerificationStatus.APPROVED) {
+                    val currentLimit = localFarmLimits[validFarmId] ?: localFarmLimits[farmId] ?: 0
+                    if (currentLimit <= 0) {
+                        localFarmLimits[validFarmId] = 2
+                        localFarmLimits[farmId] = 2
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(buildJsonObject {
+                                put("goat_listing_limit", 2)
+                            }) {
+                                filter { eq("id", validFarmId) }
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             }

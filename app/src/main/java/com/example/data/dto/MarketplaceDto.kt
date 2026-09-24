@@ -307,7 +307,7 @@ data class FarmDto(
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
     @Transient val tagline: String? = null,
-    @SerialName("goat_listing_limit") val goatListingLimit: Int? = 2,
+    @SerialName("goat_listing_limit") val goatListingLimit: Int? = 0,
     val rating: Double = 0.0,
     @SerialName("review_count") val reviewCount: Int = 0
 ) {
@@ -324,7 +324,7 @@ data class FarmDto(
 
         // Ownership / hub status is resolved by DB column is_ammal_own_farm or seeded central hub UUID
         val isAmmal = isAmmalOwnFarm || id == SEED_AMMAL_FARM_UUID
-        val effectiveLimit = customLimit ?: (if (isAmmal) 1000 else (goatListingLimit ?: 2))
+        val effectiveLimit = customLimit ?: (if (isAmmal) 1000 else (goatListingLimit ?: (if (effectiveStatus == VerificationStatus.APPROVED) 2 else 0)))
         val locationStr = if (effectiveDistrict.isNotBlank()) "$effectiveDistrict, $effectiveState" else effectiveState
         val effectiveFarmCode = farmCode?.trim()?.ifBlank { null } ?: ("FARM-" + id.take(6).uppercase())
 
@@ -501,9 +501,12 @@ data class NotificationDto(
     @SerialName("created_at") val createdAt: String? = null
 ) {
     fun toDomain(): AppNotification {
-        val parsedType = linkType?.let {
-            try { NotificationType.valueOf(it.uppercase()) } catch (_: Exception) { null }
-        } ?: NotificationType.SYSTEM_ALERT
+        val parsedType = com.example.util.DeepLinkUtils.normalizeNotificationType(
+            linkType = linkType,
+            referenceId = linkId,
+            title = title,
+            body = body
+        )
 
         val route = com.example.util.DeepLinkUtils.resolveDeepLinkRoute(parsedType, linkId)
 
@@ -637,11 +640,14 @@ data class ListingPaymentDto(
     val amount: Double = 0.0,
     val currency: String = "INR",
     @SerialName("payment_type") val paymentType: String = "LISTING_FEE",
+    @SerialName("slots_added") val slotsAdded: Int = 0,
     @SerialName("payment_status") val paymentStatus: String = "PENDING",
     @SerialName("payment_gateway_ref") val paymentGatewayRef: String? = null,
     @SerialName("razorpay_payment_id") val razorpayPaymentId: String? = null,
     @SerialName("razorpay_signature") val razorpaySignature: String? = null,
     @SerialName("receipt_number") val receiptNumber: String? = null,
+    @SerialName("payment_method") val paymentMethod: String? = null,
+    val notes: String? = null,
     @SerialName("payment_date") val paymentDate: String? = null,
     @SerialName("error_message") val errorMessage: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
@@ -668,12 +674,37 @@ data class ListingPaymentDto(
             farmName = farmName,
             amount = amount,
             currency = currency,
+            paymentType = paymentType,
+            slotsAdded = slotsAdded,
             status = parsedStatus,
             orderId = paymentGatewayRef,
             razorpayPaymentId = razorpayPaymentId,
             receiptNumber = receiptNumber,
+            paymentMethod = paymentMethod ?: "Manual Payment",
+            notes = notes ?: "",
             createdAt = timestamp ?: System.currentTimeMillis()
         )
+    }
+
+    companion object {
+        fun fromDomain(payment: ListingPayment, payerId: String = ""): ListingPaymentDto {
+            return ListingPaymentDto(
+                id = payment.id,
+                goatId = payment.goatId.takeIf { it.isNotBlank() },
+                farmId = payment.farmId.takeIf { it.isNotBlank() },
+                payerId = payerId,
+                amount = payment.amount,
+                currency = payment.currency,
+                paymentType = payment.paymentType,
+                slotsAdded = payment.slotsAdded,
+                paymentStatus = payment.status.name,
+                paymentGatewayRef = payment.orderId,
+                razorpayPaymentId = payment.razorpayPaymentId,
+                receiptNumber = payment.receiptNumber,
+                paymentMethod = payment.paymentMethod,
+                notes = payment.notes
+            )
+        }
     }
 }
 

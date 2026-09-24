@@ -42,6 +42,7 @@ data class MarketplaceUiState(
     val wishlistItems: List<WishlistItem> = emptyList(),
     val wishlistGoatIds: Set<String> = emptySet(),
     val notifications: List<AppNotification> = emptyList(),
+    val platformPricing: PlatformPricing = PlatformPricing(),
     val platformStats: PlatformStats = PlatformStats(),
     val filterCriteria: GoatFilterCriteria = GoatFilterCriteria(),
     val viewMode: ViewMode = ViewMode.GRID,
@@ -56,7 +57,8 @@ data class MarketplaceUiState(
     val isRetrying: Boolean = false,
     val networkError: String? = null,
     val errorMessage: String? = null,
-    val successMessage: String? = null
+    val successMessage: String? = null,
+    val selectedBookingIdForDetail: String? = null
 ) {
     // Backward compatibility helpers
     val approvedFarms: List<Farm> get() = farms.filter { it.verificationStatus == VerificationStatus.APPROVED }
@@ -219,6 +221,14 @@ class MarketplaceViewModel(
                 }
         }
 
+        viewModelScope.launch {
+            repository.getPlatformPricing()
+                .catch { e -> Log.w("MarketplaceVM", "Error observing pricing: ${e.message}") }
+                .collect { pricing ->
+                    _uiState.update { s -> s.copy(platformPricing = pricing) }
+                }
+        }
+
         // Initially load public marketplace data accessible to everyone
         loadPublicMarketplaceData()
     }
@@ -270,6 +280,7 @@ class MarketplaceViewModel(
     }
 
     private fun handleNetworkOrSyncError(e: Throwable, tag: String) {
+        if (e is kotlinx.coroutines.CancellationException) return
         if (isAuthOrPermissionError(e)) {
             Log.w("MarketplaceVM", "Access restricted for $tag (expected per role permissions): ${e.message}")
             return
@@ -332,9 +343,11 @@ class MarketplaceViewModel(
         when {
             isSuperAdmin -> {
                 loadSuperAdminData(user)
+                loadCustomerData(user)
             }
             isFarmAdmin -> {
                 loadFarmAdminData(user)
+                loadCustomerData(user)
             }
             else -> {
                 loadCustomerData(user)
@@ -525,6 +538,7 @@ class MarketplaceViewModel(
                     repository.searchAndFilterGoats(criteria)
                 }
                 .catch { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     val msg = e.message ?: ""
                     if (!SupabaseConfig.isConfigured || msg.contains("Database not connected", ignoreCase = true)) {
                         Log.w("MarketplaceVM", "Notice: database not connected or unconfigured in searchAndFilterGoats: $msg")
@@ -728,13 +742,44 @@ class MarketplaceViewModel(
         _uiState.update { it.copy(selectedGoat = goat) }
     }
 
+    fun findGoat(goatId: String): Goat? {
+        if (goatId.isBlank()) return null
+        val cleanId = goatId.trim()
+        return _uiState.value.goats.find { 
+            it.id.equals(cleanId, ignoreCase = true) ||
+            it.goatCode.equals(cleanId, ignoreCase = true) ||
+            it.name.equals(cleanId, ignoreCase = true)
+        } ?: _uiState.value.allAdminGoats.find {
+            it.id.equals(cleanId, ignoreCase = true) ||
+            it.goatCode.equals(cleanId, ignoreCase = true) ||
+            it.name.equals(cleanId, ignoreCase = true)
+        }
+    }
+
     fun selectGoatById(goatId: String): Goat? {
         if (goatId.isBlank()) return null
-        val goat = _uiState.value.goats.find { 
-            it.id == goatId || it.id.equals(goatId, ignoreCase = true)
+        val goat = findGoat(goatId)
+        if (goat != null) {
+            _uiState.update { it.copy(selectedGoat = goat) }
         }
-        _uiState.update { it.copy(selectedGoat = goat) }
         return goat
+    }
+
+    suspend fun selectOrFetchGoatById(goatId: String): Goat? {
+        if (goatId.isBlank()) return null
+        val inMemory = selectGoatById(goatId)
+        if (inMemory != null) return inMemory
+
+        val cleanId = goatId.trim()
+        return try {
+            val fetched = repository.getGoatById(cleanId).firstOrNull()
+            if (fetched != null) {
+                _uiState.update { it.copy(selectedGoat = fetched) }
+            }
+            fetched
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun selectFarm(farm: Farm?) {
@@ -753,7 +798,11 @@ class MarketplaceViewModel(
     }
 
     fun selectFarmById(farmId: String): Farm? {
-        val farm = _uiState.value.farms.find { it.id == farmId }
+        val cleanId = farmId.trim()
+        val farm = _uiState.value.farms.find { 
+            it.id.equals(cleanId, ignoreCase = true) ||
+            it.name.equals(cleanId, ignoreCase = true)
+        }
         _uiState.update {
             it.copy(
                 selectedFarm = farm,
@@ -769,6 +818,23 @@ class MarketplaceViewModel(
         return farm
     }
 
+    suspend fun selectOrFetchFarmById(farmId: String): Farm? {
+        if (farmId.isBlank()) return null
+        val inMemory = selectFarmById(farmId)
+        if (inMemory != null) return inMemory
+
+        val cleanId = farmId.trim()
+        return try {
+            val fetched = repository.getFarmById(cleanId).firstOrNull()
+            if (fetched != null) {
+                selectFarm(fetched)
+            }
+            fetched
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun loadFarmPublicGoats(farmId: String) {
         if (farmId.isBlank()) return
         val validFarmId = try { ensureValidUuid(farmId.trim()) } catch (_: Exception) { farmId.trim() }
@@ -776,6 +842,7 @@ class MarketplaceViewModel(
             _uiState.update { it.copy(isSelectedFarmLoading = true, selectedFarmError = null) }
             repository.getGoatsByFarm(validFarmId)
                 .catch { e ->
+                    if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.e("MarketplaceVM", "Notice: remote farm goats query failed for $validFarmId: ${e.message}", e)
                     _uiState.update {
                         it.copy(
@@ -831,38 +898,44 @@ class MarketplaceViewModel(
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = repository.createBooking(goatId, notes)
-            _uiState.update { it.copy(isLoading = false) }
-            result.onSuccess { newBooking ->
-                val enrichedBooking = if (newBooking.goatPhoto.isBlank()) {
-                    val fallbackPhoto = _uiState.value.goats.find { it.id == goatId }?.photos?.firstOrNull()
-                        ?: com.example.core.util.GoatImageResolver.getCachedPhoto(goatId)
-                        ?: ""
-                    if (fallbackPhoto.isNotBlank()) newBooking.copy(goatPhoto = fallbackPhoto) else newBooking
-                } else newBooking
-                _uiState.update { state ->
-                    val isForFarm = state.currentUser?.farmId != null && state.currentUser.farmId == enrichedBooking.farmId
-                    val updatedFarmBookings = if (isForFarm || state.currentUser?.role == UserRole.FARM_ADMIN) {
-                        listOf(enrichedBooking) + state.farmBookings.filter { it.id != enrichedBooking.id }
-                    } else state.farmBookings
+            val opKey = "create_booking_$goatId"
+            if (!inFlightOperations.add(opKey)) return@launch
+            try {
+                _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+                val result = repository.createBooking(goatId, notes)
+                _uiState.update { it.copy(isLoading = false) }
+                result.onSuccess { newBooking ->
+                    val enrichedBooking = if (newBooking.goatPhoto.isBlank()) {
+                        val fallbackPhoto = _uiState.value.goats.find { it.id == goatId }?.photos?.firstOrNull()
+                            ?: com.example.core.util.GoatImageResolver.getCachedPhoto(goatId)
+                            ?: ""
+                        if (fallbackPhoto.isNotBlank()) newBooking.copy(goatPhoto = fallbackPhoto) else newBooking
+                    } else newBooking
+                    _uiState.update { state ->
+                        val isForFarm = state.currentUser?.farmId != null && state.currentUser.farmId == enrichedBooking.farmId
+                        val updatedFarmBookings = if (isForFarm || state.currentUser?.role == UserRole.FARM_ADMIN) {
+                            listOf(enrichedBooking) + state.farmBookings.filter { it.id != enrichedBooking.id }
+                        } else state.farmBookings
 
-                    state.copy(
-                        customerBookings = listOf(enrichedBooking) + state.customerBookings.filter { it.id != enrichedBooking.id },
-                        allBookings = listOf(enrichedBooking) + state.allBookings.filter { it.id != enrichedBooking.id },
-                        farmBookings = updatedFarmBookings,
-                        goats = state.goats.map { if (it.id == goatId) it.copy(availabilityStatus = AvailabilityStatus.RESERVED) else it },
-                        allAdminGoats = state.allAdminGoats.map { if (it.id == goatId) it.copy(availabilityStatus = AvailabilityStatus.RESERVED) else it },
-                        selectedGoat = if (state.selectedGoat?.id == goatId) state.selectedGoat.copy(availabilityStatus = AvailabilityStatus.RESERVED) else state.selectedGoat,
-                        successMessage = "Goat reserved successfully!"
-                    )
+                        state.copy(
+                            customerBookings = listOf(enrichedBooking) + state.customerBookings.filter { it.id != enrichedBooking.id },
+                            allBookings = listOf(enrichedBooking) + state.allBookings.filter { it.id != enrichedBooking.id },
+                            farmBookings = updatedFarmBookings,
+                            goats = state.goats.map { if (it.id == goatId) it.copy(availabilityStatus = AvailabilityStatus.RESERVED) else it },
+                            allAdminGoats = state.allAdminGoats.map { if (it.id == goatId) it.copy(availabilityStatus = AvailabilityStatus.RESERVED) else it },
+                            selectedGoat = if (state.selectedGoat?.id == goatId) state.selectedGoat.copy(availabilityStatus = AvailabilityStatus.RESERVED) else state.selectedGoat,
+                            successMessage = "Goat reserved successfully!"
+                        )
+                    }
+                    repository.invalidateCache()
+                    _refreshTrigger.tryEmit(Unit)
+                    loadAllPlatformData()
+                    onSuccess()
+                }.onFailure { err ->
+                    _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.forBooking(err)) }
                 }
-                repository.invalidateCache()
-                _refreshTrigger.tryEmit(Unit)
-                loadAllPlatformData()
-                onSuccess()
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.forBooking(err)) }
+            } finally {
+                inFlightOperations.remove(opKey)
             }
         }
     }
@@ -886,51 +959,65 @@ class MarketplaceViewModel(
         onComplete: ((Boolean) -> Unit)? = null
     ) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            val result = repository.updateBookingStatus(bookingId, status, reason)
-            _uiState.update { it.copy(isLoading = false) }
-            result.onSuccess {
-                val actionMessage = when (status) {
-                    AvailabilityStatus.CONFIRMED -> "Booking confirmed successfully."
-                    AvailabilityStatus.CANCELLED, AvailabilityStatus.REJECTED -> "Booking cancelled successfully."
-                    AvailabilityStatus.COMPLETED -> "Booking marked as completed."
-                    else -> "Booking status updated to ${status.name}."
-                }
-                _uiState.update { state ->
-                    val updatedGoatStatus = when (status) {
-                        AvailabilityStatus.CONFIRMED -> AvailabilityStatus.CONFIRMED
-                        AvailabilityStatus.COMPLETED -> AvailabilityStatus.COMPLETED
-                        AvailabilityStatus.CANCELLED, AvailabilityStatus.REJECTED -> AvailabilityStatus.AVAILABLE
-                        AvailabilityStatus.RESERVED -> AvailabilityStatus.RESERVED
-                        else -> AvailabilityStatus.AVAILABLE
+            val opKey = "update_booking_${bookingId}_${status.name}"
+            if (!inFlightOperations.add(opKey)) return@launch
+            try {
+                _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+                val result = repository.updateBookingStatus(bookingId, status, reason)
+                _uiState.update { it.copy(isLoading = false) }
+                result.onSuccess {
+                    val actionMessage = when (status) {
+                        AvailabilityStatus.CONFIRMED -> "Booking confirmed successfully."
+                        AvailabilityStatus.CANCELLED, AvailabilityStatus.REJECTED -> "Booking cancelled successfully."
+                        AvailabilityStatus.COMPLETED -> "Booking marked as completed."
+                        else -> "Booking status updated to ${status.name}."
                     }
-                    val targetBooking = state.allBookings.find { it.id == bookingId }
-                        ?: state.customerBookings.find { it.id == bookingId }
-                        ?: state.farmBookings.find { it.id == bookingId }
-                    val targetGoatId = targetBooking?.goatId ?: if (bookingId.startsWith("res-")) bookingId.removePrefix("res-") else null
+                    _uiState.update { state ->
+                        val updatedGoatStatus = when (status) {
+                            AvailabilityStatus.CONFIRMED -> AvailabilityStatus.CONFIRMED
+                            AvailabilityStatus.COMPLETED -> AvailabilityStatus.COMPLETED
+                            AvailabilityStatus.CANCELLED, AvailabilityStatus.REJECTED -> AvailabilityStatus.AVAILABLE
+                            AvailabilityStatus.RESERVED -> AvailabilityStatus.RESERVED
+                            else -> AvailabilityStatus.AVAILABLE
+                        }
+                        val targetBooking = state.allBookings.find { it.id == bookingId }
+                            ?: state.customerBookings.find { it.id == bookingId }
+                            ?: state.farmBookings.find { it.id == bookingId }
+                        val targetGoatId = targetBooking?.goatId ?: if (bookingId.startsWith("res-")) bookingId.removePrefix("res-") else null
 
-                    state.copy(
-                        allBookings = state.allBookings.map { if (it.id == bookingId) it.copy(status = status) else it },
-                        customerBookings = state.customerBookings.map { if (it.id == bookingId) it.copy(status = status) else it },
-                        farmBookings = state.farmBookings.map { if (it.id == bookingId) it.copy(status = status) else it },
-                        goats = state.goats.map { if (targetGoatId != null && it.id == targetGoatId) it.copy(availabilityStatus = updatedGoatStatus) else it },
-                        allAdminGoats = state.allAdminGoats.map { if (targetGoatId != null && it.id == targetGoatId) it.copy(availabilityStatus = updatedGoatStatus) else it },
-                        selectedGoat = if (targetGoatId != null && state.selectedGoat?.id == targetGoatId) state.selectedGoat.copy(availabilityStatus = updatedGoatStatus) else state.selectedGoat,
-                        successMessage = actionMessage
-                    )
+                        state.copy(
+                            allBookings = state.allBookings.map { if (it.id == bookingId) it.copy(status = status) else it },
+                            customerBookings = state.customerBookings.map { if (it.id == bookingId) it.copy(status = status) else it },
+                            farmBookings = state.farmBookings.map { if (it.id == bookingId) it.copy(status = status) else it },
+                            goats = state.goats.map { if (targetGoatId != null && it.id == targetGoatId) it.copy(availabilityStatus = updatedGoatStatus) else it },
+                            allAdminGoats = state.allAdminGoats.map { if (targetGoatId != null && it.id == targetGoatId) it.copy(availabilityStatus = updatedGoatStatus) else it },
+                            selectedGoat = if (targetGoatId != null && state.selectedGoat?.id == targetGoatId) state.selectedGoat.copy(availabilityStatus = updatedGoatStatus) else state.selectedGoat,
+                            successMessage = actionMessage
+                        )
+                    }
+                    repository.invalidateCache()
+                    _refreshTrigger.tryEmit(Unit)
+                    loadAllPlatformData()
+                    onComplete?.invoke(true)
+                }.onFailure { err ->
+                    _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to update booking status")) }
+                    repository.invalidateCache()
+                    _refreshTrigger.tryEmit(Unit)
+                    loadAllPlatformData()
+                    onComplete?.invoke(false)
                 }
-                repository.invalidateCache()
-                _refreshTrigger.tryEmit(Unit)
-                loadAllPlatformData()
-                onComplete?.invoke(true)
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to update booking status")) }
-                repository.invalidateCache()
-                _refreshTrigger.tryEmit(Unit)
-                loadAllPlatformData()
-                onComplete?.invoke(false)
+            } finally {
+                inFlightOperations.remove(opKey)
             }
         }
+    }
+
+    fun selectBookingForDetail(bookingId: String?) {
+        _uiState.update { it.copy(selectedBookingIdForDetail = bookingId) }
+    }
+
+    fun clearSelectedBookingDetail() {
+        _uiState.update { it.copy(selectedBookingIdForDetail = null) }
     }
 
     fun addGoatListing(goat: Goat, onSuccess: () -> Unit) {
@@ -947,25 +1034,37 @@ class MarketplaceViewModel(
                 val isSuperAdmin = state.currentUser?.role == UserRole.SUPER_ADMIN
                 val limit = farm?.goatListingLimit ?: (if (isAmmal) 1000 else 2)
 
-                // Count existing goats listed by this farm
-                val farmGoatsCount = state.allAdminGoats.count {
-                    it.farmId == goat.farmId || (farm != null && it.farmId == farm.id)
-                }
-
-                if (!isAmmal && !isSuperAdmin && farmGoatsCount >= limit) {
+                // 1. Partner farm must be approved before adding goats
+                if (!isAmmal && !isSuperAdmin && farm?.verificationStatus != VerificationStatus.APPROVED) {
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = "Your goat listing limit has been reached.\nContact +91 63808 98358 for approval to add more goats."
+                            errorMessage = "Your partner farm must be approved by Super Admin before you can add goats.\nPlease complete the initial approval fee payment."
                         )
                     }
                     return@launch
                 }
 
-                // Ammal Farm listings: auto-approved live.
-                // Partner Farm listings: Submitted directly for Super Admin approval (Default limit: 10).
+                // 2. Count consumed slots (sold & deleted goats permanently consume their slot)
+                val farmGoatsCount = state.allAdminGoats.count {
+                    it.farmId == goat.farmId || (farm != null && it.farmId == farm.id)
+                }
+                val consumedSlots = com.example.core.util.FarmLocalCache.getConsumedListingSlots(goat.farmId, farmGoatsCount)
+
+                if (!isAmmal && !isSuperAdmin && consumedSlots >= limit) {
+                    val slotPrice = state.platformPricing.additionalSlotPrice.toInt()
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = "Your goat listing quota has been fully consumed ($consumedSlots / $limit slots).\nContact Super Admin to purchase additional listing slots (₹$slotPrice/slot)."
+                        )
+                    }
+                    return@launch
+                }
+
+                // Goat listings are auto-approved live when quota is available (Rule 13)
                 val targetGoat = goat.copy(
-                    approvalStatus = if (isAmmal) ApprovalStatus.APPROVED else ApprovalStatus.PENDING_APPROVAL,
+                    approvalStatus = ApprovalStatus.APPROVED,
                     availabilityStatus = AvailabilityStatus.AVAILABLE,
                     listingFeePaid = true,
                     listingFeeAmount = 0.0
@@ -976,6 +1075,9 @@ class MarketplaceViewModel(
                 _uiState.update { it.copy(isLoading = false) }
 
                 result.onSuccess { addedGoat ->
+                    // Permanently record slot consumption
+                    com.example.core.util.FarmLocalCache.recordListingSlotConsumed(goat.farmId)
+
                     _uiState.update { s ->
                         val updatedAdminGoats = listOf(addedGoat) + s.allAdminGoats.filterNot { it.id == addedGoat.id }
                         val updatedMarketplace = if (addedGoat.approvalStatus == ApprovalStatus.APPROVED) {
@@ -984,7 +1086,7 @@ class MarketplaceViewModel(
                         val msg = if (isAmmal) {
                             "Ammal Farm goat auto-approved & published live!"
                         } else {
-                            "Listing submitted successfully for Super Admin approval!"
+                            "Goat listing auto-approved & published live to marketplace!"
                         }
                         s.copy(
                             allAdminGoats = updatedAdminGoats,
@@ -1343,6 +1445,152 @@ class MarketplaceViewModel(
                 loadAllPlatformData()
             }.onFailure { err ->
                 _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to update farm listing limit. Please try again.")) }
+            }
+        }
+    }
+
+    fun approveFarmWithPayment(
+        farmId: String,
+        amount: Double,
+        paymentRef: String,
+        notes: String,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.recordFarmApprovalPayment(
+                farmId = farmId,
+                amount = amount,
+                paymentRef = paymentRef,
+                receiptNumber = null,
+                notes = notes
+            )
+            _uiState.update { it.copy(isLoading = false) }
+
+            result.onSuccess { payment ->
+                _uiState.update { state ->
+                    val updatedFarms = state.farms.map {
+                        if (it.id == farmId) it.copy(
+                            verificationStatus = VerificationStatus.APPROVED,
+                            goatListingLimit = maxOf(it.goatListingLimit, 2)
+                        ) else it
+                    }
+                    val updatedPayments = (listOf(payment) + state.listingPayments).distinctBy { it.id }
+                    state.copy(
+                        farms = updatedFarms,
+                        listingPayments = updatedPayments,
+                        successMessage = "Farm approved! Initial 2 free slots activated. Receipt #${payment.receiptNumber} recorded."
+                    )
+                }
+
+                // Dispatch notification for farm approval and payment
+                val targetFarm = _uiState.value.farms.find { it.id == farmId }
+                val farmOwnerId = targetFarm?.ownerId ?: ""
+                val notification = AppNotification(
+                    id = UUID.randomUUID().toString(),
+                    recipientUserId = farmOwnerId,
+                    targetRole = UserRole.FARM_ADMIN,
+                    title = "Partner Farm Approved!",
+                    message = "Your farm '${targetFarm?.name ?: "Farm"}' has been approved with 2 free listing slots. Receipt #${payment.receiptNumber} is available.",
+                    type = NotificationType.FARM_APPROVED,
+                    referenceId = farmId,
+                    deepLinkRoute = "farm_admin"
+                )
+                repository.sendNotification(notification)
+                com.example.core.supabase.SupabaseModule.getApplicationContext()?.let { ctx ->
+                    com.example.core.notification.NotificationHelper.showSystemNotification(ctx, notification)
+                }
+
+                loadAllPlatformData()
+                _refreshTrigger.tryEmit(Unit)
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to record approval payment. Please try again.")) }
+            }
+        }
+    }
+
+    fun increaseFarmListingQuota(
+        farmId: String,
+        slotsToAdd: Int,
+        amount: Double,
+        paymentRef: String,
+        notes: String,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.recordQuotaIncreasePayment(
+                farmId = farmId,
+                slotsToAdd = slotsToAdd,
+                amount = amount,
+                paymentRef = paymentRef,
+                receiptNumber = null,
+                notes = notes
+            )
+            _uiState.update { it.copy(isLoading = false) }
+
+            result.onSuccess { payment ->
+                val targetFarm = _uiState.value.farms.find { it.id == farmId }
+                val newLimit = (targetFarm?.goatListingLimit ?: 0) + slotsToAdd
+                _uiState.update { state ->
+                    val updatedFarms = state.farms.map {
+                        if (it.id == farmId) it.copy(goatListingLimit = newLimit) else it
+                    }
+                    val updatedPayments = (listOf(payment) + state.listingPayments).distinctBy { it.id }
+                    state.copy(
+                        farms = updatedFarms,
+                        listingPayments = updatedPayments,
+                        successMessage = "Listing quota increased to $newLimit slots (+$slotsToAdd). Receipt #${payment.receiptNumber} recorded."
+                    )
+                }
+
+                // Dispatch notification for listing quota increase
+                val farmOwnerId = targetFarm?.ownerId ?: ""
+                val notification = AppNotification(
+                    id = UUID.randomUUID().toString(),
+                    recipientUserId = farmOwnerId,
+                    targetRole = UserRole.FARM_ADMIN,
+                    title = "Listing Quota Increased!",
+                    message = "Your farm listing limit is now $newLimit goats (+$slotsToAdd slots added). Receipt #${payment.receiptNumber} is available in Fee Receipts.",
+                    type = NotificationType.LISTING_QUOTA_INCREASED,
+                    referenceId = farmId,
+                    deepLinkRoute = "farm_admin"
+                )
+                repository.sendNotification(notification)
+                com.example.core.supabase.SupabaseModule.getApplicationContext()?.let { ctx ->
+                    com.example.core.notification.NotificationHelper.showSystemNotification(ctx, notification)
+                }
+
+                loadAllPlatformData()
+                _refreshTrigger.tryEmit(Unit)
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to increase quota. Please try again.")) }
+            }
+        }
+    }
+
+    fun updatePlatformPricing(
+        approvalPrice: Double,
+        slotPrice: Double,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.updatePlatformPricing(approvalPrice, slotPrice)
+            _uiState.update { it.copy(isLoading = false) }
+
+            result.onSuccess { pricing ->
+                _uiState.update {
+                    it.copy(
+                        platformPricing = pricing,
+                        successMessage = "Platform pricing updated: Farm Approval = ₹${pricing.farmApprovalPrice.toInt()}, Additional Slot = ₹${pricing.additionalSlotPrice.toInt()}."
+                    )
+                }
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to update pricing.")) }
             }
         }
     }

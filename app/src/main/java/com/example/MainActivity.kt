@@ -83,16 +83,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Sync AuthViewModel user with MarketplaceViewModel & handle FCM token registration + permission prompt
+                // Sync AuthViewModel user with MarketplaceViewModel & handle notification permission prompt
                 LaunchedEffect(authUiState.currentUser) {
                     val user = authUiState.currentUser
                     marketplaceViewModel.setUser(user)
+                    FirebaseConfig.activeUserId = user?.id
                     if (user != null) {
-                        val token = FirebaseConfig.deviceToken
-                        if (!token.isNullOrBlank()) {
-                            FirebaseConfig.registerTokenForUser(user.id, token)
-                        }
-
                         // Request notification permission once on Android 13+ (Tiramisu)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             val prefs = context.getSharedPreferences("ammal_app_prefs", Context.MODE_PRIVATE)
@@ -148,91 +144,105 @@ class MainActivity : ComponentActivity() {
                     val activeUserId = currentUser?.id
 
                     // Security: User Recipient Isolation
-                    if (!payload.recipientUserId.isNullOrBlank() && activeUserId != null && payload.recipientUserId != activeUserId) {
-                        Toast.makeText(context, "Access Denied: Notification is meant for a different account.", Toast.LENGTH_SHORT).show()
-                        marketplaceViewModel.clearPendingDeepLink()
-                        return@LaunchedEffect
-                    }
-
-                    // Auth requirement
-                    if (!authUiState.isAuthenticated && !payload.recipientUserId.isNullOrBlank()) {
-                        navController.navigate(Screen.Login.route)
-                        return@LaunchedEffect
+                    if (!payload.recipientUserId.isNullOrBlank() && activeUserId != null && !payload.recipientUserId.equals(activeUserId, ignoreCase = true)) {
+                        if (!payload.intentKey.startsWith("inapp_")) {
+                            Toast.makeText(context, "Access Denied: Notification is meant for a different account.", Toast.LENGTH_SHORT).show()
+                            marketplaceViewModel.clearPendingDeepLink()
+                            return@LaunchedEffect
+                        }
                     }
 
                     val targetRoute = payload.route?.takeIf { it.isNotBlank() }
                         ?: payload.notificationType?.let { com.example.util.DeepLinkUtils.resolveDeepLinkRoute(it, payload.referenceId) }
                         ?: Screen.Marketplace.route
 
+                    // Wait for marketplace data to finish initial load if routing to goat detail
+                    if (uiState.isLoading && uiState.goats.isEmpty() && (targetRoute == "goat_detail" || targetRoute == Screen.GoatDetail.route)) {
+                        return@LaunchedEffect
+                    }
+
                     val authoritativeRole = currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
+                    val requiresAuth = targetRoute in listOf("orders", Screen.Orders.route, "my_bookings", Screen.MyBookings.route, "farm_dashboard", Screen.FarmDashboard.route, "super_admin_dashboard", Screen.SuperAdminDashboard.route)
+
+                    if (requiresAuth && !authUiState.isAuthenticated) {
+                        navController.navigate(Screen.Login.route) { launchSingleTop = true }
+                        marketplaceViewModel.clearPendingDeepLink()
+                        return@LaunchedEffect
+                    }
 
                     when (targetRoute) {
                         Screen.GoatDetail.route, "goat_detail" -> {
                             val refId = payload.referenceId
                             if (!refId.isNullOrBlank()) {
-                                val goat = marketplaceViewModel.selectGoatById(refId)
+                                val goat = marketplaceViewModel.selectOrFetchGoatById(refId)
                                 if (goat != null) {
-                                    navController.navigate(Screen.GoatDetail.route)
+                                    navController.navigate(Screen.GoatDetail.route) { launchSingleTop = true }
                                 } else {
                                     Toast.makeText(context, "This goat listing is no longer available or was removed.", Toast.LENGTH_SHORT).show()
-                                    navController.navigate(Screen.Marketplace.route)
+                                    navController.navigate(Screen.Marketplace.route) { launchSingleTop = true }
                                 }
                             } else if (uiState.selectedGoat != null) {
-                                navController.navigate(Screen.GoatDetail.route)
+                                navController.navigate(Screen.GoatDetail.route) { launchSingleTop = true }
                             } else {
-                                navController.navigate(Screen.Marketplace.route)
+                                navController.navigate(Screen.Marketplace.route) { launchSingleTop = true }
                             }
                         }
 
                         Screen.FarmDetail.route, "farm_detail" -> {
                             val refId = payload.referenceId
                             if (!refId.isNullOrBlank()) {
-                                val farm = marketplaceViewModel.selectFarmById(refId)
+                                val farm = marketplaceViewModel.selectOrFetchFarmById(refId)
                                 if (farm != null && farm.verificationStatus == com.example.model.VerificationStatus.APPROVED) {
-                                    navController.navigate(Screen.FarmDetail.route)
+                                    navController.navigate(Screen.FarmDetail.route) { launchSingleTop = true }
                                 } else {
                                     Toast.makeText(context, "This farm profile is no longer available.", Toast.LENGTH_SHORT).show()
-                                    navController.navigate(Screen.Marketplace.route)
+                                    navController.navigate(Screen.Marketplace.route) { launchSingleTop = true }
                                 }
                             } else if (uiState.selectedFarm != null) {
-                                navController.navigate(Screen.FarmDetail.route)
+                                navController.navigate(Screen.FarmDetail.route) { launchSingleTop = true }
                             } else {
-                                navController.navigate(Screen.Marketplace.route)
+                                navController.navigate(Screen.Marketplace.route) { launchSingleTop = true }
                             }
                         }
 
-                        Screen.MyBookings.route, "my_bookings" -> {
-                            navController.navigate(Screen.MyBookings.route)
+                        Screen.Orders.route, "orders", Screen.MyBookings.route, "my_bookings" -> {
+                            val refId = payload.referenceId
+                            if (!refId.isNullOrBlank()) {
+                                marketplaceViewModel.selectBookingForDetail(refId)
+                            }
+                            navController.navigate(Screen.Orders.route) { launchSingleTop = true }
                         }
 
                         Screen.FarmDashboard.route, "farm_dashboard" -> {
                             if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
-                                navController.navigate(Screen.FarmDashboard.route)
+                                navController.navigate(Screen.FarmDashboard.route) { launchSingleTop = true }
                             } else {
                                 Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
-                                navController.navigate(Screen.Marketplace.route)
+                                navController.navigate(Screen.Marketplace.route) { launchSingleTop = true }
                             }
                         }
 
                         Screen.SuperAdminDashboard.route, "super_admin_dashboard" -> {
                             if (authoritativeRole == UserRole.SUPER_ADMIN) {
-                                navController.navigate(Screen.SuperAdminDashboard.route)
+                                navController.navigate(Screen.SuperAdminDashboard.route) { launchSingleTop = true }
                             } else {
                                 Toast.makeText(context, "Access Denied: Super Admin authorization required.", Toast.LENGTH_SHORT).show()
                                 val safeRoute = if (authoritativeRole == UserRole.FARM_ADMIN) Screen.FarmDashboard.route else Screen.Marketplace.route
-                                navController.navigate(safeRoute)
+                                navController.navigate(safeRoute) { launchSingleTop = true }
                             }
                         }
 
                         Screen.Notifications.route, "notifications" -> {
-                            navController.navigate(Screen.Notifications.route)
+                            if (navController.currentDestination?.route != Screen.Notifications.route) {
+                                navController.navigate(Screen.Notifications.route) { launchSingleTop = true }
+                            }
                         }
 
                         else -> {
                             try {
-                                navController.navigate(targetRoute)
+                                navController.navigate(targetRoute) { launchSingleTop = true }
                             } catch (_: Exception) {
-                                navController.navigate(Screen.Marketplace.route)
+                                navController.navigate(Screen.Marketplace.route) { launchSingleTop = true }
                             }
                         }
                     }
@@ -253,8 +263,10 @@ class MainActivity : ComponentActivity() {
                 )
                 val isPrimaryTabRoute = currentRoute in listOf(
                     Screen.Marketplace.route,
-                    Screen.MyBookings.route,
+                    Screen.Orders.route,
+                    Screen.Account.route,
                     Screen.Profile.route,
+                    Screen.MyBookings.route,
                     Screen.FarmDashboard.route,
                     Screen.FarmBookings.route,
                     "farm_bookings",
@@ -310,7 +322,7 @@ class MainActivity : ComponentActivity() {
                     if (!deepLinkRoute.isNullOrBlank() && isAuthenticated) {
                         val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
                         when (deepLinkRoute) {
-                            "my_bookings" -> navController.navigate(Screen.MyBookings.route)
+                            "orders", "my_bookings" -> navController.navigate(Screen.Orders.route)
                             "farm_dashboard" -> {
                                 if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
                                     navController.navigate(Screen.FarmDashboard.route)
@@ -399,6 +411,21 @@ class MainActivity : ComponentActivity() {
                                         )
                                     )
 
+                                    val isOrders = currentRoute == Screen.Orders.route || currentRoute == Screen.MyBookings.route || currentRoute == Screen.FarmBookings.route || currentRoute == "farm_bookings"
+                                    NavigationBarItem(
+                                        selected = isOrders,
+                                        onClick = { navController.navigate(Screen.Orders.route) },
+                                        icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Orders") },
+                                        label = { Text("Orders", fontWeight = if (isOrders) FontWeight.Bold else FontWeight.Medium) },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    )
+
                                     if (currentRole == UserRole.SUPER_ADMIN) {
                                         val isAdminConsole = currentRoute == Screen.SuperAdminDashboard.route
                                         NavigationBarItem(
@@ -429,44 +456,14 @@ class MainActivity : ComponentActivity() {
                                                 unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         )
-
-                                        val isFarmBookings = currentRoute == Screen.FarmBookings.route || currentRoute == "farm_bookings" || currentRoute == "farm_admin_bookings"
-                                        NavigationBarItem(
-                                            selected = isFarmBookings,
-                                            onClick = { navController.navigate(Screen.FarmBookings.route) },
-                                            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Bookings") },
-                                            label = { Text("Bookings", fontWeight = if (isFarmBookings) FontWeight.Bold else FontWeight.Medium) },
-                                            colors = NavigationBarItemDefaults.colors(
-                                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        )
-                                    } else {
-                                        val isBookings = currentRoute == Screen.MyBookings.route
-                                        NavigationBarItem(
-                                            selected = isBookings,
-                                            onClick = { navController.navigate(Screen.MyBookings.route) },
-                                            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Bookings") },
-                                            label = { Text("Bookings", fontWeight = if (isBookings) FontWeight.Bold else FontWeight.Medium) },
-                                            colors = NavigationBarItemDefaults.colors(
-                                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                selectedTextColor = MaterialTheme.colorScheme.onSurface,
-                                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        )
                                     }
 
-                                    val isProfile = currentRoute == Screen.Profile.route
+                                    val isAccount = currentRoute == Screen.Account.route || currentRoute == Screen.Profile.route
                                     NavigationBarItem(
-                                        selected = isProfile,
-                                        onClick = { navController.navigate(Screen.Profile.route) },
-                                        icon = { Icon(Icons.Default.AccountCircle, contentDescription = "Profile") },
-                                        label = { Text("Profile", fontWeight = if (isProfile) FontWeight.Bold else FontWeight.Medium) },
+                                        selected = isAccount,
+                                        onClick = { navController.navigate(Screen.Account.route) },
+                                        icon = { Icon(Icons.Default.AccountCircle, contentDescription = "Account") },
+                                        label = { Text("Account", fontWeight = if (isAccount) FontWeight.Bold else FontWeight.Medium) },
                                         colors = NavigationBarItemDefaults.colors(
                                             selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                             selectedTextColor = MaterialTheme.colorScheme.onSurface,
@@ -532,6 +529,45 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        composable(Screen.Account.route) {
+                            ProfileScreen(
+                                authViewModel = authViewModel,
+                                uiState = authUiState,
+                                wishlistCount = uiState.wishlistGoatIds.size,
+                                currentThemeMode = currentThemeMode,
+                                onThemeModeChanged = { newMode ->
+                                    themeManager.setThemeMode(newMode)
+                                },
+                                onLogoutSuccess = {
+                                    navController.navigate(Screen.Login.route) {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                },
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToLogin = { navController.navigate(Screen.Login.route) },
+                                onNavigateToOrders = { navController.navigate(Screen.Orders.route) },
+                                onNavigateToWishlist = { navController.navigate(Screen.Wishlist.route) },
+                                onNavigateToSuperAdmin = {
+                                    val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
+                                    if (authoritativeRole == UserRole.SUPER_ADMIN) {
+                                        navController.navigate(Screen.SuperAdminDashboard.route)
+                                    } else {
+                                        Toast.makeText(context, "Access Denied: Super Admin authorization required.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onNavigateToFarmAdmin = {
+                                    val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
+                                    if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
+                                        navController.navigate(Screen.FarmDashboard.route)
+                                    } else {
+                                        Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                onNavigateToPrivacyPolicy = { navController.navigate(Screen.PrivacyPolicy.route) },
+                                onNavigateToTermsConditions = { navController.navigate(Screen.TermsConditions.route) }
+                            )
+                        }
+
                         composable(Screen.Profile.route) {
                             ProfileScreen(
                                 authViewModel = authViewModel,
@@ -548,6 +584,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateBack = { navController.popBackStack() },
                                 onNavigateToLogin = { navController.navigate(Screen.Login.route) },
+                                onNavigateToOrders = { navController.navigate(Screen.Orders.route) },
                                 onNavigateToWishlist = { navController.navigate(Screen.Wishlist.route) },
                                 onNavigateToSuperAdmin = {
                                     val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
@@ -601,11 +638,11 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onBookingsClick = {
-                                    navController.navigate(Screen.MyBookings.route)
+                                    navController.navigate(Screen.Orders.route)
                                 },
                                 onProfileClick = {
                                     if (authUiState.isAuthenticated) {
-                                        navController.navigate(Screen.Profile.route)
+                                        navController.navigate(Screen.Account.route)
                                     } else {
                                         navController.navigate(Screen.Login.route)
                                     }
@@ -674,7 +711,7 @@ class MainActivity : ComponentActivity() {
                                     } else if (authUiState.isAuthenticated || currentUser != null) {
                                         marketplaceViewModel.createBooking(goat.id, "Wishlist direct reservation") {
                                             Toast.makeText(context, "24-Hour Reservation Placed for ${goat.name}!", Toast.LENGTH_LONG).show()
-                                            navController.navigate(Screen.MyBookings.route)
+                                            navController.navigate(Screen.Orders.route)
                                         }
                                     } else {
                                         Toast.makeText(context, "Please sign in to book a goat.", Toast.LENGTH_SHORT).show()
@@ -774,7 +811,7 @@ class MainActivity : ComponentActivity() {
                                         } else if (authUiState.isAuthenticated || currentUser != null) {
                                             marketplaceViewModel.createBooking(goatId, notes) {
                                                 Toast.makeText(context, "24-Hour Reservation Placed! Farm breeder notified.", Toast.LENGTH_LONG).show()
-                                                navController.navigate(Screen.MyBookings.route)
+                                                navController.navigate(Screen.Orders.route)
                                             }
                                         } else {
                                             Toast.makeText(context, "Please sign in to book a goat.", Toast.LENGTH_SHORT).show()
@@ -795,12 +832,54 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // --- UNIFIED ORDERS ROUTE (CUSTOMER & FARM ADMIN & SUPER ADMIN) ---
+                        composable(Screen.Orders.route) {
+                            OrdersScreen(
+                                uiState = uiState,
+                                onNavigateBack = { navController.navigateUp() },
+                                onConfirmBooking = { bookingId ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CONFIRMED)
+                                },
+                                onRejectBooking = { bookingId, reason ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.REJECTED, reason)
+                                },
+                                onCancelBooking = { bookingId, reason ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED, reason)
+                                },
+                                onCompleteBooking = { bookingId ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.COMPLETED)
+                                },
+                                onRefresh = {
+                                    marketplaceViewModel.refreshMarketplace()
+                                },
+                                onDismissSelectedBooking = {
+                                    marketplaceViewModel.clearSelectedBookingDetail()
+                                }
+                            )
+                        }
+
+                        // Backward-compatible alias for legacy my_bookings route
                         composable(Screen.MyBookings.route) {
-                            BookingsScreen(
-                                bookings = uiState.customerBookings,
-                                goats = uiState.goats,
-                                onCancelBooking = { bookingId ->
-                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED)
+                            OrdersScreen(
+                                uiState = uiState,
+                                onNavigateBack = { navController.navigateUp() },
+                                onConfirmBooking = { bookingId ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CONFIRMED)
+                                },
+                                onRejectBooking = { bookingId, reason ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.REJECTED, reason)
+                                },
+                                onCancelBooking = { bookingId, reason ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED, reason)
+                                },
+                                onCompleteBooking = { bookingId ->
+                                    marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.COMPLETED)
+                                },
+                                onRefresh = {
+                                    marketplaceViewModel.refreshMarketplace()
+                                },
+                                onDismissSelectedBooking = {
+                                    marketplaceViewModel.clearSelectedBookingDetail()
                                 }
                             )
                         }
@@ -880,7 +959,7 @@ class MainActivity : ComponentActivity() {
                                     navController.navigate(Screen.Register.route)
                                 },
                                 onNavigateToBookings = {
-                                    navController.navigate(Screen.FarmBookings.route)
+                                    navController.navigate(Screen.Orders.route)
                                 },
                                 onNavigateBack = {
                                     navController.navigateUp()
@@ -889,7 +968,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // --- FARM ADMIN BOOKINGS ROUTE (GUARDED) ---
+                        // --- FARM ADMIN BOOKINGS ROUTE (GUARDED / REDIRECTED TO UNIFIED ORDERS) ---
                         composable(Screen.FarmBookings.route) {
                             val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
                             if (authoritativeRole == UserRole.CUSTOMER) {
@@ -917,23 +996,26 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             } else {
-                                FarmAdminBookingsScreen(
+                                OrdersScreen(
                                     uiState = uiState,
                                     onNavigateBack = { navController.navigateUp() },
                                     onConfirmBooking = { bookingId ->
                                         marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CONFIRMED)
                                     },
-                                    onRejectBooking = { bookingId ->
-                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.REJECTED)
+                                    onRejectBooking = { bookingId, reason ->
+                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.REJECTED, reason)
+                                    },
+                                    onCancelBooking = { bookingId, reason ->
+                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED, reason)
                                     },
                                     onCompleteBooking = { bookingId ->
                                         marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.COMPLETED)
                                     },
-                                    onCancelBooking = { bookingId ->
-                                        marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CANCELLED)
-                                    },
                                     onRefresh = {
                                         marketplaceViewModel.refreshMarketplace()
+                                    },
+                                    onDismissSelectedBooking = {
+                                        marketplaceViewModel.clearSelectedBookingDetail()
                                     }
                                 )
                             }
@@ -1062,7 +1144,11 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToRoute = { route ->
                                     try {
-                                        navController.navigate(route)
+                                        if (route == "my_bookings" || route == "farm_bookings" || route == "orders") {
+                                            navController.navigate(Screen.Orders.route)
+                                        } else {
+                                            navController.navigate(route)
+                                        }
                                     } catch (_: Exception) {
                                         navController.navigate(Screen.Marketplace.route)
                                     }

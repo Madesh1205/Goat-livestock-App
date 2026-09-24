@@ -327,6 +327,110 @@ object FarmLocalCache {
         }
     }
 
+    fun getConsumedListingSlots(farmId: String, currentGoatsCount: Int = 0, context: Context? = null): Int {
+        if (!isValidUuid(farmId)) return currentGoatsCount
+        val prefs = getPrefs(context) ?: return currentGoatsCount
+        val stored = prefs.getInt("consumed_slots_$farmId", 0)
+        val maxConsumed = maxOf(stored, currentGoatsCount)
+        if (maxConsumed > stored) {
+            prefs.edit().putInt("consumed_slots_$farmId", maxConsumed).apply()
+        }
+        return maxConsumed
+    }
+
+    fun recordListingSlotConsumed(farmId: String, context: Context? = null): Int {
+        if (!isValidUuid(farmId)) return 1
+        val prefs = getPrefs(context) ?: return 1
+        val current = prefs.getInt("consumed_slots_$farmId", 0)
+        val next = current + 1
+        prefs.edit().putInt("consumed_slots_$farmId", next).apply()
+        Log.d(TAG, "Slot permanently consumed for farm $farmId. New consumed count: $next")
+        return next
+    }
+
+    fun saveListingPayment(payment: com.example.model.ListingPayment, context: Context? = null) {
+        val prefs = getPrefs(context) ?: return
+        try {
+            val allPayments = getAllCachedPayments(context).toMutableList()
+            val existingIndex = allPayments.indexOfFirst { it.id == payment.id }
+            if (existingIndex >= 0) {
+                allPayments[existingIndex] = payment
+            } else {
+                allPayments.add(0, payment)
+            }
+            val array = JSONArray()
+            for (p in allPayments) {
+                val obj = JSONObject().apply {
+                    put("id", p.id)
+                    put("goatId", p.goatId)
+                    put("goatName", p.goatName)
+                    put("goatCode", p.goatCode)
+                    put("farmId", p.farmId)
+                    put("farmName", p.farmName)
+                    put("amount", p.amount)
+                    put("currency", p.currency)
+                    put("paymentType", p.paymentType)
+                    put("slotsAdded", p.slotsAdded)
+                    put("status", p.status.name)
+                    put("orderId", p.orderId ?: "")
+                    put("razorpayPaymentId", p.razorpayPaymentId ?: "")
+                    put("receiptNumber", p.receiptNumber ?: "")
+                    put("paymentMethod", p.paymentMethod)
+                    put("notes", p.notes)
+                    put("createdAt", p.createdAt)
+                }
+                array.put(obj)
+            }
+            prefs.edit().putString("all_payments_json", array.toString()).apply()
+            Log.d(TAG, "Cached listing payment receipt: ${payment.receiptNumber} (${payment.paymentType})")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to cache listing payment: ${e.message}")
+        }
+    }
+
+    fun getAllCachedPayments(context: Context? = null): List<com.example.model.ListingPayment> {
+        val prefs = getPrefs(context) ?: return emptyList()
+        val jsonStr = prefs.getString("all_payments_json", null) ?: return emptyList()
+        return try {
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<com.example.model.ListingPayment>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val payment = com.example.model.ListingPayment(
+                    id = obj.getString("id"),
+                    goatId = obj.optString("goatId", ""),
+                    goatName = obj.optString("goatName", ""),
+                    goatCode = obj.optString("goatCode", ""),
+                    farmId = obj.optString("farmId", ""),
+                    farmName = obj.optString("farmName", ""),
+                    amount = obj.optDouble("amount", 0.0),
+                    currency = obj.optString("currency", "INR"),
+                    paymentType = obj.optString("paymentType", "FARM_APPROVAL"),
+                    slotsAdded = obj.optInt("slotsAdded", 0),
+                    status = try {
+                        com.example.model.PaymentStatus.valueOf(obj.optString("status", "PAID"))
+                    } catch (_: Exception) { com.example.model.PaymentStatus.PAID },
+                    orderId = obj.optString("orderId").takeIf { it.isNotBlank() },
+                    razorpayPaymentId = obj.optString("razorpayPaymentId").takeIf { it.isNotBlank() },
+                    receiptNumber = obj.optString("receiptNumber").takeIf { it.isNotBlank() },
+                    paymentMethod = obj.optString("paymentMethod", "Manual Payment"),
+                    notes = obj.optString("notes", ""),
+                    createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                )
+                list.add(payment)
+            }
+            list
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse cached payments: ${e.message}")
+            emptyList()
+        }
+    }
+
+    fun getCachedPaymentsForFarm(farmId: String, context: Context? = null): List<com.example.model.ListingPayment> {
+        if (!isValidUuid(farmId)) return emptyList()
+        return getAllCachedPayments(context).filter { it.farmId == farmId }
+    }
+
     fun clear(context: Context? = null) {
         try {
             getPrefs(context)?.edit()?.clear()?.apply()

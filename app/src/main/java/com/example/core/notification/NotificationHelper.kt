@@ -44,6 +44,7 @@ object NotificationHelper {
             ).apply {
                 description = "General livestock marketplace news, listings, and updates"
                 enableVibration(true)
+                setShowBadge(false)
             }
 
             val bookingsChannel = NotificationChannel(
@@ -53,6 +54,7 @@ object NotificationHelper {
             ).apply {
                 description = "Real-time updates regarding livestock bookings, holds, and approvals"
                 enableVibration(true)
+                setShowBadge(false)
             }
 
             val adminChannel = NotificationChannel(
@@ -62,6 +64,7 @@ object NotificationHelper {
             ).apply {
                 description = "Administrative alerts, listing fees, approvals, and reports"
                 enableVibration(true)
+                setShowBadge(false)
             }
 
             notificationManager.createNotificationChannels(listOf(generalChannel, bookingsChannel, adminChannel))
@@ -85,14 +88,26 @@ object NotificationHelper {
             NotificationType.LISTING_PAYMENT_SUCCESS,
             NotificationType.LISTING_PAYMENT_FAILED,
             NotificationType.LISTING_APPROVED,
-            NotificationType.LISTING_REJECTED -> CHANNEL_ID_ADMIN
+            NotificationType.LISTING_REJECTED,
+            NotificationType.FARM_APPROVED,
+            NotificationType.FARM_APPROVAL_PAYMENT_CONFIRMED,
+            NotificationType.LISTING_QUOTA_INCREASED,
+            NotificationType.RECEIPT_AVAILABLE -> CHANNEL_ID_ADMIN
 
             else -> CHANNEL_ID_GENERAL
         }
 
+        val resolvedRoute = run {
+            val raw = notification.deepLinkRoute ?: com.example.util.DeepLinkUtils.resolveDeepLinkRoute(notification.type, notification.referenceId)
+            when (raw) {
+                "my_bookings", "farm_bookings" -> "orders"
+                else -> raw
+            }
+        }
+
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_DEEP_LINK_ROUTE, notification.deepLinkRoute)
+            putExtra(EXTRA_DEEP_LINK_ROUTE, resolvedRoute)
             putExtra(EXTRA_NOTIFICATION_ID, notification.id)
             putExtra(EXTRA_NOTIFICATION_TYPE, notification.type.name)
             putExtra(EXTRA_REFERENCE_ID, notification.referenceId)
@@ -113,6 +128,7 @@ object NotificationHelper {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(notification.title)
             .setContentText(notification.message)
+            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
             .setPriority(
                 if (channelId == CHANNEL_ID_BOOKINGS || channelId == CHANNEL_ID_ADMIN)

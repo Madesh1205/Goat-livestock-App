@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.firstOrNull
+import com.example.core.util.FarmLocalCache
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.jan.supabase.realtime.RealtimeChannel
@@ -685,11 +687,12 @@ class SupabaseMarketplaceRepositoryImpl(
         wishlistRepository.toggleWishlist(userId, goatId)
 
     // ==========================================
-    // 12. Listing Payments & Transaction Verification
+    // 12. Listing Payments & Transaction Verification & Receipts
     // ==========================================
-    override fun getListingPaymentsForFarm(farmId: String): Flow<List<ListingPayment>> = flow {
+    override fun getListingPaymentsForFarm(farmId: String): Flow<List<ListingPayment>> = flow<List<ListingPayment>> {
+        val cached = FarmLocalCache.getCachedPaymentsForFarm(farmId)
         if (!SupabaseConfig.isConfigured) {
-            emit(emptyList())
+            emit(cached)
             return@flow
         }
         try {
@@ -700,17 +703,24 @@ class SupabaseMarketplaceRepositoryImpl(
                     }
                     order("created_at", Order.DESCENDING)
                 }.decodeList<ListingPaymentDto>()
-            emit(payments.map { it.toDomain() })
+
+            val farm = getFarmById(farmId).firstOrNull()
+            val domainPayments = payments.map { dto: ListingPaymentDto ->
+                dto.toDomain(farmName = farm?.name ?: "")
+            }
+            val merged = (domainPayments + cached).distinctBy { it.id }.sortedByDescending { it.createdAt }
+            emit(merged)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "Error fetching farm listing payments: ${e.message}")
-            emit(emptyList())
+            emit(cached)
         }
     }.flowOn(Dispatchers.IO)
 
-    override fun getAllListingPayments(): Flow<List<ListingPayment>> = flow {
+    override fun getAllListingPayments(): Flow<List<ListingPayment>> = flow<List<ListingPayment>> {
+        val cached = FarmLocalCache.getAllCachedPayments()
         if (!SupabaseConfig.isConfigured) {
-            emit(emptyList())
+            emit(cached)
             return@flow
         }
         try {
@@ -718,13 +728,160 @@ class SupabaseMarketplaceRepositoryImpl(
                 .select {
                     order("created_at", Order.DESCENDING)
                 }.decodeList<ListingPaymentDto>()
-            emit(payments.map { it.toDomain() })
+
+            val farms = getAllFarms().firstOrNull() ?: emptyList()
+            val farmMap = farms.associateBy { it.id }
+            val domainPayments = payments.map { dto: ListingPaymentDto ->
+                val fName = dto.farmId?.let { farmMap[it]?.name } ?: ""
+                dto.toDomain(farmName = fName)
+            }
+            val merged = (domainPayments + cached).distinctBy { it.id }.sortedByDescending { it.createdAt }
+            emit(merged)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "Error fetching all listing payments: ${e.message}")
-            emit(emptyList())
+            emit(cached)
         }
     }.flowOn(Dispatchers.IO)
+
+    override suspend fun recordFarmApprovalPayment(
+        farmId: String,
+        amount: Double,
+        paymentRef: String?,
+        receiptNumber: String?,
+        notes: String?
+    ): Result<ListingPayment> = withContext(Dispatchers.IO) {
+        try {
+            val validFarmId = ensureValidUuid(farmId)
+            val farm = getFarmById(validFarmId).firstOrNull()
+                ?: return@withContext Result.failure(IllegalArgumentException("Farm not found: $farmId"))
+
+            val generatedRcpt = receiptNumber?.takeIf { it.isNotBlank() }
+                ?: "RCPT-APPR-${System.currentTimeMillis().toString().takeLast(6)}"
+            val paymentId = UUID.randomUUID().toString()
+
+            val payment = ListingPayment(
+                id = paymentId,
+                farmId = validFarmId,
+                farmName = farm.name,
+                amount = amount,
+                currency = "INR",
+                paymentType = "FARM_APPROVAL",
+                slotsAdded = 2,
+                status = PaymentStatus.PAID,
+                orderId = paymentRef?.takeIf { it.isNotBlank() } ?: "MANUAL-APPR-${validFarmId.take(6)}",
+                razorpayPaymentId = paymentRef,
+                receiptNumber = generatedRcpt,
+                paymentMethod = "Manual Payment",
+                notes = notes ?: "Super Admin Partner Farm Approval with 2 free listing slots",
+                createdAt = System.currentTimeMillis()
+            )
+
+            // 1. Approve farm & award initial 2 free slots
+            updateFarmVerification(validFarmId, VerificationStatus.APPROVED)
+            if (farm.goatListingLimit <= 0) {
+                updateFarmListingLimit(validFarmId, 2)
+            }
+
+            // 2. Persist payment in local cache
+            FarmLocalCache.saveListingPayment(payment)
+
+            // 3. Persist payment in Supabase postgrest if configured
+            if (SupabaseConfig.isConfigured) {
+                try {
+                    val authUser = SupabaseModule.auth.currentUserOrNull()
+                    val payerId = farm.ownerId.ifBlank { authUser?.id ?: "" }
+                    val dto = ListingPaymentDto.fromDomain(payment, payerId = payerId)
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS].insert<ListingPaymentDto>(dto)
+                } catch (postgrestErr: Exception) {
+                    Log.w(TAG, "Notice: remote listing_payments insert deferred: ${postgrestErr.message}")
+                }
+            }
+
+            Log.d(TAG, "Recorded farm approval receipt $generatedRcpt for farm ${farm.name}")
+            Result.success(payment)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to record farm approval payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun recordQuotaIncreasePayment(
+        farmId: String,
+        slotsToAdd: Int,
+        amount: Double,
+        paymentRef: String?,
+        receiptNumber: String?,
+        notes: String?
+    ): Result<ListingPayment> = withContext(Dispatchers.IO) {
+        try {
+            val validFarmId = ensureValidUuid(farmId)
+            val farm = getFarmById(validFarmId).firstOrNull()
+                ?: return@withContext Result.failure(IllegalArgumentException("Farm not found: $farmId"))
+
+            if (slotsToAdd <= 0) {
+                return@withContext Result.failure(IllegalArgumentException("Slots to add must be greater than 0"))
+            }
+
+            val currentLimit = farm.goatListingLimit
+            val newLimit = currentLimit + slotsToAdd
+
+            val generatedRcpt = receiptNumber?.takeIf { it.isNotBlank() }
+                ?: "RCPT-QUOTA-${System.currentTimeMillis().toString().takeLast(6)}"
+            val paymentId = UUID.randomUUID().toString()
+
+            val payment = ListingPayment(
+                id = paymentId,
+                farmId = validFarmId,
+                farmName = farm.name,
+                amount = amount,
+                currency = "INR",
+                paymentType = "ADDITIONAL_QUOTA",
+                slotsAdded = slotsToAdd,
+                status = PaymentStatus.PAID,
+                orderId = paymentRef?.takeIf { it.isNotBlank() } ?: "MANUAL-QUOTA-${validFarmId.take(6)}",
+                razorpayPaymentId = paymentRef,
+                receiptNumber = generatedRcpt,
+                paymentMethod = "Manual Payment",
+                notes = notes ?: "Additional $slotsToAdd goat listing slots purchased (Limit: $currentLimit -> $newLimit)",
+                createdAt = System.currentTimeMillis()
+            )
+
+            // 1. Update listing limit
+            updateFarmListingLimit(validFarmId, newLimit)
+
+            // 2. Persist in local cache
+            FarmLocalCache.saveListingPayment(payment)
+
+            // 3. Persist in Supabase if configured
+            if (SupabaseConfig.isConfigured) {
+                try {
+                    val authUser = SupabaseModule.auth.currentUserOrNull()
+                    val payerId = farm.ownerId.ifBlank { authUser?.id ?: "" }
+                    val dto = ListingPaymentDto.fromDomain(payment, payerId = payerId)
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS].insert<ListingPaymentDto>(dto)
+                } catch (postgrestErr: Exception) {
+                    Log.w(TAG, "Notice: remote listing_payments insert deferred: ${postgrestErr.message}")
+                }
+            }
+
+            Log.d(TAG, "Recorded quota payment receipt $generatedRcpt for farm ${farm.name} (+$slotsToAdd slots)")
+            Result.success(payment)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to record quota increase payment: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    override fun getPlatformPricing(): Flow<PlatformPricing> =
+        com.example.core.util.PlatformPricingManager.pricingFlow
+
+    override suspend fun updatePlatformPricing(
+        approvalPrice: Double,
+        slotPrice: Double
+    ): Result<PlatformPricing> = withContext(Dispatchers.IO) {
+        com.example.core.util.PlatformPricingManager.updatePricing(approvalPrice, slotPrice)
+    }
 
     override suspend fun initiateListingPayment(goatId: String): Result<ListingPaymentInitiation> = withContext(Dispatchers.IO) {
         // Stage 11K: No online payment. Listing limits are managed manually by Super Admin.

@@ -86,8 +86,25 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
         }
 
         // Apply Sorting
+        val statusPriority: (AvailabilityStatus) -> Int = { status ->
+            when (status) {
+                AvailabilityStatus.AVAILABLE -> 0
+                AvailabilityStatus.BOOKING_PENDING -> 1
+                AvailabilityStatus.RESERVED -> 2
+                AvailabilityStatus.CONFIRMED -> 3
+                AvailabilityStatus.COMPLETED -> 4
+                AvailabilityStatus.SOLD -> 5
+                AvailabilityStatus.CANCELLED -> 6
+                AvailabilityStatus.REJECTED -> 7
+            }
+        }
+
         filtered = when (criteria.sortBy) {
-            SortOption.RELEVANCE -> filtered.sortedByDescending { it.isFeatured }
+            SortOption.RELEVANCE -> filtered.sortedWith(
+                compareBy<Goat> { statusPriority(it.availabilityStatus) }
+                    .thenByDescending { it.isFeatured }
+                    .thenByDescending { it.createdAt }
+            )
             SortOption.PRICE_LOW_HIGH -> filtered.sortedBy { it.finalPrice }
             SortOption.PRICE_HIGH_LOW -> filtered.sortedByDescending { it.finalPrice }
             SortOption.AGE_YOUNGEST -> filtered.sortedBy { it.ageMonths }
@@ -341,10 +358,10 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 id = generatedId,
                 farmId = resolvedFarmId,
                 farmCode = targetFarmCode,
-                approvalStatus = if (isAmmal) ApprovalStatus.APPROVED else ApprovalStatus.PENDING_APPROVAL,
+                approvalStatus = ApprovalStatus.APPROVED,
                 availabilityStatus = AvailabilityStatus.AVAILABLE,
-                listingFeePaid = isAmmal,
-                listingFeeAmount = if (isAmmal) 0.0 else 100.0,
+                listingFeePaid = true,
+                listingFeeAmount = 0.0,
                 photos = emptyList()
             )
 
@@ -355,16 +372,49 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                 var insertSuccess = false
                 var lastInsertException: Exception? = null
 
+                // 1. Try atomic server-authoritative RPC first
                 try {
-                    val inserted = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                        .insert(goatDto) { select() }
-                        .decodeSingle<GoatDto>()
-                    insertSuccess = true
-                    serverGoatCode = inserted.goatCode?.takeIf { it.isNotBlank() }
-                    Log.i(TAG, "Successfully inserted goat ${initialGoat.name} (${initialGoat.id}), assigned goat_code: $serverGoatCode")
-                } catch (insertErr: Exception) {
-                    lastInsertException = insertErr
-                    Log.e(TAG, "Goat insert failed: ${insertErr.message}")
+                    val goatJsonObj = kotlinx.serialization.json.Json.encodeToJsonElement(GoatDto.serializer(), goatDto)
+                    val rpcParams = buildJsonObject {
+                        put("p_goat", goatJsonObj)
+                    }
+                    val rpcResult = SupabaseModule.client.postgrest.rpc(
+                        function = "create_goat_listing_secure",
+                        parameters = rpcParams
+                    ).decodeSingleOrNull<GoatDto>()
+
+                    if (rpcResult != null) {
+                        insertSuccess = true
+                        serverGoatCode = rpcResult.goatCode?.takeIf { it.isNotBlank() }
+                        Log.i(TAG, "Successfully inserted goat via create_goat_listing_secure RPC: ${initialGoat.name}, code: $serverGoatCode")
+                    }
+                } catch (rpcErr: Exception) {
+                    val msg = rpcErr.message ?: ""
+                    // If error is quota rejection, permission or approval failure, throw immediately without fallback
+                    if (msg.contains("quota", ignoreCase = true) ||
+                        msg.contains("listing limit", ignoreCase = true) ||
+                        msg.contains("must be approved", ignoreCase = true) ||
+                        msg.contains("Unauthorized", ignoreCase = true)
+                    ) {
+                        throw rpcErr
+                    }
+                    Log.w(TAG, "create_goat_listing_secure RPC failed or not available, falling back to direct insert: ${rpcErr.message}")
+                    lastInsertException = rpcErr
+                }
+
+                // 2. Direct insert fallback (guarded by database trigger tr_enforce_goat_listing_limit)
+                if (!insertSuccess) {
+                    try {
+                        val inserted = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                            .insert(goatDto) { select() }
+                            .decodeSingle<GoatDto>()
+                        insertSuccess = true
+                        serverGoatCode = inserted.goatCode?.takeIf { it.isNotBlank() }
+                        Log.i(TAG, "Successfully inserted goat ${initialGoat.name} (${initialGoat.id}), assigned goat_code: $serverGoatCode")
+                    } catch (insertErr: Exception) {
+                        lastInsertException = insertErr
+                        Log.e(TAG, "Goat insert failed: ${insertErr.message}")
+                    }
                 }
 
                 if (!insertSuccess) {

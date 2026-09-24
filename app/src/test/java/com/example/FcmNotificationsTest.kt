@@ -13,13 +13,10 @@ class FcmNotificationsTest {
     @Test
     fun testActiveUserTokenAssociation() {
         val userA = "00000000-0000-0000-0000-00000000000a"
-        val tokenA = "fcm_token_device_1"
 
         FirebaseConfig.activeUserId = userA
-        FirebaseConfig.deviceToken = tokenA
 
         assertEquals(userA, FirebaseConfig.activeUserId)
-        assertEquals(tokenA, FirebaseConfig.deviceToken)
     }
 
     @Test

@@ -133,4 +133,15 @@ class DeepLinkNavigationTest {
         val safeFallbackRoute = if (foundGoat != null) "goat_detail" else "marketplace"
         assertEquals("marketplace", safeFallbackRoute)
     }
+
+    // --- TEST L: Database link_type Normalization ---
+    @Test
+    fun testLinkTypeNormalization() {
+        assertEquals(NotificationType.BOOKING_CONFIRMED, DeepLinkUtils.normalizeNotificationType("BOOKING", null, "Booking Approved", "Confirmed"))
+        assertEquals(NotificationType.BOOKING_CANCELLED, DeepLinkUtils.normalizeNotificationType("BOOKING", null, "Booking Cancelled", "Cancelled"))
+        assertEquals(NotificationType.LISTING_UPDATE, DeepLinkUtils.normalizeNotificationType("LISTING", "goat-123", "Goat update", null))
+        assertEquals(NotificationType.NEW_BOOKING, DeepLinkUtils.normalizeNotificationType("FARM", null, "New Booking", "Received"))
+        assertEquals(NotificationType.LISTING_PAYMENT_SUCCESS, DeepLinkUtils.normalizeNotificationType("PAYMENT", null, "Paid", "Success"))
+        assertEquals(NotificationType.NEW_REPORT_SUBMITTED, DeepLinkUtils.normalizeNotificationType("REPORT", null, "Report", "User report"))
+    }
 }

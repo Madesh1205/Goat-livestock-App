@@ -74,13 +74,32 @@ interface MarketplaceRepository {
     suspend fun removeFromWishlist(userId: String, goatId: String): Result<Unit>
     suspend fun toggleWishlist(userId: String, goatId: String): Result<Boolean>
 
-    // Payments & Listing Fees
+    // Payments & Listing Fees & Receipts
     fun getListingPaymentsForFarm(farmId: String): Flow<List<ListingPayment>>
     fun getAllListingPayments(): Flow<List<ListingPayment>>
+    suspend fun recordFarmApprovalPayment(
+        farmId: String,
+        amount: Double,
+        paymentRef: String? = null,
+        receiptNumber: String? = null,
+        notes: String? = null
+    ): Result<ListingPayment>
+    suspend fun recordQuotaIncreasePayment(
+        farmId: String,
+        slotsToAdd: Int,
+        amount: Double,
+        paymentRef: String? = null,
+        receiptNumber: String? = null,
+        notes: String? = null
+    ): Result<ListingPayment>
     suspend fun initiateListingPayment(goatId: String): Result<ListingPaymentInitiation>
     suspend fun verifyListingPayment(goatId: String, orderId: String, paymentId: String, signature: String, amount: Double = 100.0): Result<PaymentVerificationResult>
     suspend fun recordPaymentFailure(goatId: String, orderId: String?, error: String): Result<Unit>
     suspend fun recordPaymentCancellation(goatId: String, orderId: String?): Result<Unit>
+
+    // Platform Pricing Configuration
+    fun getPlatformPricing(): Flow<PlatformPricing>
+    suspend fun updatePlatformPricing(approvalPrice: Double, slotPrice: Double): Result<PlatformPricing>
 
     // Platform Stats
     fun getPlatformStats(): Flow<PlatformStats>

@@ -6,11 +6,13 @@ sealed class Screen(val route: String) {
     data object Register : Screen("register")
     data object ForgotPassword : Screen("forgot_password")
     data object Profile : Screen("profile")
+    data object Account : Screen("account")
 
     // Common / Customer
     data object Marketplace : Screen("marketplace")
     data object GoatDetail : Screen("goat_detail")
     data object FarmDetail : Screen("farm_detail")
+    data object Orders : Screen("orders")
     data object MyBookings : Screen("my_bookings")
     data object Wishlist : Screen("wishlist")
     data object Notifications : Screen("notifications")

@@ -183,10 +183,27 @@ fun FarmDetailScreen(
             matchesBreed && matchesQuery
         }
 
+        val statusPriority: (AvailabilityStatus) -> Int = { status ->
+            when (status) {
+                AvailabilityStatus.AVAILABLE -> 0
+                AvailabilityStatus.BOOKING_PENDING -> 1
+                AvailabilityStatus.RESERVED -> 2
+                AvailabilityStatus.CONFIRMED -> 3
+                AvailabilityStatus.COMPLETED -> 4
+                AvailabilityStatus.SOLD -> 5
+                AvailabilityStatus.CANCELLED -> 6
+                AvailabilityStatus.REJECTED -> 7
+            }
+        }
+
         when (selectedSortOption) {
-            SortOption.RELEVANCE -> list.sortedByDescending { it.isFeatured }
-            SortOption.PRICE_LOW_HIGH -> list.sortedBy { it.price }
-            SortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.price }
+            SortOption.RELEVANCE -> list.sortedWith(
+                compareBy<Goat> { statusPriority(it.availabilityStatus) }
+                    .thenByDescending { it.isFeatured }
+                    .thenByDescending { it.createdAt }
+            )
+            SortOption.PRICE_LOW_HIGH -> list.sortedBy { it.finalPrice }
+            SortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.finalPrice }
             SortOption.NEWEST -> list.sortedByDescending { it.createdAt }
             SortOption.AGE_YOUNGEST -> list.sortedBy { it.ageMonths }
             SortOption.AGE_OLDEST -> list.sortedByDescending { it.ageMonths }

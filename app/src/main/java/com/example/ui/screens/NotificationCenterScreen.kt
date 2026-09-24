@@ -471,7 +471,8 @@ fun NotificationItemCard(
 private fun getNotificationVisuals(type: NotificationType): Triple<ImageVector, Color, Color> {
     return when (type) {
         NotificationType.BOOKING_CONFIRMED,
-        NotificationType.LISTING_APPROVED -> Triple(
+        NotificationType.LISTING_APPROVED,
+        NotificationType.FARM_APPROVED -> Triple(
             Icons.Default.CheckCircle,
             Color(0xFFE8F5E9),
             Color(0xFF2E7D32)
@@ -501,7 +502,10 @@ private fun getNotificationVisuals(type: NotificationType): Triple<ImageVector, 
             Color(0xFFF57F17)
         )
         NotificationType.LISTING_PAYMENT_SUCCESS,
-        NotificationType.NEW_PAYMENT_RECEIVED -> Triple(
+        NotificationType.NEW_PAYMENT_RECEIVED,
+        NotificationType.FARM_APPROVAL_PAYMENT_CONFIRMED,
+        NotificationType.LISTING_QUOTA_INCREASED,
+        NotificationType.RECEIPT_AVAILABLE -> Triple(
             Icons.Default.Payments,
             Color(0xFFE8F5E9),
             Color(0xFF2E7D32)
