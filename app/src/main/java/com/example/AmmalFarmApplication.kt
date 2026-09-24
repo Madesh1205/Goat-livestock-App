@@ -3,7 +3,7 @@ package com.example
 import android.app.Application
 import android.util.Log
 import com.example.core.di.AppModule
-import com.example.core.firebase.FirebaseConfig
+import com.example.core.notification.NotificationConfig
 import com.example.core.supabase.SupabaseModule
 import com.example.di.AppContainer
 import com.example.di.DefaultAppContainer
@@ -27,7 +27,7 @@ class AmmalFarmApplication : Application() {
         SupabaseModule.initialize(this)
         appModule = AppModule(this)
         container = DefaultAppContainer(this)
-        FirebaseConfig.initialize(this)
+        NotificationConfig.initialize(this)
     }
 
     private fun setupCrashHandler() {

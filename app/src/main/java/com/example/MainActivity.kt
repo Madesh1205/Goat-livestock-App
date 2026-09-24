@@ -29,7 +29,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.core.firebase.FirebaseConfig
+import com.example.core.notification.NotificationConfig
+import com.example.core.notification.NotificationHelper
+import com.example.core.notification.NotificationSyncWorker
 import com.example.core.supabase.SupabaseConfig
 import com.example.model.AvailabilityStatus
 import com.example.model.UserRole
@@ -87,8 +89,13 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(authUiState.currentUser) {
                     val user = authUiState.currentUser
                     marketplaceViewModel.setUser(user)
-                    FirebaseConfig.activeUserId = user?.id
+                    NotificationConfig.activeUserId = user?.id
+
                     if (user != null) {
+                        // Enqueue periodic and immediate background notification sync via WorkManager
+                        NotificationSyncWorker.enqueuePeriodicSync(context)
+                        NotificationSyncWorker.triggerImmediateSync(context)
+
                         // Request notification permission once on Android 13+ (Tiramisu)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             val prefs = context.getSharedPreferences("ammal_app_prefs", Context.MODE_PRIVATE)
@@ -103,6 +110,10 @@ class MainActivity : ComponentActivity() {
                                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                             }
                         }
+                    } else {
+                        // User logged out: cancel sync and dismiss active notifications
+                        NotificationSyncWorker.cancelSync(context)
+                        NotificationHelper.cancelAllNotifications(context)
                     }
                 }
 

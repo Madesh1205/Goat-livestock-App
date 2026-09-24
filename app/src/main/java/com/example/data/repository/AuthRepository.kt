@@ -3,7 +3,8 @@ package com.example.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import com.example.core.firebase.FirebaseConfig
+import com.example.core.notification.NotificationConfig
+import com.example.core.notification.NotificationSyncWorker
 import com.example.core.supabase.SupabaseConfig
 import com.example.core.supabase.SupabaseModule
 import com.example.core.util.FarmLocalCache
@@ -1274,7 +1275,10 @@ class AuthRepositoryImpl(
     override suspend fun logout() {
         val userToLogOut = _currentUser.value
         if (userToLogOut != null) {
-            FirebaseConfig.activeUserId = null
+            NotificationConfig.activeUserId = null
+            SupabaseModule.getApplicationContext()?.let {
+                NotificationSyncWorker.cancelSync(it)
+            }
         }
         try {
             SupabaseModule.auth.signOut()

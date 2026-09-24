@@ -152,4 +152,53 @@ object NotificationHelper {
             // Graceful fallback for restricted sandbox
         }
     }
+
+    /**
+     * Checks whether notifications are enabled for the application.
+     */
+    fun areNotificationsEnabled(context: Context): Boolean {
+        val notificationManagerCompat = NotificationManagerCompat.from(context)
+        if (!notificationManagerCompat.areNotificationsEnabled()) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+        return true
+    }
+
+    /**
+     * Opens system notification settings for the application.
+     */
+    fun openNotificationSettings(context: Context) {
+        try {
+            val intent = Intent().apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    action = android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                    putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                } else {
+                    action = android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                }
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            android.util.Log.w("NotificationHelper", "Failed to open notification settings: ${e.message}")
+        }
+    }
+
+    /**
+     * Cancels all notifications currently shown in the system drawer.
+     */
+    fun cancelAllNotifications(context: Context) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancelAll()
+        } catch (_: Exception) {
+        }
+    }
 }

@@ -1,14 +1,14 @@
-package com.example.core.firebase
+package com.example.core.notification
 
 import android.content.Context
 import android.util.Log
-import com.example.core.notification.NotificationHelper
 
 /**
- * Local Notification System Configuration
- * Initializes Android notification channels and provides local notification support.
+ * Native Android Notification System Configuration
+ * Initializes Android notification channels, manages active user isolation,
+ * and configures native background synchronization.
  */
-object FirebaseConfig {
+object NotificationConfig {
     private const val TAG = "NotificationConfig"
 
     var isInitialized: Boolean = false
@@ -24,7 +24,7 @@ object FirebaseConfig {
         try {
             NotificationHelper.createNotificationChannels(context)
             isInitialized = true
-            Log.d(TAG, "Local notification channels initialized successfully.")
+            Log.d(TAG, "Native notification channels initialized successfully.")
         } catch (e: Throwable) {
             Log.w(TAG, "Notification channel initialization handled gracefully", e)
             isInitialized = true

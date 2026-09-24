@@ -1787,6 +1787,11 @@ class MarketplaceViewModel(
         if (payload.intentKey.isBlank() || _handledDeepLinkKeys.contains(payload.intentKey)) {
             return
         }
+        val currentUserId = _uiState.value.currentUser?.id ?: com.example.core.notification.NotificationConfig.activeUserId
+        if (!payload.recipientUserId.isNullOrBlank() && currentUserId != null && payload.recipientUserId != currentUserId) {
+            // Suppress deep link intended for another user account
+            return
+        }
         _handledDeepLinkKeys.add(payload.intentKey)
 
         payload.notificationId?.takeIf { it.isNotBlank() }?.let { notifId ->

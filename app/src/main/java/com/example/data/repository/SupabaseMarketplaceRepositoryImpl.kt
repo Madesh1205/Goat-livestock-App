@@ -331,6 +331,21 @@ class SupabaseMarketplaceRepositoryImpl(
                 notificationMap[notif.id] = notif
             }
             trySend(notificationMap.values.sortedByDescending { it.timestamp })
+
+            // Check for recent unread notifications that have not been delivered locally yet
+            val appContext = SupabaseModule.getApplicationContext()
+            if (appContext != null) {
+                val now = System.currentTimeMillis()
+                val recentWindowMillis = 24 * 60 * 60 * 1000L // last 24 hours
+                notificationMap.values
+                    .filter { !it.isRead && (now - it.timestamp) < recentWindowMillis }
+                    .forEach { unreadNotif ->
+                        if (!com.example.core.notification.NotificationDeliveryTracker.isDelivered(appContext, validUserId, unreadNotif.id)) {
+                            com.example.core.notification.NotificationHelper.showSystemNotification(appContext, unreadNotif)
+                            com.example.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, unreadNotif.id)
+                        }
+                    }
+            }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "Notice: initial notifications query notice: ${e.message}")
@@ -358,8 +373,13 @@ class SupabaseMarketplaceRepositoryImpl(
                                 is PostgresAction.Insert -> {
                                     val dto = action.decodeRecord<NotificationDto>()
                                     val newNotif = dto.toDomain()
-                                    // Deduplicate by database ID
-                                    if (!notificationMap.containsKey(newNotif.id)) {
+                                    // Verify user ownership
+                                    if (newNotif.recipientUserId.isBlank() || newNotif.recipientUserId == validUserId) {
+                                        val appContext = SupabaseModule.getApplicationContext()
+                                        if (appContext != null && !com.example.core.notification.NotificationDeliveryTracker.isDelivered(appContext, validUserId, newNotif.id)) {
+                                            com.example.core.notification.NotificationHelper.showSystemNotification(appContext, newNotif)
+                                            com.example.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, newNotif.id)
+                                        }
                                         notificationMap[newNotif.id] = newNotif
                                         trySend(notificationMap.values.sortedByDescending { it.timestamp })
                                     }
@@ -409,9 +429,21 @@ class SupabaseMarketplaceRepositoryImpl(
                             }
                         }.decodeList<NotificationDto>()
 
-                    notificationMap.clear()
+                    val appContext = SupabaseModule.getApplicationContext()
+                    val now = System.currentTimeMillis()
+                    val recentWindowMillis = 24 * 60 * 60 * 1000L
+
                     dtos.forEach { dto ->
                         val notif = dto.toDomain()
+                        if (!notificationMap.containsKey(notif.id)) {
+                            // Newly discovered notification from polling
+                            if (appContext != null && !notif.isRead && (now - notif.timestamp) < recentWindowMillis) {
+                                if (!com.example.core.notification.NotificationDeliveryTracker.isDelivered(appContext, validUserId, notif.id)) {
+                                    com.example.core.notification.NotificationHelper.showSystemNotification(appContext, notif)
+                                    com.example.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, notif.id)
+                                }
+                            }
+                        }
                         notificationMap[notif.id] = notif
                     }
                     trySend(notificationMap.values.sortedByDescending { it.timestamp })
@@ -480,23 +512,6 @@ class SupabaseMarketplaceRepositoryImpl(
             )
             val dto = NotificationDto.fromDomain(cleanNotification)
             SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].insert(dto)
-
-            // Trigger server-side push notification dispatch securely
-            try {
-                SupabaseModule.client.postgrest.rpc(
-                    "send_push_notification",
-                    buildJsonObject {
-                        put("p_notification_id", cleanNotification.id)
-                        put("p_recipient_user_id", cleanNotification.recipientUserId)
-                        put("p_title", cleanNotification.title)
-                        put("p_message", cleanNotification.message)
-                        put("p_type", cleanNotification.type.name)
-                        put("p_reference_id", cleanNotification.referenceId ?: "")
-                    }
-                )
-            } catch (e: Exception) {
-                Log.d(TAG, "Notice: push notification RPC or DB trigger notice: ${e.message}")
-            }
 
             Result.success(Unit)
         } catch (e: Exception) {
