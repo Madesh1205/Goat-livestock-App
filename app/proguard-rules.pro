@@ -10,10 +10,10 @@
 -keep,allowobfuscation,allowshrinking class * {
     <fields>;
 }
--keepclassmembers class com.example.data.dto.** { *; }
--keepclassmembers class com.example.model.** { *; }
--keep class com.example.data.dto.** { *; }
--keep class com.example.model.** { *; }
+-keepclassmembers class com.ammalfarm.adusanthai.data.dto.** { *; }
+-keepclassmembers class com.ammalfarm.adusanthai.model.** { *; }
+-keep class com.ammalfarm.adusanthai.data.dto.** { *; }
+-keep class com.ammalfarm.adusanthai.model.** { *; }
 
 # Supabase & Ktor Rules
 -dontwarn java.lang.management.**
@@ -49,6 +49,10 @@
 # AndroidX Navigation Compose
 -keep class androidx.navigation.** { *; }
 -keepclassmembers class * extends androidx.navigation.NavType { *; }
+
+# Sentry
+-keep class io.sentry.** { *; }
+-dontwarn io.sentry.**
 
 # Optimize Log calls in release
 -assumenosideeffects class android.util.Log {

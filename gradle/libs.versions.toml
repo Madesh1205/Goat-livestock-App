@@ -45,6 +45,7 @@ supabase = "3.1.1"
 ktor = "3.1.1"
 kotlinxSerialization = "1.8.0"
 workRuntimeKtx = "2.10.0"
+sentry = "7.19.0"
 
 
 [libraries]
@@ -111,6 +112,7 @@ supabase-realtime = { group = "io.github.jan-tennert.supabase", name = "realtime
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+sentry-android = { group = "io.sentry", name = "sentry-android", version.ref = "sentry" }
 
 
 [plugins]

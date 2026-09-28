@@ -21,6 +21,10 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+        <!-- Sentry Configuration -->
+        <meta-data android:name="io.sentry.dsn" android:value="https://c2494963998190de3d5a5baaaeb25462@o4512150876389376.ingest.us.sentry.io/4512150880911360" />
+        <meta-data android:name="io.sentry.auto-init" android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

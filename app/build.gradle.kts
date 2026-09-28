@@ -11,11 +11,11 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.ammalfarm.adusanthai"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.ammalfarm.marketplace.lrlief"
+    applicationId = "com.ammalfarm.adusanthai"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
@@ -81,6 +81,7 @@ secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
   ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  ignoreList.add("SENTRY_AUTH_TOKEN")
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
@@ -140,6 +141,7 @@ dependencies {
   implementation(libs.ktor.client.okhttp)
   implementation(libs.ktor.client.core)
   implementation(libs.kotlinx.serialization.json)
+  implementation(libs.sentry.android)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
