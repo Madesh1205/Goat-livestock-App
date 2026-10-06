@@ -146,7 +146,7 @@ class MarketplaceViewModel(
                             s.copy(currentUser = user)
                         }
                     }
-                    if (user != prevUser) {
+                    if (user?.id != prevUser?.id || user?.role != prevUser?.role || user?.farmId != prevUser?.farmId) {
                         loadRoleScopedData(user)
                     }
                 }

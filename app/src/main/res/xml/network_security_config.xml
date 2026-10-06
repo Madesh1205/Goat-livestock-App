@@ -11,6 +11,8 @@
         <domain includeSubdomains="true">firebaseio.com</domain>
         <domain includeSubdomains="true">googleapis.com</domain>
         <domain includeSubdomains="true">unsplash.com</domain>
+        <domain includeSubdomains="true">dpdns.org</domain>
+        <domain includeSubdomains="true">ammalfarm.dpdns.org</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

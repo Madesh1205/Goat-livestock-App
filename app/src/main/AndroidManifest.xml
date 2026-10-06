@@ -36,6 +36,52 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Verified App Links for Official Production Domains -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="adusanthai.ammalfarm.dpdns.org"
+                    android:pathPrefix="/" />
+            </intent-filter>
+
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="ammalfarm.dpdns.org"
+                    android:pathPrefix="/" />
+            </intent-filter>
+
+            <!-- Standard Web Deep Links for HTTP & HTTPS across Domains -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="adusanthai.ammalfarm.dpdns.org" />
+                <data android:host="ammalfarm.dpdns.org" />
+                <data android:host="*.dpdns.org" />
+                <data android:host="*.run.app" />
+                <data android:pathPrefix="/" />
+            </intent-filter>
+
+            <!-- Custom URI Schemes for In-App Navigation and Social Sharing -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="ammalfarm" />
+                <data android:scheme="adusanthai" />
+                <data android:scheme="com.aistudio.ammalfarm" />
+                <data android:scheme="com.ammalfarm.adusanthai" />
+            </intent-filter>
         </activity>
     </application>
 

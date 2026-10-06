@@ -520,7 +520,9 @@ class AuthRepositoryImpl(
         return when {
             lower.contains("user already registered") ||
             lower.contains("already exists") ||
-            lower.contains("user_already_exists") ->
+            lower.contains("user_already_exists") ||
+            lower.contains("database error saving new user") ||
+            lower.contains("unexpected_failure") ->
                 "An account with this email already exists. Please sign in with your account password or reset it."
 
             lower.contains("email not confirmed") ||
@@ -784,10 +786,15 @@ class AuthRepositoryImpl(
         } catch (e: Exception) {
             val isUserAlreadyExists = e.message?.contains("user_already_exists", ignoreCase = true) == true ||
                 e.message?.contains("User already registered", ignoreCase = true) == true ||
-                e.message?.contains("already exists", ignoreCase = true) == true
+                e.message?.contains("already exists", ignoreCase = true) == true ||
+                e.message?.contains("unexpected_failure", ignoreCase = true) == true ||
+                e.message?.contains("Database error saving new user", ignoreCase = true) == true ||
+                e.message?.contains("23505", ignoreCase = true) == true ||
+                e.message?.contains("duplicate key", ignoreCase = true) == true ||
+                e.message?.contains("unique constraint", ignoreCase = true) == true
 
             if (isUserAlreadyExists && SupabaseConfig.isConfigured) {
-                Log.d("AuthRepository", "Customer registration: user already exists, attempting auth with provided credentials.")
+                Log.d("AuthRepository", "Customer registration: attempting sign-in / recovery for ${cleanEmail}.")
                 try {
                     SupabaseModule.auth.signInWith(Email) {
                         this.email = cleanEmail
@@ -818,13 +825,16 @@ class AuthRepositoryImpl(
                         return Result.success(profile)
                     }
                 } catch (loginErr: Exception) {
-                    Log.d("AuthRepository", "Auto-login on existing customer account failed: ${loginErr.message}")
+                    Log.d("AuthRepository", "Auto-login on customer account recovery: ${loginErr.message}")
                     val isEmailNotConfirmed = loginErr.message?.contains("email not confirmed", ignoreCase = true) == true ||
                         loginErr.message?.contains("email_not_confirmed", ignoreCase = true) == true
-                    val friendlyMsg = if (isEmailNotConfirmed) {
-                        "An account with this email exists, but its email is not verified yet. Please check your inbox or resend verification."
-                    } else {
-                        "An account with this email already exists. Please sign in with your account password or reset it."
+                    val isInvalidCreds = loginErr.message?.contains("invalid", ignoreCase = true) == true ||
+                        loginErr.message?.contains("grant", ignoreCase = true) == true
+
+                    val friendlyMsg = when {
+                        isEmailNotConfirmed -> "An account with this email exists, but its email is not verified yet. Please check your inbox or resend verification."
+                        isInvalidCreds -> "An account with this email already exists. Please sign in with your account password or use 'Forgot Password' to reset it."
+                        else -> parseAuthErrorMessage(e)
                     }
                     _authState.update {
                         it.copy(
@@ -1044,10 +1054,15 @@ class AuthRepositoryImpl(
         } catch (e: Exception) {
             val isUserAlreadyExists = e.message?.contains("user_already_exists", ignoreCase = true) == true ||
                 e.message?.contains("User already registered", ignoreCase = true) == true ||
-                e.message?.contains("already exists", ignoreCase = true) == true
+                e.message?.contains("already exists", ignoreCase = true) == true ||
+                e.message?.contains("unexpected_failure", ignoreCase = true) == true ||
+                e.message?.contains("Database error saving new user", ignoreCase = true) == true ||
+                e.message?.contains("23505", ignoreCase = true) == true ||
+                e.message?.contains("duplicate key", ignoreCase = true) == true ||
+                e.message?.contains("unique constraint", ignoreCase = true) == true
 
             if (isUserAlreadyExists && SupabaseConfig.isConfigured) {
-                Log.d("AuthRepository", "Farm registration: user already exists, attempting auth with provided credentials.")
+                Log.d("AuthRepository", "Farm registration: user exists or trigger collision, attempting auth/recovery for $cleanEmail.")
                 try {
                     SupabaseModule.auth.signInWith(Email) {
                         this.email = cleanEmail
@@ -1176,10 +1191,13 @@ class AuthRepositoryImpl(
                     Log.d("AuthRepository", "Auto-login on existing account for farm registration failed: ${loginErr.message}")
                     val isEmailNotConfirmed = loginErr.message?.contains("email not confirmed", ignoreCase = true) == true ||
                         loginErr.message?.contains("email_not_confirmed", ignoreCase = true) == true
-                    val friendlyMsg = if (isEmailNotConfirmed) {
-                        "An account with this email exists, but its email is not verified yet. Please check your inbox or resend verification."
-                    } else {
-                        "An account with this email already exists. Please enter your account password to sign in or apply, or tap 'Sign In' below."
+                    val isInvalidCreds = loginErr.message?.contains("invalid", ignoreCase = true) == true ||
+                        loginErr.message?.contains("grant", ignoreCase = true) == true
+
+                    val friendlyMsg = when {
+                        isEmailNotConfirmed -> "An account with this email exists, but its email is not verified yet. Please check your inbox or resend verification."
+                        isInvalidCreds -> "An account with this email already exists. Please enter your account password to sign in or apply, or tap 'Sign In' / 'Forgot Password' below."
+                        else -> parseAuthErrorMessage(e)
                     }
                     _authState.update {
                         it.copy(
@@ -1248,13 +1266,15 @@ class AuthRepositoryImpl(
             }
             Result.success(Unit)
         } catch (e: Exception) {
+            val friendlyMsg = parseAuthErrorMessage(e)
+            Log.w("AuthRepository", "Password reset notice: ${e.message}", e)
             _authState.update {
                 it.copy(
                     isLoading = false,
-                    successMessage = "Reset instructions sent to $cleanEmail."
+                    errorMessage = friendlyMsg
                 )
             }
-            Result.success(Unit)
+            Result.failure(Exception(friendlyMsg, e))
         }
     }
 
@@ -1272,13 +1292,15 @@ class AuthRepositoryImpl(
             }
             Result.success(Unit)
         } catch (e: Exception) {
+            val friendlyMsg = parseAuthErrorMessage(e)
+            Log.w("AuthRepository", "Reset password notice: ${e.message}", e)
             _authState.update {
                 it.copy(
                     isLoading = false,
-                    successMessage = "Password reset completed."
+                    errorMessage = friendlyMsg
                 )
             }
-            Result.success(Unit)
+            Result.failure(Exception(friendlyMsg, e))
         }
     }
 
@@ -1311,12 +1333,75 @@ class AuthRepositoryImpl(
         _authState.update { it.copy(isLoading = true, errorMessage = null) }
         return try {
             if (SupabaseConfig.isConfigured) {
-                val params = buildJsonObject {
-                    if (current?.id != null && current.id.isNotBlank()) {
-                        put("p_user_id", current.id)
+                var rpcCompleted = false
+                val uid = current?.id
+
+                // 1. Try parameterized RPC: delete_user_account(p_user_id)
+                if (!uid.isNullOrBlank()) {
+                    try {
+                        val params = buildJsonObject {
+                            put("p_user_id", uid)
+                        }
+                        SupabaseModule.client.postgrest.rpc("delete_user_account", params)
+                        rpcCompleted = true
+                    } catch (e: Exception) {
+                        Log.w("AuthRepository", "delete_user_account with parameter failed: ${e.message}")
                     }
                 }
-                SupabaseModule.client.postgrest.rpc("delete_user_account", params)
+
+                // 2. Try parameterless RPC: delete_user_account()
+                if (!rpcCompleted) {
+                    try {
+                        SupabaseModule.client.postgrest.rpc("delete_user_account")
+                        rpcCompleted = true
+                    } catch (e: Exception) {
+                        Log.w("AuthRepository", "delete_user_account parameterless failed: ${e.message}")
+                    }
+                }
+
+                // 3. Fallback table cleanup if RPC could not run
+                if (!uid.isNullOrBlank() && !rpcCompleted) {
+                    try {
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_WISHLIST].delete {
+                                filter { eq("user_id", uid) }
+                            }
+                        } catch (_: Exception) {}
+
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].delete {
+                                filter { eq("user_id", uid) }
+                            }
+                        } catch (_: Exception) {}
+
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].update({
+                                set("customer_id", null as String?)
+                            }) {
+                                filter { eq("customer_id", uid) }
+                            }
+                        } catch (_: Exception) {}
+
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update({
+                                set("owner_id", null as String?)
+                                set("status", "SUSPENDED")
+                            }) {
+                                filter { eq("owner_id", uid) }
+                            }
+                        } catch (_: Exception) {}
+
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].delete {
+                                filter { eq("id", uid) }
+                            }
+                        } catch (_: Exception) {}
+                    } catch (e: Exception) {
+                        Log.w("AuthRepository", "Fallback cleanup error: ${e.message}")
+                    }
+                }
+
+                // 4. Always sign out from Supabase Auth
                 try {
                     SupabaseModule.auth.signOut()
                 } catch (_: Exception) {}

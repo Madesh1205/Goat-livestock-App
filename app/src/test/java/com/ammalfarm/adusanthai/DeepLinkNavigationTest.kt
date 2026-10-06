@@ -1,12 +1,16 @@
 package com.ammalfarm.adusanthai
 
+import android.net.Uri
 import com.ammalfarm.adusanthai.model.NotificationType
 import com.ammalfarm.adusanthai.model.UserRole
 import com.ammalfarm.adusanthai.util.DeepLinkUtils
 import com.ammalfarm.adusanthai.util.NotificationDeepLinkPayload
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class DeepLinkNavigationTest {
 
     // --- TEST A: Notification Type Mapping ---
@@ -143,5 +147,36 @@ class DeepLinkNavigationTest {
         assertEquals(NotificationType.NEW_BOOKING, DeepLinkUtils.normalizeNotificationType("FARM", null, "New Booking", "Received"))
         assertEquals(NotificationType.LISTING_PAYMENT_SUCCESS, DeepLinkUtils.normalizeNotificationType("PAYMENT", null, "Paid", "Success"))
         assertEquals(NotificationType.NEW_REPORT_SUBMITTED, DeepLinkUtils.normalizeNotificationType("REPORT", null, "Report", "User report"))
+    }
+
+    // --- TEST M: Web URL & Deep Link Parsing ---
+    @Test
+    fun testWebUrlDeepLinkParsing() {
+        assertEquals("https://adusanthai.ammalfarm.dpdns.org", DeepLinkUtils.OFFICIAL_WEB_URL)
+        assertEquals("adusanthai.ammalfarm.dpdns.org", DeepLinkUtils.OFFICIAL_DOMAIN)
+        assertEquals("https://adusanthai.ammalfarm.dpdns.org/privacy", DeepLinkUtils.PRIVACY_POLICY_URL)
+        assertEquals("https://adusanthai.ammalfarm.dpdns.org/terms", DeepLinkUtils.TERMS_CONDITIONS_URL)
+
+        // Test parsing the exact user goat URL
+        val targetGoatId = "5cf84bbb-e211-42ea-b9c0-74042f22273a"
+        val goatWebUri = Uri.parse("https://adusanthai.ammalfarm.dpdns.org/goats/$targetGoatId")
+        val payload1 = DeepLinkUtils.parseUriToDeepLinkPayload(goatWebUri)
+        assertNotNull(payload1)
+        assertEquals("goat_detail", payload1?.route)
+        assertEquals(targetGoatId, payload1?.referenceId)
+
+        // Test custom scheme
+        val goatAppUri = Uri.parse("adusanthai://goats/$targetGoatId")
+        val payload2 = DeepLinkUtils.parseUriToDeepLinkPayload(goatAppUri)
+        assertNotNull(payload2)
+        assertEquals("goat_detail", payload2?.route)
+        assertEquals(targetGoatId, payload2?.referenceId)
+
+        // Test query parameter format
+        val goatQueryUri = Uri.parse("https://adusanthai.ammalfarm.dpdns.org/goat?id=$targetGoatId")
+        val payload3 = DeepLinkUtils.parseUriToDeepLinkPayload(goatQueryUri)
+        assertNotNull(payload3)
+        assertEquals("goat_detail", payload3?.route)
+        assertEquals(targetGoatId, payload3?.referenceId)
     }
 }

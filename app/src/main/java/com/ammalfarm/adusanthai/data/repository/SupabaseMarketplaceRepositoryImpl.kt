@@ -410,13 +410,29 @@ class SupabaseMarketplaceRepositoryImpl(
                 }
             }
 
-            channel.subscribe()
+            try {
+                channel.subscribe()
+            } catch (subErr: Throwable) {
+                if (subErr is CancellationException) throw subErr
+                Log.w(TAG, "Notice: Realtime websocket unavailable, falling back to REST polling: ${subErr.message}")
+                try {
+                    channel.unsubscribe()
+                    SupabaseModule.client.realtime.removeChannel(channel)
+                } catch (_: Exception) {}
+                channel = null
+            }
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
-            Log.w(TAG, "Notice: failed to subscribe to realtime notifications: ${e.message}")
+            Log.w(TAG, "Notice: realtime notifications not active: ${e.message}")
+            try {
+                channel?.let {
+                    SupabaseModule.client.realtime.removeChannel(it)
+                }
+            } catch (_: Exception) {}
+            channel = null
         }
 
-        // 3. Fallback periodic refresh (every 30s) to keep notifications updated
+        // 3. Fallback periodic refresh (every 20s) to keep notifications updated
         pollingJob = launch {
             var pollingIntervalMs = 30_000L
             while (isActive) {

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.ammalfarm.adusanthai",
+      "sha256_cert_fingerprints": [
+        "5F:1F:4D:11:EF:85:9F:BF:13:D6:B7:13:B1:95:29:72:91:25:8D:AC:3E:56:85:D0:54:60:44:FB:3D:66:28:16"
+      ]
+    }
+  }
+]

@@ -54,7 +54,15 @@ fun LoginScreen(
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
+    var showValidationErrors by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+
+    val isEmailBlank = email.trim().isBlank()
+    val isEmailValid = !isEmailBlank && android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+    val isPasswordBlank = password.isBlank()
+
+    val emailHasError = showValidationErrors && (isEmailBlank || !isEmailValid)
+    val passwordHasError = showValidationErrors && isPasswordBlank
 
     LaunchedEffect(uiState.prefilledEmail) {
         if (!uiState.prefilledEmail.isNullOrBlank()) {
@@ -69,12 +77,15 @@ fun LoginScreen(
     }
 
     val attemptLogin = {
-        if (!isSubmitting && !uiState.isLoading && email.isNotBlank() && password.isNotBlank()) {
-            isSubmitting = true
-            focusManager.clearFocus()
-            authViewModel.login(email.trim(), password) { role ->
-                isSubmitting = false
-                onNavigateByRole(role)
+        showValidationErrors = true
+        if (!isEmailBlank && isEmailValid && !isPasswordBlank) {
+            if (!isSubmitting && !uiState.isLoading) {
+                isSubmitting = true
+                focusManager.clearFocus()
+                authViewModel.login(email.trim(), password) { role ->
+                    isSubmitting = false
+                    onNavigateByRole(role)
+                }
             }
         }
     }
@@ -216,26 +227,54 @@ fun LoginScreen(
                     // Email Field
                     OutlinedTextField(
                         value = email,
-                        onValueChange = { email = it },
+                        onValueChange = {
+                            email = it
+                            if (uiState.errorMessage != null) authViewModel.clearMessages()
+                        },
                         label = { Text("Email Address") },
                         placeholder = { Text("e.g. yourname@example.com") },
                         leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null) },
+                        isError = emailHasError,
+                        supportingText = if (emailHasError) {
+                            {
+                                Text(
+                                    text = if (isEmailBlank) "Email address is required" else "Please enter a valid email address",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        } else null,
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Email,
                             imeAction = ImeAction.Next
                         ),
                         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_login_email"),
                         shape = RoundedCornerShape(10.dp)
                     )
 
                     // Password Field
                     OutlinedTextField(
                         value = password,
-                        onValueChange = { password = it },
+                        onValueChange = {
+                            password = it
+                            if (uiState.errorMessage != null) authViewModel.clearMessages()
+                        },
                         label = { Text("Password") },
                         leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                        isError = passwordHasError,
+                        supportingText = if (passwordHasError) {
+                            {
+                                Text(
+                                    text = "Password is required",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        } else null,
                         trailingIcon = {
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                                 Icon(
@@ -253,7 +292,9 @@ fun LoginScreen(
                             attemptLogin()
                         }),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_login_password"),
                         shape = RoundedCornerShape(10.dp)
                     )
 
@@ -270,16 +311,17 @@ fun LoginScreen(
                         )
                     }
 
-                    // Login Button
+                    // Login Button (Always Active)
                     Button(
                         onClick = attemptLogin,
-                        enabled = !isSubmitting && !uiState.isLoading && email.isNotBlank() && password.isNotBlank(),
+                        enabled = !isSubmitting && !uiState.isLoading,
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
+                            .testTag("button_login_submit")
                     ) {
-                        if (uiState.isLoading) {
+                        if (uiState.isLoading || isSubmitting) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 color = MaterialTheme.colorScheme.onPrimary,

@@ -265,6 +265,13 @@ class AuthViewModel(
     }
 
     fun deleteAccount(onSuccess: () -> Unit) {
+        deleteAccount(onFailure = {}, onSuccess = onSuccess)
+    }
+
+    fun deleteAccount(
+        onFailure: (String) -> Unit,
+        onSuccess: () -> Unit
+    ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = authRepository.deleteAccount()
@@ -272,7 +279,9 @@ class AuthViewModel(
                 _uiState.update { it.copy(isLoading = false, successMessage = "Account deleted successfully.") }
                 onSuccess()
             }.onFailure { err ->
-                _uiState.update { it.copy(isLoading = false, errorMessage = err.message ?: "Failed to delete account.") }
+                val errorMsg = err.message ?: "Failed to delete account."
+                _uiState.update { it.copy(isLoading = false, errorMessage = errorMsg) }
+                onFailure(errorMsg)
             }
         }
     }
@@ -292,7 +301,7 @@ class AuthViewModel(
     }
 
     fun clearMessages() {
-        _uiState.update { it.copy(errorMessage = null, successMessage = null) }
+        _uiState.update { it.copy(errorMessage = null, successMessage = null, resetEmailSent = false) }
     }
 
     fun prepareSignIn(email: String) {

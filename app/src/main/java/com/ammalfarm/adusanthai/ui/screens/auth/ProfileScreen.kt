@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +54,7 @@ fun ProfileScreen(
 ) {
     val user = uiState.currentUser
     val farm = uiState.currentFarm
+    val context = LocalContext.current
     var isEditing by remember { mutableStateOf(false) }
     var editName by remember(user) { mutableStateOf(user?.name ?: "") }
     var editPhone by remember(user) { mutableStateOf(user?.phone ?: "") }
@@ -802,7 +804,80 @@ fun ProfileScreen(
                             )
                         }
 
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        // Open Supported Links in App Settings row
                         val context = androidx.compose.ui.platform.LocalContext.current
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    try {
+                                        val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                            android.content.Intent(
+                                                android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
+                                                android.net.Uri.parse("package:${context.packageName}")
+                                            )
+                                        } else {
+                                            android.content.Intent(
+                                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                android.net.Uri.parse("package:${context.packageName}")
+                                            )
+                                        }
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                        val fallback = android.content.Intent(
+                                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                            android.net.Uri.parse("package:${context.packageName}")
+                                        )
+                                        context.startActivity(fallback)
+                                    }
+                                }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Link,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Open Shared Links in App",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Configure phone to open adusanthai links directly in app",
+                                        fontSize = 11.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = "Open App Link Settings",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
                         val consentManager = remember { com.ammalfarm.adusanthai.core.util.PolicyConsentManager(context) }
                         val acceptedDate = remember { consentManager.getAcceptedDateFormatted() }
                         val isPolicyAccepted = remember { consentManager.hasAcceptedPolicies() }
@@ -968,17 +1043,32 @@ fun ProfileScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
+                    if (!uiState.errorMessage.isNullOrBlank() && !isDeletingAccount) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = uiState.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         isDeletingAccount = true
-                        authViewModel.deleteAccount {
-                            isDeletingAccount = false
-                            showDeleteConfirmationDialog = false
-                            onLogoutSuccess()
-                        }
+                        authViewModel.deleteAccount(
+                            onFailure = { errorMsg ->
+                                isDeletingAccount = false
+                                android.widget.Toast.makeText(context, errorMsg, android.widget.Toast.LENGTH_LONG).show()
+                            },
+                            onSuccess = {
+                                isDeletingAccount = false
+                                showDeleteConfirmationDialog = false
+                                onLogoutSuccess()
+                            }
+                        )
                     },
                     enabled = !isDeletingAccount,
                     colors = ButtonDefaults.buttonColors(

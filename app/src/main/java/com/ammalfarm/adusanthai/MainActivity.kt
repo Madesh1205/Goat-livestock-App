@@ -2,7 +2,9 @@ package com.ammalfarm.adusanthai
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -305,6 +307,18 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val openWebBrowserUrl: (String) -> Unit = { url ->
+                    try {
+                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                            addCategory(Intent.CATEGORY_BROWSABLE)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(browserIntent)
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Opening $url", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
                 // Strict Authentication Guard: The marketplace and features are strictly hidden without login
                 val isAuthenticated = authUiState.isAuthenticated && authUiState.currentUser != null
                 val publicRoutes = remember {
@@ -509,9 +523,12 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToRegister = { navController.navigate(Screen.Register.route) },
                                 onNavigateToRegisterFarm = { navController.navigate(Screen.Register.route) },
-                                onNavigateToForgotPassword = { navController.navigate(Screen.ForgotPassword.route) },
-                                onNavigateToPrivacyPolicy = { navController.navigate(Screen.PrivacyPolicy.route) },
-                                onNavigateToTermsConditions = { navController.navigate(Screen.TermsConditions.route) }
+                                onNavigateToForgotPassword = {
+                                    authViewModel.clearMessages()
+                                    navController.navigate(Screen.ForgotPassword.route)
+                                },
+                                onNavigateToPrivacyPolicy = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.PRIVACY_POLICY_URL) },
+                                onNavigateToTermsConditions = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.TERMS_CONDITIONS_URL) }
                             )
                         }
 
@@ -521,14 +538,17 @@ class MainActivity : ComponentActivity() {
                                 uiState = authUiState,
                                 policyConsentManager = app.container.policyConsentManager,
                                 onNavigateToLogin = { navController.navigate(Screen.Login.route) },
-                                onNavigateToForgotPassword = { navController.navigate(Screen.ForgotPassword.route) },
+                                onNavigateToForgotPassword = {
+                                    authViewModel.clearMessages()
+                                    navController.navigate(Screen.ForgotPassword.route)
+                                },
                                 onRegistrationSuccess = { role ->
                                     marketplaceViewModel.loadAllPlatformData()
                                     authViewModel.refreshUserProfile()
                                     navigateByRole(role)
                                 },
-                                onNavigateToPrivacyPolicy = { navController.navigate(Screen.PrivacyPolicy.route) },
-                                onNavigateToTermsConditions = { navController.navigate(Screen.TermsConditions.route) }
+                                onNavigateToPrivacyPolicy = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.PRIVACY_POLICY_URL) },
+                                onNavigateToTermsConditions = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.TERMS_CONDITIONS_URL) }
                             )
                         }
 
@@ -574,8 +594,8 @@ class MainActivity : ComponentActivity() {
                                         Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                onNavigateToPrivacyPolicy = { navController.navigate(Screen.PrivacyPolicy.route) },
-                                onNavigateToTermsConditions = { navController.navigate(Screen.TermsConditions.route) }
+                                onNavigateToPrivacyPolicy = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.PRIVACY_POLICY_URL) },
+                                onNavigateToTermsConditions = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.TERMS_CONDITIONS_URL) }
                             )
                         }
 
@@ -613,8 +633,8 @@ class MainActivity : ComponentActivity() {
                                         Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
                                     }
                                 },
-                                onNavigateToPrivacyPolicy = { navController.navigate(Screen.PrivacyPolicy.route) },
-                                onNavigateToTermsConditions = { navController.navigate(Screen.TermsConditions.route) }
+                                onNavigateToPrivacyPolicy = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.PRIVACY_POLICY_URL) },
+                                onNavigateToTermsConditions = { openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.TERMS_CONDITIONS_URL) }
                             )
                         }
 
@@ -1189,6 +1209,10 @@ class MainActivity : ComponentActivity() {
 
                         // --- LEGAL & POLICIES ROUTES ---
                         composable(Screen.PrivacyPolicy.route) {
+                            LaunchedEffect(Unit) {
+                                openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.PRIVACY_POLICY_URL)
+                                navController.popBackStack()
+                            }
                             LegalPolicyScreen(
                                 initialTab = 0,
                                 onBackClick = { navController.popBackStack() }
@@ -1196,6 +1220,10 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(Screen.TermsConditions.route) {
+                            LaunchedEffect(Unit) {
+                                openWebBrowserUrl(com.ammalfarm.adusanthai.util.DeepLinkUtils.TERMS_CONDITIONS_URL)
+                                navController.popBackStack()
+                            }
                             LegalPolicyScreen(
                                 initialTab = 1,
                                 onBackClick = { navController.popBackStack() }
@@ -1217,6 +1245,18 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingNotificationIntent(intent: android.content.Intent?) {
         if (intent == null) return
 
+        // 1. Check URI / Web Deep Link (e.g., https://adusanthai.ammalfarm.dpdns.org/goats/GOAT-001)
+        val dataUri = intent.data
+        if (dataUri != null) {
+            val uriPayload = com.ammalfarm.adusanthai.util.DeepLinkUtils.parseUriToDeepLinkPayload(dataUri)
+            if (uriPayload != null) {
+                marketplaceViewModel.queueNotificationDeepLink(uriPayload)
+                intent.data = null
+                return
+            }
+        }
+
+        // 2. Check Notification Extras
         val notifId = intent.getStringExtra(com.ammalfarm.adusanthai.core.notification.NotificationHelper.EXTRA_NOTIFICATION_ID)
         val route = intent.getStringExtra(com.ammalfarm.adusanthai.core.notification.NotificationHelper.EXTRA_DEEP_LINK_ROUTE)
         val refId = intent.getStringExtra(com.ammalfarm.adusanthai.core.notification.NotificationHelper.EXTRA_REFERENCE_ID)

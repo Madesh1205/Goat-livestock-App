@@ -1,5 +1,7 @@
 package com.ammalfarm.adusanthai.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,11 +26,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ammalfarm.adusanthai.util.DeepLinkUtils
 import kotlinx.coroutines.launch
 
 data class PolicySection(
@@ -51,6 +55,7 @@ fun LegalPolicyScreen(
     var searchQuery by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
 
     val privacySections = remember {
         listOf(
@@ -289,6 +294,23 @@ fun LegalPolicyScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Navigate back"
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            val url = if (selectedTab == 0) DeepLinkUtils.PRIVACY_POLICY_URL else DeepLinkUtils.TERMS_CONDITIONS_URL
+                            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            try {
+                                context.startActivity(browserIntent)
+                            } catch (_: Exception) {}
+                        },
+                        modifier = Modifier.testTag("legal_policy_browser_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.OpenInNew,
+                            contentDescription = "Open legal policy in web browser"
                         )
                     }
                 },
@@ -594,17 +616,39 @@ fun LegalPolicyScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Email: compliance@goatmarketplace.in • Tel: +91 (0422) 298-4400",
+                                text = "Web: adusanthai.ammalfarm.dpdns.org • Email: privacy@ammalfarm.com",
                                 fontSize = 11.5.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "Tamil Nadu Livestock Pedigree & Breeding Network © 2026",
+                                text = "Ammal Farm Adu Santhai • Livestock Marketplace © 2026",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 textAlign = TextAlign.Center
                             )
+                            OutlinedButton(
+                                onClick = {
+                                    val url = if (selectedTab == 0) DeepLinkUtils.PRIVACY_POLICY_URL else DeepLinkUtils.TERMS_CONDITIONS_URL
+                                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    try {
+                                        context.startActivity(browserIntent)
+                                    } catch (_: Exception) {}
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.OpenInNew,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (selectedTab == 0) "View Online Privacy Policy" else "View Online Terms & Conditions",
+                                    fontSize = 12.sp
+                                )
+                            }
                         }
                     }
                 }

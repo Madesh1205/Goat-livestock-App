@@ -95,6 +95,105 @@ object DeepLinkUtils {
         return NotificationType.SYSTEM_ALERT
     }
 
+    const val OFFICIAL_WEB_URL = "https://adusanthai.ammalfarm.dpdns.org"
+    const val OFFICIAL_DOMAIN = "adusanthai.ammalfarm.dpdns.org"
+    const val PRIVACY_POLICY_URL = "https://adusanthai.ammalfarm.dpdns.org/privacy"
+    const val TERMS_CONDITIONS_URL = "https://adusanthai.ammalfarm.dpdns.org/terms"
+
+    /**
+     * Parses a Web URL or custom scheme Uri into a strongly-typed [NotificationDeepLinkPayload].
+     * Handles standard paths, query params, hash fragments, and custom schemes.
+     */
+    fun parseUriToDeepLinkPayload(uri: android.net.Uri?): NotificationDeepLinkPayload? {
+        if (uri == null) return null
+
+        val scheme = uri.scheme?.lowercase() ?: return null
+        val host = uri.host?.lowercase().orEmpty()
+        var segments = uri.pathSegments ?: emptyList()
+
+        val isHttp = scheme == "http" || scheme == "https"
+        val isCustomScheme = scheme == "ammalfarm" || scheme == "com.aistudio.ammalfarm" || scheme == "adusanthai" || scheme == "com.ammalfarm.adusanthai"
+
+        if (!isHttp && !isCustomScheme) return null
+
+        // If URL has a hash fragment (e.g., /#/goat/123 or #/goats/123)
+        val fragment = uri.fragment?.trim().orEmpty()
+        val fragmentSegments = if (fragment.isNotEmpty()) {
+            val cleanFrag = if (fragment.startsWith("/")) fragment.substring(1) else fragment
+            cleanFrag.split("/").filter { it.isNotBlank() }
+        } else emptyList()
+
+        val effectiveSegments = if (segments.isEmpty() && fragmentSegments.isNotEmpty()) {
+            fragmentSegments
+        } else {
+            segments
+        }
+
+        val firstSeg = effectiveSegments.getOrNull(0)?.lowercase() ?: ""
+        val secondSeg = effectiveSegments.getOrNull(1)
+
+        // Also check query parameters
+        val queryId = uri.getQueryParameter("id")
+            ?: uri.getQueryParameter("goat_id")
+            ?: uri.getQueryParameter("goatId")
+            ?: uri.getQueryParameter("goat")
+        val queryFarmId = uri.getQueryParameter("farm_id")
+            ?: uri.getQueryParameter("farmId")
+            ?: uri.getQueryParameter("farm")
+        val queryBookingId = uri.getQueryParameter("booking_id")
+            ?: uri.getQueryParameter("bookingId")
+            ?: uri.getQueryParameter("order_id")
+
+        val (targetRoute, refId) = when {
+            // Direct goat segments or query
+            firstSeg in listOf("goats", "goat", "livestock", "listing", "listings") -> {
+                "goat_detail" to (secondSeg ?: queryId)
+            }
+            // Direct farm segments or query
+            firstSeg in listOf("farms", "farm", "partner", "partners") -> {
+                "farm_detail" to (secondSeg ?: queryFarmId ?: queryId)
+            }
+            // Bookings / Orders
+            firstSeg in listOf("orders", "bookings", "my_bookings", "my-bookings") -> {
+                "orders" to (secondSeg ?: queryBookingId ?: queryId)
+            }
+            firstSeg in listOf("notifications") -> "notifications" to null
+            firstSeg in listOf("wishlist", "favorites") -> "wishlist" to null
+            firstSeg in listOf("login", "signin") -> "login" to null
+            firstSeg in listOf("register", "signup") -> "register" to null
+            firstSeg in listOf("reset-password", "forgot-password") -> "forgot_password" to null
+            firstSeg in listOf("farm-admin", "farm-dashboard", "farm_dashboard") -> "farm_dashboard" to null
+            firstSeg in listOf("admin", "super-admin", "super_admin_dashboard") -> "super_admin_dashboard" to null
+            firstSeg in listOf("privacy", "privacy-policy") -> "privacy_policy" to null
+            firstSeg in listOf("terms", "terms-conditions") -> "terms_conditions" to null
+            firstSeg in listOf("marketplace", "home", "") -> {
+                when {
+                    !queryId.isNullOrBlank() -> "goat_detail" to queryId
+                    !queryFarmId.isNullOrBlank() -> "farm_detail" to queryFarmId
+                    !queryBookingId.isNullOrBlank() -> "orders" to queryBookingId
+                    else -> "marketplace" to null
+                }
+            }
+            else -> {
+                when {
+                    host in listOf("goat", "goats") -> "goat_detail" to (segments.getOrNull(0) ?: queryId)
+                    host in listOf("farm", "farms") -> "farm_detail" to (segments.getOrNull(0) ?: queryFarmId)
+                    host in listOf("orders", "bookings") -> "orders" to (segments.getOrNull(0) ?: queryBookingId)
+                    !queryId.isNullOrBlank() -> "goat_detail" to queryId
+                    !queryFarmId.isNullOrBlank() -> "farm_detail" to queryFarmId
+                    else -> "marketplace" to null
+                }
+            }
+        }
+
+        return NotificationDeepLinkPayload(
+            notificationId = "web_link_${System.currentTimeMillis()}",
+            route = targetRoute,
+            referenceId = refId?.takeIf { it.isNotBlank() },
+            intentKey = "uri_${uri.toString().hashCode()}"
+        )
+    }
+
     /**
      * Resolves the navigation route for a notification based on its type and reference ID.
      */

@@ -66,6 +66,30 @@ fun RegisterScreen(
     var showEmailConfirmationDialog by remember { mutableStateOf(false) }
     var showFarmPartnerPendingDialog by remember { mutableStateOf(false) }
     var registeredEmail by remember { mutableStateOf("") }
+    var showValidationErrors by remember { mutableStateOf(false) }
+
+    // Validation computations
+    val isFullNameBlank = fullName.trim().isBlank()
+    val isEmailBlank = email.trim().isBlank()
+    val isEmailFormatValid = !isEmailBlank && android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+    val isPhoneBlank = phone.trim().isBlank()
+    val isPhoneValid = !isPhoneBlank && phone.filter { it.isDigit() }.length >= 10
+    val isFarmNameBlank = selectedTab == 1 && farmName.trim().isBlank()
+    val isFarmDistrictBlank = selectedTab == 1 && farmDistrict.trim().isBlank()
+    val isPasswordBlank = password.isBlank()
+    val isPasswordShort = !isPasswordBlank && password.length < 6
+    val isConfirmPasswordBlank = confirmPassword.isBlank()
+    val isPasswordMismatch = !isConfirmPasswordBlank && confirmPassword != password
+    val isPolicyUnchecked = !acceptedPolicies
+
+    val fullNameHasError = showValidationErrors && isFullNameBlank
+    val emailHasError = showValidationErrors && (isEmailBlank || !isEmailFormatValid)
+    val phoneHasError = showValidationErrors && (isPhoneBlank || !isPhoneValid)
+    val farmNameHasError = showValidationErrors && isFarmNameBlank
+    val farmDistrictHasError = showValidationErrors && isFarmDistrictBlank
+    val passwordHasError = showValidationErrors && (isPasswordBlank || isPasswordShort)
+    val confirmPasswordHasError = showValidationErrors && (isConfirmPasswordBlank || isPasswordMismatch)
+    val policyHasError = showValidationErrors && isPolicyUnchecked
 
     val districts = remember { com.ammalfarm.adusanthai.core.util.FarmLocations.TAMIL_NADU_DISTRICTS }
     var districtDropdownExpanded by remember { mutableStateOf(false) }
@@ -249,8 +273,16 @@ fun RegisterScreen(
                 label = { Text("Full Name *") },
                 placeholder = { Text(if (selectedTab == 0) "e.g. Full Name" else "e.g. Authorized Farm Representative") },
                 leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
+                isError = fullNameHasError,
+                supportingText = if (fullNameHasError) {
+                    {
+                        Text("Full name is required", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                } else null,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("input_register_name"),
                 shape = RoundedCornerShape(10.dp)
             )
 
@@ -263,21 +295,48 @@ fun RegisterScreen(
                 label = { Text("Email Address *") },
                 placeholder = { Text("e.g. user@example.com") },
                 leadingIcon = { Icon(Icons.Outlined.Email, contentDescription = null) },
+                isError = emailHasError,
+                supportingText = if (emailHasError) {
+                    {
+                        Text(
+                            text = if (isEmailBlank) "Email address is required" else "Please enter a valid email address",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("input_register_email"),
                 shape = RoundedCornerShape(10.dp)
             )
 
             OutlinedTextField(
                 value = phone,
-                onValueChange = { phone = it },
+                onValueChange = {
+                    phone = it
+                    if (uiState.errorMessage != null) authViewModel.clearMessages()
+                },
                 label = { Text("Phone Number *") },
                 placeholder = { Text("e.g. +91 98000 00000") },
                 leadingIcon = { Icon(Icons.Outlined.Phone, contentDescription = null) },
+                isError = phoneHasError,
+                supportingText = if (phoneHasError) {
+                    {
+                        Text(
+                            text = if (isPhoneBlank) "Phone number is required" else "Please enter a valid 10-digit phone number",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("input_register_phone"),
                 shape = RoundedCornerShape(10.dp)
             )
 
@@ -327,12 +386,23 @@ fun RegisterScreen(
 
                 OutlinedTextField(
                     value = farmName,
-                    onValueChange = { farmName = it },
+                    onValueChange = {
+                        farmName = it
+                        if (uiState.errorMessage != null) authViewModel.clearMessages()
+                    },
                     label = { Text("Farm / Ranch Name *") },
                     placeholder = { Text("e.g. Green Valley Livestock Farm") },
                     leadingIcon = { Icon(Icons.Outlined.Store, contentDescription = null) },
+                    isError = farmNameHasError,
+                    supportingText = if (farmNameHasError) {
+                        {
+                            Text("Farm name is required", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                    } else null,
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_register_farm_name"),
                     shape = RoundedCornerShape(10.dp)
                 )
 
@@ -349,6 +419,12 @@ fun RegisterScreen(
                         label = { Text("District (Tamil Nadu) *") },
                         leadingIcon = { Icon(Icons.Outlined.LocationOn, contentDescription = null) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = districtDropdownExpanded) },
+                        isError = farmDistrictHasError,
+                        supportingText = if (farmDistrictHasError) {
+                            {
+                                Text("District is required", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
+                        } else null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
@@ -387,9 +463,22 @@ fun RegisterScreen(
             // Password Fields
             OutlinedTextField(
                 value = password,
-                onValueChange = { password = it },
+                onValueChange = {
+                    password = it
+                    if (uiState.errorMessage != null) authViewModel.clearMessages()
+                },
                 label = { Text("Password (min 6 characters) *") },
                 leadingIcon = { Icon(Icons.Outlined.Lock, contentDescription = null) },
+                isError = passwordHasError,
+                supportingText = if (passwordHasError) {
+                    {
+                        Text(
+                            text = if (isPasswordBlank) "Password is required" else "Password must be at least 6 characters",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else null,
                 trailingIcon = {
                     IconButton(onClick = { passwordVisible = !passwordVisible }) {
                         Icon(
@@ -401,30 +490,54 @@ fun RegisterScreen(
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("input_register_password"),
                 shape = RoundedCornerShape(10.dp)
             )
 
             OutlinedTextField(
                 value = confirmPassword,
-                onValueChange = { confirmPassword = it },
+                onValueChange = {
+                    confirmPassword = it
+                    if (uiState.errorMessage != null) authViewModel.clearMessages()
+                },
                 label = { Text("Confirm Password *") },
                 leadingIcon = { Icon(Icons.Outlined.LockReset, contentDescription = null) },
+                isError = confirmPasswordHasError,
+                supportingText = if (confirmPasswordHasError) {
+                    {
+                        Text(
+                            text = if (isConfirmPasswordBlank) "Please confirm your password" else "Passwords do not match",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                } else null,
                 visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("input_register_confirm_password"),
                 shape = RoundedCornerShape(10.dp)
             )
 
             // Mandatory Terms & Privacy Agreement Checkbox
             Surface(
                 shape = RoundedCornerShape(10.dp),
-                color = if (acceptedPolicies) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                color = when {
+                    policyHasError -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+                    acceptedPolicies -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                },
                 border = BorderStroke(
                     1.dp,
-                    if (acceptedPolicies) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                    else MaterialTheme.colorScheme.outlineVariant
+                    when {
+                        policyHasError -> MaterialTheme.colorScheme.error
+                        acceptedPolicies -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                        else -> MaterialTheme.colorScheme.outlineVariant
+                    }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -477,33 +590,52 @@ fun RegisterScreen(
                             )
                         }
                         Text(
-                            text = if (acceptedPolicies) "Policies accepted. You can create your account." else "Mandatory: You must accept policies to create an account.",
+                            text = when {
+                                policyHasError -> "Please accept the Privacy Policy and Terms & Conditions to create your account."
+                                acceptedPolicies -> "Policies accepted. You can create your account."
+                                else -> "Mandatory: You must accept policies to create an account."
+                            },
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (acceptedPolicies) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = when {
+                                policyHasError -> MaterialTheme.colorScheme.error
+                                acceptedPolicies -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = if (policyHasError) FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 }
             }
 
-            // Submit Button (Enabled ONLY when policies are accepted and fields filled)
-            val canSubmit = !uiState.isLoading && acceptedPolicies &&
-                fullName.isNotBlank() && email.isNotBlank() && password.isNotBlank() && confirmPassword.isNotBlank() && phone.isNotBlank() &&
-                (selectedTab == 0 || (farmName.isNotBlank() && farmDistrict.isNotBlank()))
-
+            // Submit Button (Always Active - Validates and Highlights on click)
             Button(
                 onClick = {
-                    focusManager.clearFocus()
-                    if (!acceptedPolicies) {
-                        android.widget.Toast.makeText(context, "Please accept the Privacy Policy and Terms & Conditions to create an account.", android.widget.Toast.LENGTH_SHORT).show()
+                    showValidationErrors = true
+                    val isValid = !isFullNameBlank &&
+                            !isEmailBlank && isEmailFormatValid &&
+                            !isPhoneBlank && isPhoneValid &&
+                            (selectedTab == 0 || (!isFarmNameBlank && !isFarmDistrictBlank)) &&
+                            !isPasswordBlank && !isPasswordShort &&
+                            !isConfirmPasswordBlank && !isPasswordMismatch &&
+                            acceptedPolicies
+
+                    if (!isValid) {
+                        if (!acceptedPolicies) {
+                            android.widget.Toast.makeText(context, "Please accept the Privacy Policy and Terms & Conditions.", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            android.widget.Toast.makeText(context, "Please fill in all required fields highlighted in red.", android.widget.Toast.LENGTH_SHORT).show()
+                        }
                         return@Button
                     }
+
+                    focusManager.clearFocus()
                     if (selectedTab == 0) {
                         authViewModel.registerCustomer(
-                            name = fullName,
-                            email = email,
+                            name = fullName.trim(),
+                            email = email.trim(),
                             password = password,
                             confirmPass = confirmPassword,
-                            phone = phone,
+                            phone = phone.trim(),
                             onSuccess = { requiresVerification ->
                                 consentManager.setPoliciesAccepted(true)
                                 registeredEmail = email.trim()
@@ -516,14 +648,14 @@ fun RegisterScreen(
                         )
                     } else {
                         authViewModel.registerFarmAdmin(
-                            name = fullName,
-                            email = email,
+                            name = fullName.trim(),
+                            email = email.trim(),
                             password = password,
                             confirmPass = confirmPassword,
-                            phone = phone,
-                            farmName = farmName,
-                            farmDistrict = farmDistrict,
-                            farmDescription = farmDescription,
+                            phone = phone.trim(),
+                            farmName = farmName.trim(),
+                            farmDistrict = farmDistrict.trim(),
+                            farmDescription = farmDescription.trim(),
                             onSuccess = { requiresVerification ->
                                 consentManager.setPoliciesAccepted(true)
                                 registeredEmail = email.trim()
@@ -536,7 +668,7 @@ fun RegisterScreen(
                         )
                     }
                 },
-                enabled = canSubmit,
+                enabled = !uiState.isLoading,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -551,9 +683,7 @@ fun RegisterScreen(
                     )
                 } else {
                     Text(
-                        text = if (!acceptedPolicies) {
-                            "Accept Policies to Create Account"
-                        } else if (selectedTab == 0) {
+                        text = if (selectedTab == 0) {
                             "Create Customer Account"
                         } else {
                             "Submit Farm Application"

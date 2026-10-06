@@ -245,10 +245,12 @@ object UserFriendlyErrorMapper {
             return "Unable to connect. Please check your internet connection and try again."
         }
 
-        // Account already exists
+        // Account already exists / unique trigger collision
         if (msg.contains("user already registered") ||
             msg.contains("already exists") ||
-            msg.contains("user_already_exists")
+            msg.contains("user_already_exists") ||
+            msg.contains("database error saving new user") ||
+            msg.contains("unexpected_failure")
         ) {
             return "An account with this email already exists. Please sign in with your account password or reset it."
         }
@@ -366,6 +368,8 @@ object UserFriendlyErrorMapper {
                 lowerMsg.contains("column") ||
                 lowerMsg.contains("trigger") ||
                 lowerMsg.contains("has no field") ||
+                lowerMsg.contains("listing_fee_paid") ||
+                lowerMsg.contains("record \"old\"") ||
                 lowerMsg.contains("serializer for class 'any'")
     }
 }
