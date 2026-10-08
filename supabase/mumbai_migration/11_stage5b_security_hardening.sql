@@ -546,39 +546,8 @@ CREATE POLICY "goat_images_select_policy" ON public.goat_images
     );
 
 DROP POLICY IF EXISTS "bookings_insert_policy" ON public.bookings;
-CREATE POLICY "bookings_insert_policy" ON public.bookings
-    FOR INSERT TO authenticated
-    WITH CHECK (
-        public.is_super_admin()
-        OR (
-            customer_id = auth.uid()
-            AND NOT EXISTS (
-                SELECT 1 FROM public.farms f
-                WHERE f.id = bookings.farm_id
-                  AND f.owner_id = auth.uid()
-            )
-        )
-    );
-
 DROP POLICY IF EXISTS "bookings_update_policy" ON public.bookings;
-CREATE POLICY "bookings_update_policy" ON public.bookings
-    FOR UPDATE TO authenticated
-    USING (
-        customer_id = auth.uid()
-        OR EXISTS (
-            SELECT 1 FROM public.farms f
-            WHERE f.id = bookings.farm_id AND f.owner_id = auth.uid()
-        )
-        OR public.is_super_admin()
-    )
-    WITH CHECK (
-        customer_id = auth.uid()
-        OR EXISTS (
-            SELECT 1 FROM public.farms f
-            WHERE f.id = bookings.farm_id AND f.owner_id = auth.uid()
-        )
-        OR public.is_super_admin()
-    );
+DROP POLICY IF EXISTS "bookings_delete_policy" ON public.bookings;
 
 
 -- =============================================================================

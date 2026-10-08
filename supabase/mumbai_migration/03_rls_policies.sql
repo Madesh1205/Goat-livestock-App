@@ -263,6 +263,10 @@ CREATE POLICY "goat_images_delete_policy" ON public.goat_images
 -- =============================================================================
 -- 7. BOOKINGS RLS POLICIES
 -- =============================================================================
+-- 7. BOOKINGS RLS POLICIES (SERVER-AUTHORITATIVE LOCKDOWN)
+-- Direct INSERT, UPDATE, and DELETE are strictly disabled.
+-- Writes occur exclusively via SECURITY DEFINER booking RPCs.
+-- =============================================================================
 
 DROP POLICY IF EXISTS "bookings_select_policy" ON public.bookings;
 DROP POLICY IF EXISTS "bookings_insert_policy" ON public.bookings;
@@ -277,46 +281,6 @@ CREATE POLICY "bookings_select_policy" ON public.bookings
             SELECT 1 FROM public.farms f
             WHERE f.id::text = bookings.farm_id::text AND f.owner_id::text = auth.uid()::text
         )
-        OR public.is_super_admin()
-    );
-
-CREATE POLICY "bookings_insert_policy" ON public.bookings
-    FOR INSERT TO authenticated
-    WITH CHECK (
-        public.is_super_admin()
-        OR (
-            customer_id::text = auth.uid()::text
-            AND NOT EXISTS (
-                SELECT 1 FROM public.farms f
-                WHERE f.id = bookings.farm_id
-                  AND f.owner_id::text = auth.uid()::text
-            )
-        )
-    );
-
-CREATE POLICY "bookings_update_policy" ON public.bookings
-    FOR UPDATE TO authenticated
-    USING (
-        customer_id::text = auth.uid()::text
-        OR EXISTS (
-            SELECT 1 FROM public.farms f
-            WHERE f.id::text = bookings.farm_id::text AND f.owner_id::text = auth.uid()::text
-        )
-        OR public.is_super_admin()
-    )
-    WITH CHECK (
-        customer_id::text = auth.uid()::text
-        OR EXISTS (
-            SELECT 1 FROM public.farms f
-            WHERE f.id::text = bookings.farm_id::text AND f.owner_id::text = auth.uid()::text
-        )
-        OR public.is_super_admin()
-    );
-
-CREATE POLICY "bookings_delete_policy" ON public.bookings
-    FOR DELETE TO authenticated
-    USING (
-        customer_id::text = auth.uid()::text
         OR public.is_super_admin()
     );
 
