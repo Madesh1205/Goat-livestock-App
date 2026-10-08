@@ -977,7 +977,7 @@ private fun FarmAdminCard(
                                 color = MaterialTheme.colorScheme.primaryContainer
                             ) {
                                 Text(
-                                    text = farm.farmCode.ifBlank { "FARM-001" },
+                                    text = farm.farmCode.ifBlank { if (isAmmal) "FARM-001" else "FARM-002" },
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1405,7 +1405,7 @@ private fun GoatAdminCard(
                     Column {
                         Text(goat.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                         Text("Code: ${goat.goatCode.ifBlank { "GOAT-" + goat.id.take(6).uppercase() }} • ${goat.breed}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Farm: ${goat.farmName} (${goat.farmCode.ifBlank { "FARM-001" }})", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        Text(if (goat.farmCode.isNotBlank()) "Farm: ${goat.farmName} (${goat.farmCode})" else "Farm: ${goat.farmName}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                         Text("${goat.gender.name} • ${goat.ageMonths} mos • ${goat.weightKg} kg", fontSize = 11.sp, color = Color.Gray)
                     }
                 }

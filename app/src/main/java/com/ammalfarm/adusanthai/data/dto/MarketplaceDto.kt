@@ -330,7 +330,8 @@ data class FarmDto(
         val effectiveFarmCode = if (isAmmal) "FARM-001"
             else if (rawCode != null && rawCode.startsWith("FARM-") && rawCode.length <= 8) rawCode
             else if (rawCode != null) "FARM-" + rawCode.removePrefix("FARM-").uppercase()
-            else "FARM-002"
+            else ""
+        val parsedCreatedAt = parseIsoTimestamp(createdAt) ?: System.currentTimeMillis()
 
         return Farm(
             id = id,
@@ -350,7 +351,8 @@ data class FarmDto(
             rating = rating,
             totalReviews = reviewCount,
             totalGoatsListed = totalGoats,
-            goatListingLimit = effectiveLimit
+            goatListingLimit = effectiveLimit,
+            createdAt = parsedCreatedAt
         )
     }
 
