@@ -326,7 +326,11 @@ data class FarmDto(
         val isAmmal = isAmmalOwnFarm || id == SEED_AMMAL_FARM_UUID
         val effectiveLimit = customLimit ?: (if (isAmmal) 1000 else (goatListingLimit ?: (if (effectiveStatus == VerificationStatus.APPROVED) 2 else 0)))
         val locationStr = if (effectiveDistrict.isNotBlank()) "$effectiveDistrict, $effectiveState" else effectiveState
-        val effectiveFarmCode = farmCode?.trim()?.ifBlank { null } ?: ("FARM-" + id.take(6).uppercase())
+        val rawCode = farmCode?.trim()?.ifBlank { null }
+        val effectiveFarmCode = if (isAmmal) "FARM-001"
+            else if (rawCode != null && rawCode.startsWith("FARM-") && rawCode.length <= 8) rawCode
+            else if (rawCode != null) "FARM-" + rawCode.removePrefix("FARM-").uppercase()
+            else "FARM-002"
 
         return Farm(
             id = id,

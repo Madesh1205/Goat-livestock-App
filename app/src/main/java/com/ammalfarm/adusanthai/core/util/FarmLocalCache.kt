@@ -45,6 +45,8 @@ object FarmLocalCache {
         if (!isValidUuid(farm.id)) return false
         if (farm.name.isBlank()) return false
         if (farm.ownerId.isNotBlank() && !isValidUuid(farm.ownerId)) return false
+        // Orphaned non-Ammal farm whose owner was removed/deleted is invalid
+        if (farm.ownerId.isBlank() && !farm.isAmmalOwnFarm) return false
         return true
     }
 
@@ -195,6 +197,10 @@ object FarmLocalCache {
             removeCachedFarm(targetId, context)
             null
         }
+    }
+
+    fun deleteFarm(farmId: String?, context: Context? = null) {
+        removeCachedFarm(farmId, context)
     }
 
     fun removeCachedFarm(farmId: String?, context: Context? = null) {

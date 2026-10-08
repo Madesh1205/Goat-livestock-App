@@ -41,6 +41,7 @@ interface MarketplaceRepository {
     suspend fun updateFarmLogo(farmId: String, logoUrl: String): Result<String>
     suspend fun updateFarmVerification(farmId: String, status: VerificationStatus): Result<Unit>
     suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit>
+    suspend fun deleteFarm(farmId: String): Result<Unit>
 
     // Reports & Moderation
     fun getAllReports(): Flow<List<PlatformReport>>

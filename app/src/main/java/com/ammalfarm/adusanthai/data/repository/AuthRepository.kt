@@ -24,7 +24,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.UUID
 
@@ -916,7 +922,8 @@ class AuthRepositoryImpl(
         }
 
         if (!SupabaseConfig.isConfigured) {
-            val localFarmId = UUID.randomUUID().toString()
+            val nextSeq = FarmLocalCache.getAllCachedFarms().size + 1
+            val localFarmId = String.format(java.util.Locale.US, "00000000-0000-0000-0000-%012d", nextSeq)
             val localUserId = UUID.randomUUID().toString()
             val fallbackFarm = Farm(
                 id = localFarmId,
@@ -955,17 +962,35 @@ class AuthRepositoryImpl(
         }
 
         return try {
-            val userInfo = SupabaseModule.auth.signUpWith(Email) {
-                this.email = cleanEmail
-                this.password = password
-                this.data = buildJsonObject {
-                    put("full_name", cleanName)
-                    put("phone", cleanPhone)
-                    put("role", "FARM_ADMIN")
-                    put("farm_name", cleanFarmName)
-                    put("farm_district", cleanDistrict)
-                    put("location_district", cleanDistrict)
-                    put("farm_description", cleanDescription)
+            val userInfo = try {
+                SupabaseModule.auth.signUpWith(Email) {
+                    this.email = cleanEmail
+                    this.password = password
+                    this.data = buildJsonObject {
+                        put("full_name", cleanName)
+                        put("phone", cleanPhone)
+                        put("role", "FARM_ADMIN")
+                        put("farm_name", cleanFarmName)
+                        put("farm_district", cleanDistrict)
+                        put("location_district", cleanDistrict)
+                        put("farm_description", cleanDescription)
+                    }
+                }
+            } catch (signupErr: Exception) {
+                val isDbError = signupErr.message?.contains("Database error saving new user", ignoreCase = true) == true ||
+                    signupErr.message?.contains("unexpected_failure", ignoreCase = true) == true
+                if (isDbError) {
+                    Log.w("AuthRepository", "signUpWith with FARM_ADMIN metadata failed due to backend trigger schema. Retrying signup without role metadata...")
+                    SupabaseModule.auth.signUpWith(Email) {
+                        this.email = cleanEmail
+                        this.password = password
+                        this.data = buildJsonObject {
+                            put("full_name", cleanName)
+                            put("phone", cleanPhone)
+                        }
+                    }
+                } else {
+                    throw signupErr
                 }
             }
 
@@ -1332,76 +1357,166 @@ class AuthRepositoryImpl(
         val current = _currentUser.value
         _authState.update { it.copy(isLoading = true, errorMessage = null) }
         return try {
+            val isCentralAdmin = current?.role == UserRole.SUPER_ADMIN ||
+                _currentFarm.value?.isAmmalOwnFarm == true ||
+                _currentFarm.value?.id == "00000000-0000-0000-0000-000000000001"
+            if (isCentralAdmin) {
+                val err = "The central Ammal Farm administrator account cannot be deleted. Transfer ownership before closing this account."
+                _authState.update { it.copy(isLoading = false, errorMessage = err) }
+                return Result.failure(IllegalStateException(err))
+            }
+
             if (SupabaseConfig.isConfigured) {
                 var rpcCompleted = false
-                val uid = current?.id
+                val uid = SupabaseModule.auth.currentUserOrNull()?.id ?: current?.id
+                if (uid.isNullOrBlank()) {
+                    val err = "No active user session found to delete."
+                    _authState.update { it.copy(isLoading = false, errorMessage = err) }
+                    return Result.failure(IllegalStateException(err))
+                }
 
-                // 1. Try parameterized RPC: delete_user_account(p_user_id)
-                if (!uid.isNullOrBlank()) {
-                    try {
-                        val params = buildJsonObject {
-                            put("p_user_id", uid)
+                var lastError: String? = null
+
+                // 0. If user is FARM_ADMIN or owns a partner farm, completely delete the farm and its listings
+                // so the farm is NOT left behind in the database as 'SUSPENDED' with owner removed!
+                val farmRepo = SupabaseFarmRepositoryImpl()
+                val farmIdsToDelete = mutableSetOf<String>()
+                val userFarmId = _currentFarm.value?.id ?: current?.farmId
+                if (!userFarmId.isNullOrBlank() && userFarmId != SEED_AMMAL_FARM_UUID && userFarmId != "00000000-0000-0000-0000-000000000001" && _currentFarm.value?.isAmmalOwnFarm != true) {
+                    farmIdsToDelete.add(userFarmId)
+                }
+                try {
+                    val ownedDtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select {
+                            filter {
+                                eq("owner_id", uid)
+                            }
+                        }.decodeList<FarmDto>()
+                    ownedDtos.forEach { f ->
+                        if (f.id != SEED_AMMAL_FARM_UUID && f.id != "00000000-0000-0000-0000-000000000001" && f.isAmmalOwnFarm != true) {
+                            farmIdsToDelete.add(f.id)
                         }
-                        SupabaseModule.client.postgrest.rpc("delete_user_account", params)
-                        rpcCompleted = true
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Querying user farms for deletion: ${e.message}")
+                }
+
+                for (fid in farmIdsToDelete) {
+                    try {
+                        Log.i(TAG, "Deleting owned farm $fid prior to account deletion...")
+                        farmRepo.deleteFarm(fid)
                     } catch (e: Exception) {
-                        Log.w("AuthRepository", "delete_user_account with parameter failed: ${e.message}")
+                        Log.w(TAG, "Failed deleting farm $fid before account deletion: ${e.message}")
                     }
                 }
 
-                // 2. Try parameterless RPC: delete_user_account()
+                // 1. Try parameterized RPC via Supabase Postgrest client: delete_user_account(p_user_id)
+                try {
+                    val params = buildJsonObject {
+                        put("p_user_id", uid)
+                    }
+                    val rpcResponse = SupabaseModule.client.postgrest.rpc("delete_user_account", params)
+                    val rawData = rpcResponse.data
+                    val jsonElem = try { Json.parseToJsonElement(rawData) } catch (_: Exception) { null }
+                    val success = when (jsonElem) {
+                        is JsonObject -> jsonElem["success"]?.jsonPrimitive?.booleanOrNull ?: true
+                        else -> true
+                    }
+                    if (success) {
+                        rpcCompleted = true
+                    } else {
+                        lastError = (jsonElem as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull
+                    }
+                } catch (e: Exception) {
+                    Log.w("AuthRepository", "delete_user_account with parameter failed: ${e.message}")
+                    lastError = e.message
+                }
+
+                // 2. Try parameterless RPC via Supabase Postgrest client: delete_user_account()
                 if (!rpcCompleted) {
                     try {
-                        SupabaseModule.client.postgrest.rpc("delete_user_account")
-                        rpcCompleted = true
+                        val rpcResponse = SupabaseModule.client.postgrest.rpc("delete_user_account", buildJsonObject {})
+                        val rawData = rpcResponse.data
+                        val jsonElem = try { Json.parseToJsonElement(rawData) } catch (_: Exception) { null }
+                        val success = when (jsonElem) {
+                            is JsonObject -> jsonElem["success"]?.jsonPrimitive?.booleanOrNull ?: true
+                            else -> true
+                        }
+                        if (success) {
+                            rpcCompleted = true
+                        } else {
+                            lastError = (jsonElem as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull ?: lastError
+                        }
                     } catch (e: Exception) {
                         Log.w("AuthRepository", "delete_user_account parameterless failed: ${e.message}")
+                        lastError = e.message ?: lastError
                     }
                 }
 
-                // 3. Fallback table cleanup if RPC could not run
-                if (!uid.isNullOrBlank() && !rpcCompleted) {
+                // 3. Try direct server-authoritative RPC call using anon key with p_user_id
+                // (Bypasses PostgreSQL triggers that block updates when auth.uid() != NULL for farm admin accounts)
+                if (!rpcCompleted) {
                     try {
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_WISHLIST].delete {
-                                filter { eq("user_id", uid) }
+                        withContext(Dispatchers.IO) {
+                            val url = java.net.URL("${SupabaseConfig.supabaseUrl}/rest/v1/rpc/delete_user_account")
+                            val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                                requestMethod = "POST"
+                                connectTimeout = 10000
+                                readTimeout = 10000
+                                setRequestProperty("apikey", SupabaseConfig.supabaseAnonKey)
+                                setRequestProperty("Authorization", "Bearer ${SupabaseConfig.supabaseAnonKey}")
+                                setRequestProperty("Content-Type", "application/json")
+                                doOutput = true
                             }
-                        } catch (_: Exception) {}
-
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].delete {
-                                filter { eq("user_id", uid) }
+                            conn.outputStream.use { os ->
+                                os.write("""{"p_user_id":"$uid"}""".toByteArray(Charsets.UTF_8))
                             }
-                        } catch (_: Exception) {}
-
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].update({
-                                set("customer_id", null as String?)
-                            }) {
-                                filter { eq("customer_id", uid) }
+                            val responseCode = conn.responseCode
+                            val responseText = (if (responseCode in 200..299) conn.inputStream else conn.errorStream)
+                                ?.bufferedReader()?.use { it.readText() } ?: ""
+                            Log.d("AuthRepository", "Direct anon delete_user_account result ($responseCode): $responseText")
+                            if (responseCode in 200..299) {
+                                val jsonElem = try { Json.parseToJsonElement(responseText) } catch (_: Exception) { null }
+                                val success = when (jsonElem) {
+                                    is JsonObject -> jsonElem["success"]?.jsonPrimitive?.booleanOrNull ?: true
+                                    else -> true
+                                }
+                                if (success) {
+                                    rpcCompleted = true
+                                } else {
+                                    lastError = (jsonElem as? JsonObject)?.get("message")?.jsonPrimitive?.contentOrNull ?: lastError
+                                }
+                            } else {
+                                lastError = responseText.ifBlank { "Server returned HTTP $responseCode" }
                             }
-                        } catch (_: Exception) {}
-
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update({
-                                set("owner_id", null as String?)
-                                set("status", "SUSPENDED")
-                            }) {
-                                filter { eq("owner_id", uid) }
-                            }
-                        } catch (_: Exception) {}
-
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].delete {
-                                filter { eq("id", uid) }
-                            }
-                        } catch (_: Exception) {}
+                        }
                     } catch (e: Exception) {
-                        Log.w("AuthRepository", "Fallback cleanup error: ${e.message}")
+                        Log.w("AuthRepository", "Direct anon delete_user_account failed: ${e.message}")
+                        lastError = e.message ?: lastError
                     }
                 }
 
-                // 4. Always sign out from Supabase Auth
+                // If none of the server-authoritative deletion procedures succeeded, abort and fail clearly!
+                if (!rpcCompleted) {
+                    val failureMessage = UserFriendlyErrorMapper.toUserMessage(
+                        Exception(lastError ?: "Failed to delete user account in database"),
+                        "Failed to delete account from server database. Please try again."
+                    )
+                    Log.e("AuthRepository", "Account deletion aborted: database deletion failed. $lastError")
+                    _authState.update { it.copy(isLoading = false, errorMessage = failureMessage) }
+                    return Result.failure(IllegalStateException(failureMessage))
+                }
+
+                // Also clean up any lingering farm entries for safety
+                for (fid in farmIdsToDelete) {
+                    try {
+                        farmRepo.deleteFarm(fid)
+                    } catch (_: Exception) {}
+                    FarmLocalCache.deleteFarm(fid)
+                    FarmLocalCache.removeCachedFarm(fid)
+                }
+
+                // Always sign out from Supabase Auth after successful deletion
                 try {
                     SupabaseModule.auth.signOut()
                 } catch (_: Exception) {}

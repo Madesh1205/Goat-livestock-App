@@ -6,6 +6,7 @@ import com.ammalfarm.adusanthai.core.supabase.SupabaseModule
 import com.ammalfarm.adusanthai.data.dto.FarmDto
 import com.ammalfarm.adusanthai.data.dto.GoatDto
 import com.ammalfarm.adusanthai.data.dto.ProfileDto
+import com.ammalfarm.adusanthai.data.dto.SEED_AMMAL_FARM_UUID
 import com.ammalfarm.adusanthai.data.dto.ensureValidUuid
 import com.ammalfarm.adusanthai.core.util.FarmLocalCache
 import com.ammalfarm.adusanthai.model.Farm
@@ -13,10 +14,12 @@ import com.ammalfarm.adusanthai.model.VerificationStatus
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -36,6 +39,7 @@ interface FarmRepository {
     suspend fun updateFarmVerification(farmId: String, status: VerificationStatus): Result<Unit>
     suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit>
     suspend fun getFarmsCount(): Result<Int>
+    suspend fun deleteFarm(farmId: String): Result<Unit>
 }
 
 class SupabaseFarmRepositoryImpl : FarmRepository {
@@ -44,14 +48,18 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
     private val localFarmLimits = ConcurrentHashMap<String, Int>()
 
     override fun getAllApprovedFarms(): Flow<List<Farm>> = flow {
-        val cached = FarmLocalCache.getAllCachedFarms().filter { it.verificationStatus == VerificationStatus.APPROVED }
+        val cached = FarmLocalCache.getAllCachedFarms().filter { 
+            it.verificationStatus == VerificationStatus.APPROVED && (it.isAmmalOwnFarm || it.ownerId.isNotBlank())
+        }
         if (!SupabaseConfig.isConfigured) {
             emit(cached)
             return@flow
         }
         try {
             val allFarms = fetchFarmsFromSupabase()
-            val approved = allFarms.filter { it.verificationStatus == VerificationStatus.APPROVED }
+            val approved = allFarms.filter { 
+                it.verificationStatus == VerificationStatus.APPROVED && (it.isAmmalOwnFarm || it.ownerId.isNotBlank())
+            }
             emit(approved)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -61,13 +69,13 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
     }.flowOn(Dispatchers.IO)
 
     override fun getAllFarmsForAdmin(): Flow<List<Farm>> = flow {
-        val cached = FarmLocalCache.getAllCachedFarms()
+        val cached = FarmLocalCache.getAllCachedFarms().filter { it.isAmmalOwnFarm || it.ownerId.isNotBlank() }
         if (!SupabaseConfig.isConfigured) {
             emit(cached)
             return@flow
         }
         try {
-            val allFarms = fetchFarmsFromSupabase()
+            val allFarms = fetchFarmsFromSupabase().filter { it.isAmmalOwnFarm || it.ownerId.isNotBlank() }
             emit(allFarms)
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -419,7 +427,22 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
                 emptyMap()
             }
 
-            val mappedFarms = farmDtos.map { dto ->
+            val mappedFarms = farmDtos.mapNotNull { dto ->
+                // If a non-Ammal farm has no owner, its owner account was deleted.
+                // Auto-purge it from Supabase and do not return it to admins.
+                val isAmmal = dto.isAmmalOwnFarm == true || dto.id == SEED_AMMAL_FARM_UUID || dto.id == "00000000-0000-0000-0000-000000000001"
+                if (dto.ownerId.isNullOrBlank() && !isAmmal) {
+                    Log.i(TAG, "Detected orphaned farm with deleted owner account: ${dto.id} (${dto.name}). Purging...")
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            deleteFarm(dto.id)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed auto-purge of farm ${dto.id}: ${e.message}")
+                        }
+                    }
+                    return@mapNotNull null
+                }
+
                 val goatsCount = goatsCountMap[dto.id] ?: 0
                 val customLimit = localFarmLimits[dto.id] ?: localFarmLimits[ensureValidUuid(dto.id)]
                 val domain = dto.toDomain(totalGoats = goatsCount, customLimit = customLimit)
@@ -442,12 +465,101 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
                 domain.copy(logoUrl = effectiveLogo, bannerUrl = effectiveBanner)
             }
 
-            FarmLocalCache.saveAllFarms(mappedFarms)
-            mappedFarms
+            val sortedFarms = mappedFarms.sortedWith(compareByDescending<Farm> { it.isAmmalOwnFarm }.thenBy { it.createdAt }.thenBy { it.name })
+            val sequentialFarms = sortedFarms.mapIndexed { index, farm ->
+                val code = if (farm.isAmmalOwnFarm) "FARM-001"
+                           else String.format(java.util.Locale.US, "FARM-%03d", index + 1)
+                farm.copy(farmCode = code)
+            }
+
+            FarmLocalCache.saveAllFarms(sequentialFarms)
+            sequentialFarms
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.e(TAG, "Supabase farms query failed: ${e.message}", e)
             throw e
+        }
+    }
+
+    override suspend fun deleteFarm(farmId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val validFarmId = ensureValidUuid(farmId)
+            if (validFarmId == SEED_AMMAL_FARM_UUID || validFarmId == "00000000-0000-0000-0000-000000000001") {
+                return@withContext Result.failure(IllegalStateException("The central Ammal Farm cannot be deleted."))
+            }
+
+            if (SupabaseConfig.isConfigured) {
+                // 1. Delete goats belonging to this farm
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].delete {
+                        filter { eq("farm_id", validFarmId) }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notice: goats cleanup for farm $validFarmId: ${e.message}")
+                }
+
+                // 2. Delete bookings from this farm
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].delete {
+                        filter { eq("farm_id", validFarmId) }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notice: bookings deletion for farm $validFarmId: ${e.message}")
+                }
+
+                // 3. Delete payments from this farm
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS].delete {
+                        filter { eq("farm_id", validFarmId) }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notice: payments deletion for farm $validFarmId: ${e.message}")
+                }
+
+                // 4. Delete reviews for this farm
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS].delete {
+                        filter { eq("farm_id", validFarmId) }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Notice: reviews deletion for farm $validFarmId: ${e.message}")
+                }
+
+                // 4. Delete the farm record from Supabase
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].delete {
+                        filter { eq("id", validFarmId) }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "PostgREST delete on farms failed: ${e.message}, trying direct HTTP DELETE...")
+                    try {
+                        val token = SupabaseModule.auth.currentAccessTokenOrNull() ?: SupabaseConfig.supabaseAnonKey
+                        val url = java.net.URL("${SupabaseConfig.supabaseUrl}/rest/v1/farms?id=eq.$validFarmId")
+                        val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "DELETE"
+                            connectTimeout = 8000
+                            readTimeout = 8000
+                            setRequestProperty("apikey", SupabaseConfig.supabaseAnonKey)
+                            setRequestProperty("Authorization", "Bearer $token")
+                        }
+                        val code = conn.responseCode
+                        Log.d(TAG, "Direct HTTP DELETE on farm $validFarmId: $code")
+                    } catch (httpEx: Exception) {
+                        Log.w(TAG, "Direct HTTP DELETE failed: ${httpEx.message}")
+                    }
+                }
+            }
+
+            localFarmLimits.remove(validFarmId)
+            localFarmLimits.remove(farmId)
+            FarmLocalCache.deleteFarm(validFarmId)
+            FarmLocalCache.removeCachedFarm(validFarmId)
+            FarmLocalCache.removeCachedFarm(farmId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.e(TAG, "Failed to delete farm $farmId: ${e.message}", e)
+            Result.failure(e)
         }
     }
 }

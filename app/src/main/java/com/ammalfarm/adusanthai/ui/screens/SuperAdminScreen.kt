@@ -55,6 +55,7 @@ fun SuperAdminScreen(
     onRejectFarm: (String) -> Unit,
     onSuspendFarm: (String) -> Unit,
     onReactivateFarm: (String) -> Unit = onApproveFarm,
+    onDeleteFarm: (String) -> Unit = {},
     onApproveFarmWithPayment: (String, Double, String, String) -> Unit = { _, _, _, _ -> },
     onIncreaseFarmQuota: (String, Int, Double, String, String) -> Unit = { _, _, _, _, _ -> },
     onUpdatePlatformPricing: (Double, Double) -> Unit = { _, _ -> },
@@ -350,6 +351,7 @@ fun SuperAdminScreen(
                         onRejectFarm = onRejectFarm,
                         onSuspendFarm = onSuspendFarm,
                         onReactivateFarm = onReactivateFarm,
+                        onDeleteFarm = onDeleteFarm,
                         onViewDetails = { farmDetailToView = it },
                         onSetListingLimit = { farmToSetLimit = it },
                         onAddQuota = { farmToAddQuota = it },
@@ -793,6 +795,7 @@ private fun SuperAdminFarmsTab(
     onRejectFarm: (String) -> Unit,
     onSuspendFarm: (String) -> Unit,
     onReactivateFarm: (String) -> Unit,
+    onDeleteFarm: (String) -> Unit = {},
     onViewDetails: (Farm) -> Unit,
     onSetListingLimit: (Farm) -> Unit = {},
     onAddQuota: (Farm) -> Unit = {},
@@ -887,6 +890,7 @@ private fun SuperAdminFarmsTab(
                         onReject = { onRejectFarm(farm.id) },
                         onSuspend = { onSuspendFarm(farm.id) },
                         onReactivate = { onReactivateFarm(farm.id) },
+                        onDeleteFarm = { onDeleteFarm(farm.id) },
                         onViewDetails = { onViewDetails(farm) },
                         onSetListingLimit = { onSetListingLimit(farm) },
                         onAddQuota = { onAddQuota(farm) },
@@ -905,12 +909,14 @@ private fun FarmAdminCard(
     onReject: () -> Unit,
     onSuspend: () -> Unit,
     onReactivate: () -> Unit,
+    onDeleteFarm: () -> Unit = {},
     onViewDetails: () -> Unit,
     onSetListingLimit: () -> Unit = {},
     onAddQuota: () -> Unit = {},
     onNavigateToAmmalFarm: () -> Unit = {}
 ) {
     val isAmmal = farm.isAmmalOwnFarm
+    val isOwnerDeleted = farm.ownerId.isBlank() && !isAmmal
 
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -965,6 +971,19 @@ private fun FarmAdminCard(
                                 fontSize = 15.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    text = farm.farmCode.ifBlank { "FARM-001" },
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
                             if (isAmmal) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Icon(
@@ -975,14 +994,18 @@ private fun FarmAdminCard(
                                 )
                             }
                         }
-                        Text("Owner: ${farm.ownerName}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = if (isOwnerDeleted) "Owner: Account Deleted" else "Owner: ${farm.ownerName}",
+                            fontSize = 12.sp,
+                            color = if (isOwnerDeleted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Text("${farm.location}, ${farm.state}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                     }
                 }
 
                 Surface(
                     shape = RoundedCornerShape(4.dp),
-                    color = if (isAmmal) Color(0xFF1B5E20) else when (farm.verificationStatus) {
+                    color = if (isAmmal) Color(0xFF1B5E20) else if (isOwnerDeleted) Color(0xFF7F8C8D) else when (farm.verificationStatus) {
                         VerificationStatus.APPROVED -> Color(0xFF13663C)
                         VerificationStatus.PENDING -> Color(0xFFD48B06)
                         VerificationStatus.SUSPENDED -> Color(0xFFC0392B)
@@ -990,7 +1013,7 @@ private fun FarmAdminCard(
                     }
                 ) {
                     Text(
-                        text = if (isAmmal) "PLATFORM OWNER (FREE)" else farm.verificationStatus.name,
+                        text = if (isAmmal) "PLATFORM OWNER (FREE)" else if (isOwnerDeleted) "ACCOUNT REMOVED" else farm.verificationStatus.name,
                         color = Color.White,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -1108,50 +1131,103 @@ private fun FarmAdminCard(
                     }
 
                     if (!isAmmal) {
-                        when (farm.verificationStatus) {
-                            VerificationStatus.PENDING -> {
-                                OutlinedButton(
-                                    onClick = onReject,
-                                    modifier = Modifier.height(32.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
-                                ) {
-                                    Text("Reject", fontSize = 11.sp)
+                        val isOwnerDeleted = farm.ownerId.isBlank()
+                        var showDeleteDialog by remember { mutableStateOf(false) }
+
+                        if (showDeleteDialog) {
+                            AlertDialog(
+                                onDismissRequest = { showDeleteDialog = false },
+                                title = { Text("Delete Farm") },
+                                text = { Text("Are you sure you want to permanently delete \"${farm.name}\"? All associated listings will be removed.") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            showDeleteDialog = false
+                                            onDeleteFarm()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showDeleteDialog = false }) {
+                                        Text("Cancel")
+                                    }
                                 }
-                                Button(
-                                    onClick = onApprove,
-                                    modifier = Modifier.height(32.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                ) {
-                                    Text("Approve KYC", fontSize = 11.sp)
-                                }
+                            )
+                        }
+
+                        if (isOwnerDeleted) {
+                            Button(
+                                onClick = { showDeleteDialog = true },
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Delete Farm Record", fontSize = 11.sp)
                             }
-                            VerificationStatus.APPROVED -> {
-                                OutlinedButton(
-                                    onClick = onSuspend,
-                                    modifier = Modifier.height(32.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC0392B))
-                                ) {
-                                    Text("Suspend Farm", fontSize = 11.sp)
-                                }
+                        } else {
+                            IconButton(
+                                onClick = { showDeleteDialog = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete Farm",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
                             }
-                            VerificationStatus.SUSPENDED -> {
-                                Button(
-                                    onClick = onReactivate,
-                                    modifier = Modifier.height(32.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                ) {
-                                    Text("Reactivate Farm", fontSize = 11.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            when (farm.verificationStatus) {
+                                VerificationStatus.PENDING -> {
+                                    OutlinedButton(
+                                        onClick = onReject,
+                                        modifier = Modifier.height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                                    ) {
+                                        Text("Reject", fontSize = 11.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Button(
+                                        onClick = onApprove,
+                                        modifier = Modifier.height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text("Approve KYC", fontSize = 11.sp)
+                                    }
                                 }
-                            }
-                            VerificationStatus.REJECTED -> {
-                                Button(
-                                    onClick = onApprove,
-                                    modifier = Modifier.height(32.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                                ) {
-                                    Text("Re-Approve", fontSize = 11.sp)
+                                VerificationStatus.APPROVED -> {
+                                    OutlinedButton(
+                                        onClick = onSuspend,
+                                        modifier = Modifier.height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC0392B))
+                                    ) {
+                                        Text("Suspend Farm", fontSize = 11.sp)
+                                    }
+                                }
+                                VerificationStatus.SUSPENDED -> {
+                                    Button(
+                                        onClick = onReactivate,
+                                        modifier = Modifier.height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text("Reactivate Farm", fontSize = 11.sp)
+                                    }
+                                }
+                                VerificationStatus.REJECTED -> {
+                                    Button(
+                                        onClick = onApprove,
+                                        modifier = Modifier.height(32.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text("Re-Approve", fontSize = 11.sp)
+                                    }
                                 }
                             }
                         }

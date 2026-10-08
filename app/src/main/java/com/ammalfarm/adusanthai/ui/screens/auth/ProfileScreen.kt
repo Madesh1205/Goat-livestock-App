@@ -804,80 +804,7 @@ fun ProfileScreen(
                             )
                         }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                        // Open Supported Links in App Settings row
                         val context = androidx.compose.ui.platform.LocalContext.current
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    try {
-                                        val intent = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                                            android.content.Intent(
-                                                android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
-                                                android.net.Uri.parse("package:${context.packageName}")
-                                            )
-                                        } else {
-                                            android.content.Intent(
-                                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                                android.net.Uri.parse("package:${context.packageName}")
-                                            )
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (_: Exception) {
-                                        val fallback = android.content.Intent(
-                                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                            android.net.Uri.parse("package:${context.packageName}")
-                                        )
-                                        context.startActivity(fallback)
-                                    }
-                                }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.tertiaryContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Link,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.tertiary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                                Column {
-                                    Text(
-                                        text = "Open Shared Links in App",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Configure phone to open adusanthai links directly in app",
-                                        fontSize = 11.5.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Icon(
-                                imageVector = Icons.Default.OpenInNew,
-                                contentDescription = "Open App Link Settings",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
                         val consentManager = remember { com.ammalfarm.adusanthai.core.util.PolicyConsentManager(context) }
                         val acceptedDate = remember { consentManager.getAcceptedDateFormatted() }
                         val isPolicyAccepted = remember { consentManager.hasAcceptedPolicies() }
@@ -1039,6 +966,21 @@ fun ProfileScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (user.role == UserRole.SUPER_ADMIN) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Text(
+                                text = "Notice: The central Ammal Farm root administrator account cannot be deleted. To test account deletion, please use a customer or partner farm account.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(8.dp),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                     if (isDeletingAccount) {
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -1070,7 +1012,7 @@ fun ProfileScreen(
                             }
                         )
                     },
-                    enabled = !isDeletingAccount,
+                    enabled = !isDeletingAccount && user.role != UserRole.SUPER_ADMIN,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError

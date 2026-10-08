@@ -107,18 +107,15 @@ class Stage6ASecureAccountDeletionTest {
         // 1. Farm admin profile removed
         assertNull("Farm admin profile must be removed", dbEngine.getProfile(farmAdmin.id))
 
-        // 2. Farm status must be SUSPENDED with contact info redacted
+        // 2. Farm and goats must be removed on farm admin closure
         val farm = dbEngine.getFarm(partnerFarm.id)
-        assertNotNull("Farm record must remain for historic audit", farm)
-        assertEquals(VerificationStatus.SUSPENDED, farm?.verificationStatus)
-        assertEquals("REDACTED", farm?.contactNumber)
-        assertEquals("", farm?.ownerId)
+        assertNull("Farm record must be removed when owner account is deleted", farm)
 
-        // 3. Goats must be deactivated to prevent orphaned listings on public marketplace
+        // 3. Goats must be removed to prevent orphaned listings
         val goat1 = dbEngine.getGoat(goatId1)
         val goat2 = dbEngine.getGoat(goatId2)
-        assertEquals("Goat 1 must be deactivated", "INACTIVE", goat1?.status)
-        assertEquals("Goat 2 must be deactivated", "INACTIVE", goat2?.status)
+        assertNull("Goat 1 must be removed", goat1)
+        assertNull("Goat 2 must be removed", goat2)
 
         // 4. Pending bookings on this farm must be cancelled
         val b = dbEngine.getAllBookings().first { it.id == bookingId }
@@ -172,18 +169,15 @@ class Stage6ASecureAccountDeletionTest {
         assertEquals("CANCELLED status must be preserved", "CANCELLED", cancelledBooking.status)
         assertEquals("Historical price must remain intact", 25000.0, cancelledBooking.totalPrice, 0.001)
 
-        // 3. Farm is suspended and personal metadata redacted
+        // 3. Farm is removed on account deletion
         val farm = dbEngine.getFarm(partnerFarm.id)
-        assertNotNull("Farm record remains for historical transaction foreign key integrity", farm)
-        assertEquals(VerificationStatus.SUSPENDED, farm?.verificationStatus)
-        assertEquals("REDACTED", farm?.contactNumber)
-        assertEquals("", farm?.ownerId)
+        assertNull("Farm record must be removed on account deletion", farm)
 
-        // 4. Goats state: active goats become INACTIVE, already SOLD goats remain SOLD
+        // 4. Goats state: goats removed on farm deletion
         val activeGoat = dbEngine.getGoat(activeGoatId)
         val soldGoat = dbEngine.getGoat(soldGoatId)
-        assertEquals("Active goat becomes INACTIVE", "INACTIVE", activeGoat?.status)
-        assertEquals("SOLD goat remains SOLD", "SOLD", soldGoat?.status)
+        assertNull("Active goat removed", activeGoat)
+        assertNull("Sold goat removed", soldGoat)
 
         // 5. Unrelated users/farms/goats unaffected
         assertNotNull("Customer profile intact", dbEngine.getProfile(customer.id))

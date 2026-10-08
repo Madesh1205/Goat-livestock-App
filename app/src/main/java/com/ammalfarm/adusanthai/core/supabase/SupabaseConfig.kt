@@ -110,6 +110,7 @@ object SupabaseConfig {
     const val TABLE_NOTIFICATIONS = "notifications"
     const val TABLE_REPORTS = "reports"
     const val TABLE_WISHLIST = "wishlist"
+    const val TABLE_REVIEWS = "reviews"
 
     // Storage Buckets
     const val BUCKET_GOAT_IMAGES = "goat-images"

@@ -1125,6 +1125,11 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.updateFarmVerification(farmId, com.ammalfarm.adusanthai.model.VerificationStatus.APPROVED)
                                     Toast.makeText(context, "Farm reactivated!", Toast.LENGTH_SHORT).show()
                                 },
+                                onDeleteFarm = { farmId ->
+                                    marketplaceViewModel.deleteFarm(farmId) {
+                                        Toast.makeText(context, "Farm deleted successfully.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                                 onUpdateFarmListingLimit = { farmId, limit ->
                                     marketplaceViewModel.updateFarmListingLimit(farmId, limit)
                                     Toast.makeText(context, "Farm goat listing limit updated to $limit.", Toast.LENGTH_SHORT).show()

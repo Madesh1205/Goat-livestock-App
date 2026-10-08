@@ -427,28 +427,21 @@ class MockRlsDatabaseEngine {
             throw IllegalStateException("The owner account of the central Ammal Farm cannot be deleted. Transfer ownership first.")
         }
 
-        // 1. If user is FARM_ADMIN: safely handle farms and listings
+        // 1. If user is FARM_ADMIN: safely remove farms and listings
         if (target.role == "FARM_ADMIN") {
             val userFarms = farms.values.filter { it.ownerId == targetUserId }
             for (farm in userFarms) {
-                // Deactivate active goats so they are not left orphaned or active
-                goats.values.filter { it.farmId == farm.id && it.status != "SOLD" }.forEach { goat ->
-                    goats[goat.id] = goat.copy(status = "INACTIVE")
-                }
+                // Remove goats belonging to this farm
+                val farmGoatIds = goats.values.filter { it.farmId == farm.id }.map { it.id }
+                farmGoatIds.forEach { goats.remove(it) }
 
                 // Cancel pending bookings on this farm
                 bookings.values.filter { it.farmId == farm.id && it.status in listOf("PENDING", "RESERVED") }.forEach { b ->
                     bookings[b.id] = b.copy(status = "CANCELLED")
                 }
 
-                // Suspend farm, redact contact details, clear owner_id
-                farms[farm.id] = farm.copy(
-                    verificationStatus = VerificationStatus.SUSPENDED,
-                    contactNumber = "REDACTED",
-                    email = "",
-                    description = "Farm account closed by owner.",
-                    ownerId = "" // Anonymized/unlinked
-                )
+                // Remove farm record completely
+                farms.remove(farm.id)
             }
         }
 

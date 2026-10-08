@@ -266,37 +266,32 @@ BEGIN
     -- Set local session config to allow triggers to permit deletion updates
     PERFORM set_config('ammal.account_deletion', 'true', true);
 
-    -- 4. FARM_ADMIN specific cleanup
+    -- 4. FARM_ADMIN specific cleanup: completely remove the farm and associated listings
     IF v_user_role = 'FARM_ADMIN' THEN
         FOR v_farm_record IN SELECT id FROM public.farms WHERE owner_id = v_user_id LOOP
-            -- (a) Deactivate active goat listings for this farm so they are not orphaned
-            UPDATE public.goats
-            SET status = 'INACTIVE',
-                updated_at = NOW()
-            WHERE farm_id = v_farm_record.id
-              AND status != 'SOLD';
+            -- (a) Delete bookings for this farm
+            DELETE FROM public.bookings WHERE farm_id = v_farm_record.id;
 
-            -- (b) Cancel unconfirmed / pending bookings on this farm's goats
-            UPDATE public.bookings
-            SET status = 'CANCELLED',
-                cancelled_at = NOW(),
-                admin_notes = COALESCE(admin_notes, '') || ' [Cancelled: Farm account deleted by owner]',
-                updated_at = NOW()
-            WHERE farm_id = v_farm_record.id
-              AND status IN ('PENDING', 'RESERVED');
+            -- (b) Delete reviews for this farm
+            BEGIN
+                DELETE FROM public.reviews WHERE farm_id = v_farm_record.id;
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
 
-            -- (c) Clean and anonymize the farm metadata
-            UPDATE public.farms
-            SET status = 'SUSPENDED',
-                contact_phone = 'REDACTED',
-                contact_email = NULL,
-                description = 'Farm account closed by owner.',
-                tagline = NULL,
-                logo_url = NULL,
-                banner_url = NULL,
-                owner_id = NULL,
-                updated_at = NOW()
-            WHERE id = v_farm_record.id;
+            -- (c) Unlink payments referencing this farm
+            BEGIN
+                UPDATE public.listing_payments SET farm_id = NULL, goat_id = NULL WHERE farm_id = v_farm_record.id;
+            EXCEPTION WHEN OTHERS THEN NULL;
+            END;
+
+            -- (d) Delete goats belonging to this farm (cascades goat_images)
+            DELETE FROM public.goats WHERE farm_id = v_farm_record.id;
+
+            -- (e) Unlink any user profile referencing this farm
+            UPDATE public.profiles SET farm_id = NULL WHERE farm_id = v_farm_record.id;
+
+            -- (f) Delete the farm itself permanently
+            DELETE FROM public.farms WHERE id = v_farm_record.id;
         END LOOP;
     END IF;
 

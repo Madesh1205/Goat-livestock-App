@@ -1452,6 +1452,36 @@ class MarketplaceViewModel(
         }
     }
 
+    fun deleteFarm(farmId: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.deleteFarm(farmId)
+            _uiState.update { it.copy(isLoading = false) }
+
+            result.onSuccess {
+                _uiState.update { state ->
+                    val updatedFarms = state.farms.filter { it.id != farmId }
+                    val updatedGoats = state.goats.filter { it.farmId != farmId }
+                    val updatedAdminGoats = state.allAdminGoats.filter { it.farmId != farmId }
+                    val updatedSelected = if (state.selectedFarm?.id == farmId) null else state.selectedFarm
+                    state.copy(
+                        farms = updatedFarms,
+                        goats = updatedGoats,
+                        allAdminGoats = updatedAdminGoats,
+                        selectedFarm = updatedSelected,
+                        successMessage = "Farm deleted successfully."
+                    )
+                }
+                loadAllPlatformData()
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to delete farm."))
+                }
+            }
+        }
+    }
+
     fun approveFarmWithPayment(
         farmId: String,
         amount: Double,

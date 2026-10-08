@@ -159,6 +159,8 @@ class SupabaseMarketplaceRepositoryImpl(
         farmRepository.updateFarmVerification(farmId, status)
     override suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit> =
         farmRepository.updateFarmListingLimit(farmId, limit)
+    override suspend fun deleteFarm(farmId: String): Result<Unit> =
+        farmRepository.deleteFarm(farmId)
 
     // ==========================================
     // 6. Reports & Moderation

@@ -195,13 +195,12 @@ fun GoatDetailScreen(
                         onClick = {
                             val priceInfo = if (goat.hasDiscount) "${goat.formattedFinalPrice} (${goat.formattedDiscountBadge} original ${goat.formattedPrice})" else goat.formattedPrice
                             val shareUrl = "https://adusanthai.ammalfarm.dpdns.org/goats/${goat.id}"
-                            val appLink = "adusanthai://goat/${goat.id}"
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_SUBJECT, "Check out ${goat.name} on Adu Santhai")
                                 putExtra(
                                     Intent.EXTRA_TEXT,
-                                    "Check out ${goat.name} (${goat.breed}, ${goat.gender.name.lowercase()}, ${goat.weightKg} kg) from $displayFarmName on Adu Santhai for $priceInfo!\n\nView listing: $shareUrl\nOpen in App: $appLink"
+                                    "Check out ${goat.name} (${goat.breed}, ${goat.gender.name.lowercase()}, ${goat.weightKg} kg) from $displayFarmName on Adu Santhai for $priceInfo!\n\nView listing: $shareUrl"
                                 )
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "Share Goat Listing"))

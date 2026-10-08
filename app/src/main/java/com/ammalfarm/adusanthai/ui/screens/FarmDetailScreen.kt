@@ -266,11 +266,10 @@ fun FarmDetailScreen(
                     IconButton(
                         onClick = {
                             val shareUrl = "https://adusanthai.ammalfarm.dpdns.org/farm/${farm.id}"
-                            val appLink = "adusanthai://farm/${farm.id}"
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_SUBJECT, farm.name)
-                                putExtra(Intent.EXTRA_TEXT, "Check out ${farm.name} on Adu Santhai: ${farm.description}\n\nView farm: $shareUrl\nOpen in App: $appLink")
+                                putExtra(Intent.EXTRA_TEXT, "Check out ${farm.name} on Adu Santhai: ${farm.description}\n\nView farm: $shareUrl")
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "Share Farm"))
                         }

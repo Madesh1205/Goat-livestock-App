@@ -251,6 +251,7 @@ class MarketplaceSearchTest {
         override suspend fun updateFarmLogo(farmId: String, logoUrl: String): Result<String> = Result.success(logoUrl)
         override suspend fun updateFarmVerification(farmId: String, status: VerificationStatus): Result<Unit> = Result.success(Unit)
         override suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit> = Result.success(Unit)
+        override suspend fun deleteFarm(farmId: String): Result<Unit> = Result.success(Unit)
 
         override fun getAllReports(): Flow<List<PlatformReport>> = flowOf(emptyList())
         override suspend fun submitReport(report: PlatformReport): Result<PlatformReport> = Result.success(report)
