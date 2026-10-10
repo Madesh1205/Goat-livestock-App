@@ -344,8 +344,9 @@ class SupabaseMarketplaceRepositoryImpl(
                     .filter { !it.isRead && (now - it.timestamp) < recentWindowMillis }
                     .forEach { unreadNotif ->
                         if (!com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.isDelivered(appContext, validUserId, unreadNotif.id)) {
-                            com.ammalfarm.adusanthai.core.notification.NotificationHelper.showSystemNotification(appContext, unreadNotif)
-                            com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, unreadNotif.id)
+                            if (com.ammalfarm.adusanthai.core.notification.NotificationHelper.showSystemNotification(appContext, unreadNotif)) {
+                                com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, unreadNotif.id)
+                            }
                         }
                     }
             }
@@ -380,8 +381,9 @@ class SupabaseMarketplaceRepositoryImpl(
                                     if (newNotif.recipientUserId.isBlank() || newNotif.recipientUserId == validUserId) {
                                         val appContext = SupabaseModule.getApplicationContext()
                                         if (appContext != null && !com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.isDelivered(appContext, validUserId, newNotif.id)) {
-                                            com.ammalfarm.adusanthai.core.notification.NotificationHelper.showSystemNotification(appContext, newNotif)
-                                            com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, newNotif.id)
+                                            if (com.ammalfarm.adusanthai.core.notification.NotificationHelper.showSystemNotification(appContext, newNotif)) {
+                                                com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, newNotif.id)
+                                            }
                                         }
                                         notificationMap[newNotif.id] = newNotif
                                         trySend(notificationMap.values.sortedByDescending { it.timestamp })
@@ -464,8 +466,9 @@ class SupabaseMarketplaceRepositoryImpl(
                             // Newly discovered notification from polling
                             if (appContext != null && !notif.isRead && (now - notif.timestamp) < recentWindowMillis) {
                                 if (!com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.isDelivered(appContext, validUserId, notif.id)) {
-                                    com.ammalfarm.adusanthai.core.notification.NotificationHelper.showSystemNotification(appContext, notif)
-                                    com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, notif.id)
+                                    if (com.ammalfarm.adusanthai.core.notification.NotificationHelper.showSystemNotification(appContext, notif)) {
+                                        com.ammalfarm.adusanthai.core.notification.NotificationDeliveryTracker.markDelivered(appContext, validUserId, notif.id)
+                                    }
                                 }
                             }
                         }
