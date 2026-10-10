@@ -5,6 +5,10 @@ import com.ammalfarm.adusanthai.model.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -655,10 +659,14 @@ data class ListingPaymentDto(
     val notes: String? = null,
     @SerialName("payment_date") val paymentDate: String? = null,
     @SerialName("error_message") val errorMessage: String? = null,
+    @SerialName("metadata") val metadata: JsonObject? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 ) {
     fun toDomain(goatName: String = "", goatCode: String = "", farmName: String = ""): ListingPayment {
+        val metadataSlotsAdded = metadata?.get("slots_added")?.jsonPrimitive?.intOrNull
+        val metadataPaymentMethod = metadata?.get("payment_method")?.jsonPrimitive?.contentOrNull
+        val metadataNotes = metadata?.get("notes")?.jsonPrimitive?.contentOrNull
         val parsedStatus = try {
             PaymentStatus.valueOf(paymentStatus.uppercase())
         } catch (_: Exception) {
@@ -680,13 +688,13 @@ data class ListingPaymentDto(
             amount = amount,
             currency = currency,
             paymentType = paymentType,
-            slotsAdded = slotsAdded,
+            slotsAdded = if (slotsAdded > 0) slotsAdded else (metadataSlotsAdded ?: 0),
             status = parsedStatus,
             orderId = paymentGatewayRef,
             razorpayPaymentId = razorpayPaymentId,
             receiptNumber = receiptNumber,
-            paymentMethod = paymentMethod ?: "Manual Payment",
-            notes = notes ?: "",
+            paymentMethod = paymentMethod ?: metadataPaymentMethod ?: "Manual Payment",
+            notes = notes ?: metadataNotes ?: "",
             createdAt = timestamp ?: System.currentTimeMillis()
         )
     }
