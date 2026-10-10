@@ -15,7 +15,6 @@ import com.ammalfarm.adusanthai.MainActivity
 import com.ammalfarm.adusanthai.R
 import com.ammalfarm.adusanthai.model.AppNotification
 import com.ammalfarm.adusanthai.model.NotificationType
-import com.ammalfarm.adusanthai.model.UserRole
 import java.util.concurrent.atomic.AtomicInteger
 
 object NotificationHelper {
@@ -36,7 +35,6 @@ object NotificationHelper {
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
             val generalChannel = NotificationChannel(
                 CHANNEL_ID_GENERAL,
                 "Marketplace & Updates",
@@ -46,7 +44,6 @@ object NotificationHelper {
                 enableVibration(true)
                 setShowBadge(false)
             }
-
             val bookingsChannel = NotificationChannel(
                 CHANNEL_ID_BOOKINGS,
                 "Bookings & Holds",
@@ -56,7 +53,6 @@ object NotificationHelper {
                 enableVibration(true)
                 setShowBadge(false)
             }
-
             val adminChannel = NotificationChannel(
                 CHANNEL_ID_ADMIN,
                 "Farm & Super Admin Alerts",
@@ -66,12 +62,16 @@ object NotificationHelper {
                 enableVibration(true)
                 setShowBadge(false)
             }
-
             notificationManager.createNotificationChannels(listOf(generalChannel, bookingsChannel, adminChannel))
         }
     }
 
-    fun showSystemNotification(context: Context, notification: AppNotification) {
+    /**
+     * Posts a notification to the Android system drawer.
+     * Returns true only when the notify call completes; false when permission is missing or
+     * the system rejects the notification, so callers do not incorrectly mark it as delivered.
+     */
+    fun showSystemNotification(context: Context, notification: AppNotification): Boolean {
         val channelId = when (notification.type) {
             NotificationType.BOOKING_CREATED,
             NotificationType.BOOKING_CONFIRMED,
@@ -97,82 +97,69 @@ object NotificationHelper {
             else -> CHANNEL_ID_GENERAL
         }
 
-        val resolvedRoute = run {
-            val raw = notification.deepLinkRoute ?: com.ammalfarm.adusanthai.util.DeepLinkUtils.resolveDeepLinkRoute(notification.type, notification.referenceId)
-            when (raw) {
-                "my_bookings", "farm_bookings" -> "orders"
-                else -> raw
-            }
-        }
-
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_DEEP_LINK_ROUTE, resolvedRoute)
-            putExtra(EXTRA_NOTIFICATION_ID, notification.id)
-            putExtra(EXTRA_NOTIFICATION_TYPE, notification.type.name)
-            putExtra(EXTRA_REFERENCE_ID, notification.referenceId)
-            putExtra(EXTRA_RECIPIENT_USER_ID, notification.recipientUserId)
-            putExtra(EXTRA_INTENT_TIMESTAMP, System.currentTimeMillis())
-        }
-
-        val pendingIntent = PendingIntent.getActivity(
-            context,
-            notification.id.hashCode(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notificationId = notificationCounter.incrementAndGet()
-
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(notification.title)
-            .setContentText(notification.message)
-            .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
-            .setPriority(
-                if (channelId == CHANNEL_ID_BOOKINGS || channelId == CHANNEL_ID_ADMIN)
-                    NotificationCompat.PRIORITY_HIGH
-                else
-                    NotificationCompat.PRIORITY_DEFAULT
-            )
-            .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-
-        try {
-            val notificationManagerCompat = NotificationManagerCompat.from(context)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-                    notificationManagerCompat.notify(notificationId, builder.build())
-                }
-            } else {
-                notificationManagerCompat.notify(notificationId, builder.build())
-            }
-        } catch (_: Exception) {
-            // Graceful fallback for restricted sandbox
-        }
-    }
-
-    /**
-     * Checks whether notifications are enabled for the application.
-     */
-    fun areNotificationsEnabled(context: Context): Boolean {
-        val notificationManagerCompat = NotificationManagerCompat.from(context)
-        if (!notificationManagerCompat.areNotificationsEnabled()) {
+        if (!areNotificationsEnabled(context)) {
+            android.util.Log.w("NotificationHelper", "Notification permission or app notifications are disabled; not marking as delivered.")
             return false
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return ActivityCompat.checkSelfPermission(
+
+        return try {
+            val resolvedRoute = run {
+                val raw = notification.deepLinkRoute
+                    ?: com.ammalfarm.adusanthai.util.DeepLinkUtils.resolveDeepLinkRoute(notification.type, notification.referenceId)
+                when (raw) {
+                    "my_bookings", "farm_bookings" -> "orders"
+                    else -> raw
+                }
+            }
+
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_DEEP_LINK_ROUTE, resolvedRoute)
+                putExtra(EXTRA_NOTIFICATION_ID, notification.id)
+                putExtra(EXTRA_NOTIFICATION_TYPE, notification.type.name)
+                putExtra(EXTRA_REFERENCE_ID, notification.referenceId)
+                putExtra(EXTRA_RECIPIENT_USER_ID, notification.recipientUserId)
+                putExtra(EXTRA_INTENT_TIMESTAMP, System.currentTimeMillis())
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
                 context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
+                notification.id.hashCode(),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notificationId = notificationCounter.incrementAndGet()
+            val builder = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(notification.title)
+                .setContentText(notification.message)
+                .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
+                .setPriority(
+                    if (channelId == CHANNEL_ID_BOOKINGS || channelId == CHANNEL_ID_ADMIN)
+                        NotificationCompat.PRIORITY_HIGH
+                    else
+                        NotificationCompat.PRIORITY_DEFAULT
+                )
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+
+            NotificationManagerCompat.from(context).notify(notificationId, builder.build())
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("NotificationHelper", "Failed to post system notification: ${e.message}", e)
+            false
         }
-        return true
     }
 
-    /**
-     * Opens system notification settings for the application.
-     */
+    fun areNotificationsEnabled(context: Context): Boolean {
+        val manager = NotificationManagerCompat.from(context)
+        if (!manager.areNotificationsEnabled()) return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    }
+
     fun openNotificationSettings(context: Context) {
         try {
             val intent = Intent().apply {
@@ -191,13 +178,10 @@ object NotificationHelper {
         }
     }
 
-    /**
-     * Cancels all notifications currently shown in the system drawer.
-     */
     fun cancelAllNotifications(context: Context) {
         try {
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.cancelAll()
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancelAll()
         } catch (_: Exception) {
         }
     }
