@@ -173,6 +173,14 @@ object UserFriendlyErrorMapper {
             return "This goat is no longer available. Please choose another goat."
         }
 
+        // Profile foreign key constraint during initial booking sync
+        if (msg.contains("bookings_customer_id_fkey") ||
+            msg.contains("is not present in table \"profiles\"") ||
+            msg.contains("not present in table profiles")
+        ) {
+            return "Unable to complete reservation: customer profile is syncing. Please try again in a moment."
+        }
+
         // Database/server failure
         if (isServerOrDatabaseFailure(msg) || containsLeakage(throwable.message)) {
             return "Unable to create the booking right now. Please try again."

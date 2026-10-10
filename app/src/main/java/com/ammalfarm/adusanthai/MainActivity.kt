@@ -87,7 +87,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Sync AuthViewModel user with MarketplaceViewModel & handle notification permission prompt
+                // Request notification permission automatically on first app start (Android 13+)
+                LaunchedEffect(Unit) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val prefs = context.getSharedPreferences("ammal_app_prefs", Context.MODE_PRIVATE)
+                        val hasPrompted = prefs.getBoolean("has_prompted_notif_perm", false)
+                        val hasPermission = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.POST_NOTIFICATIONS
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (!hasPermission && !hasPrompted) {
+                            prefs.edit().putBoolean("has_prompted_notif_perm", true).apply()
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
+
+                // Sync AuthViewModel user with MarketplaceViewModel & handle FCM token sync
                 LaunchedEffect(authUiState.currentUser) {
                     val user = authUiState.currentUser
                     marketplaceViewModel.setUser(user)
@@ -98,20 +115,8 @@ class MainActivity : ComponentActivity() {
                         NotificationSyncWorker.enqueuePeriodicSync(context)
                         NotificationSyncWorker.triggerImmediateSync(context)
 
-                        // Request notification permission once on Android 13+ (Tiramisu)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            val prefs = context.getSharedPreferences("ammal_app_prefs", Context.MODE_PRIVATE)
-                            val hasPrompted = prefs.getBoolean("has_prompted_notif_perm", false)
-                            val hasPermission = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.POST_NOTIFICATIONS
-                            ) == PackageManager.PERMISSION_GRANTED
-
-                            if (!hasPermission && !hasPrompted) {
-                                prefs.edit().putBoolean("has_prompted_notif_perm", true).apply()
-                                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            }
-                        }
+                        // Retrieve current FCM registration token and sync to Supabase profile
+                        NotificationConfig.fetchAndSyncFcmToken(context)
                     } else {
                         // User logged out: cancel sync and dismiss active notifications
                         NotificationSyncWorker.cancelSync(context)

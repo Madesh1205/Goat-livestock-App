@@ -1333,8 +1333,13 @@ class AuthRepositoryImpl(
         val userToLogOut = _currentUser.value
         if (userToLogOut != null) {
             NotificationConfig.activeUserId = null
-            SupabaseModule.getApplicationContext()?.let {
-                NotificationSyncWorker.cancelSync(it)
+            SupabaseModule.getApplicationContext()?.let { ctx ->
+                NotificationSyncWorker.cancelSync(ctx)
+                try {
+                    NotificationConfig.unregisterFcmTokenOnLogout(ctx)
+                } catch (e: Exception) {
+                    Log.w("AuthRepository", "Error unregistering FCM token on logout: ${e.message}")
+                }
             }
         }
         try {

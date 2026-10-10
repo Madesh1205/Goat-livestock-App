@@ -67,6 +67,9 @@ interface MarketplaceRepository {
     suspend fun deleteNotification(notificationId: String): Result<Unit>
     suspend fun clearAllNotifications(userId: String, role: UserRole): Result<Unit>
     suspend fun triggerSampleNotification(type: NotificationType): Result<Unit>
+    suspend fun updateFcmToken(token: String): Result<Unit> = Result.success(Unit)
+    suspend fun registerFcmDeviceToken(token: String, deviceId: String? = null): Result<Unit> = Result.success(Unit)
+    suspend fun unregisterFcmDeviceToken(token: String): Result<Unit> = Result.success(Unit)
 
     // Wishlist
     fun getWishlistForUser(userId: String): Flow<List<WishlistItem>>

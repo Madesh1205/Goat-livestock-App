@@ -127,4 +127,28 @@ class NativeNotificationsTest {
         assertFalse("APK/Build file must not contain service_account private key", buildFileContent.contains("private_key"))
         assertFalse("APK/Build file must not contain service_role key", buildFileContent.contains("service_role"))
     }
+
+    @Test
+    fun testFcmTokenLocalCachingAndClearing() {
+        val sampleToken = "fcm_test_token_abcdef123456"
+        NotificationConfig.saveSavedFcmToken(context, sampleToken)
+        assertEquals(sampleToken, NotificationConfig.getSavedFcmToken(context))
+
+        NotificationConfig.clearSavedFcmToken(context)
+        assertNull(NotificationConfig.getSavedFcmToken(context))
+    }
+
+    @Test
+    fun testNotificationConfigInitializationDoesNotRequireAuth() {
+        NotificationConfig.initialize(context)
+        assertTrue(NotificationConfig.isInitialized)
+    }
+
+    @Test
+    fun testUnauthenticatedFcmTokenRetrievalHandledSafely() {
+        NotificationConfig.activeUserId = null
+        // Should safely exit without error or crashing
+        NotificationConfig.fetchAndSyncFcmToken(context)
+        assertNull(NotificationConfig.activeUserId)
+    }
 }

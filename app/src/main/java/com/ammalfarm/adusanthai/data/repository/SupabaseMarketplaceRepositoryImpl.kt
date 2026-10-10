@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.JsonNull
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.query.Order
 import okhttp3.MediaType.Companion.toMediaType
@@ -607,6 +608,61 @@ class SupabaseMarketplaceRepositoryImpl(
 
     override suspend fun triggerSampleNotification(type: NotificationType): Result<Unit> = withContext(Dispatchers.IO) {
         Result.success(Unit)
+    }
+
+    override suspend fun updateFcmToken(token: String): Result<Unit> {
+        return registerFcmDeviceToken(token, null)
+    }
+
+    override suspend fun registerFcmDeviceToken(token: String, deviceId: String?): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            if (token.isBlank() || !SupabaseConfig.isConfigured) {
+                return@withContext Result.success(Unit)
+            }
+            val authUser = SupabaseModule.auth.currentUserOrNull()
+            if (authUser == null) {
+                Log.d(TAG, "No authenticated Supabase session; skipping FCM device token registration")
+                return@withContext Result.success(Unit)
+            }
+            val parameters = buildJsonObject {
+                put("p_token", token)
+                if (!deviceId.isNullOrBlank()) {
+                    put("p_device_id", deviceId)
+                } else {
+                    put("p_device_id", JsonNull)
+                }
+                put("p_platform", "ANDROID")
+            }
+            SupabaseModule.client.postgrest.rpc(
+                function = "register_fcm_device_token",
+                parameters = parameters
+            )
+            Log.d(TAG, "Successfully registered FCM device token via RPC (deviceId: ${deviceId ?: "null"})")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice: register_fcm_device_token RPC failed safely: ${e.message}")
+            Result.success(Unit)
+        }
+    }
+
+    override suspend fun unregisterFcmDeviceToken(token: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            if (token.isBlank() || !SupabaseConfig.isConfigured) {
+                return@withContext Result.success(Unit)
+            }
+            val parameters = buildJsonObject {
+                put("p_token", token)
+            }
+            SupabaseModule.client.postgrest.rpc(
+                function = "unregister_fcm_device_token",
+                parameters = parameters
+            )
+            Log.d(TAG, "Successfully unregistered FCM device token via RPC")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice: unregister_fcm_device_token RPC failed safely: ${e.message}")
+            Result.success(Unit)
+        }
     }
 
     // ==========================================

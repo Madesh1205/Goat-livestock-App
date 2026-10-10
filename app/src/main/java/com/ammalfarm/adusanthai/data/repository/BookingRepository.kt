@@ -313,52 +313,48 @@ class SupabaseBookingRepositoryImpl : BookingRepository {
             return@withContext Result.success(newBooking)
         }
 
-        try {
-            // 0. Pre-check: Check if there are active unexpired reservation holds on this goat
-            val existingActiveBookings = try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
-                    .select {
-                        filter {
-                            eq("goat_id", validGoatId)
-                            isIn("status", listOf("PENDING", "RESERVED", "CONFIRMED"))
-                        }
-                    }.decodeList<BookingDto>()
-            } catch (_: Exception) {
-                emptyList()
-            }
+        // Proactively guarantee customer profile exists in public.profiles before attempting booking hold
+        ensureCustomerProfileExists(validCustomerId)
 
-            val nowMillis = System.currentTimeMillis()
-            var hasActiveUnexpiredHold = false
-            for (existing in existingActiveBookings) {
-                val expiryMillis = parseIsoTimestamp(existing.holdExpiresAt) ?: 0L
-                val statusUpper = (existing.status ?: "PENDING").uppercase()
-                if (statusUpper in listOf("PENDING", "RESERVED")) {
-                    if (expiryMillis > nowMillis || expiryMillis == 0L) {
-                        hasActiveUnexpiredHold = true
+        try {
+            // Server-authoritative booking hold via secure create_booking_hold RPC
+            // The customer identity is derived server-side from the authenticated Supabase session (auth.uid()).
+            val rpcResponse = try {
+                SupabaseModule.client.postgrest.rpc(
+                    function = "create_booking_hold",
+                    parameters = buildJsonObject {
+                        put("p_goat_id", validGoatId)
+                        put("p_notes", notes.trim())
                     }
-                } else if (statusUpper == "CONFIRMED") {
-                    hasActiveUnexpiredHold = true
+                )
+            } catch (initialRpcErr: Exception) {
+                val errMessage = initialRpcErr.message ?: ""
+                val isProfileFkeyViolation = errMessage.contains("bookings_customer_id_fkey", ignoreCase = true) ||
+                    errMessage.contains("is not present in table \"profiles\"", ignoreCase = true) ||
+                    errMessage.contains("not present in table profiles", ignoreCase = true)
+
+                if (isProfileFkeyViolation) {
+                    Log.w(TAG, "Notice: Customer profile foreign key constraint missing, auto-healing profile and retrying hold: $errMessage")
+                    ensureCustomerProfileExists(validCustomerId, forceSync = true)
+                    // Retry RPC call once with newly provisioned profile
+                    SupabaseModule.client.postgrest.rpc(
+                        function = "create_booking_hold",
+                        parameters = buildJsonObject {
+                            put("p_goat_id", validGoatId)
+                            put("p_notes", notes.trim())
+                        }
+                    )
+                } else {
+                    throw initialRpcErr
                 }
             }
 
-            if (hasActiveUnexpiredHold) {
-                return@withContext Result.failure(IllegalStateException("This goat has already been reserved by another customer."))
-            }
+            val rawData = rpcResponse.data
+            Log.d(TAG, "create_booking_hold raw response: $rawData")
 
-            // 1. Attempt atomic RPC call: create_booking_hold
-            val rpcBookingDto = try {
-                val rpcResponse = SupabaseModule.client.postgrest.rpc(
-                    "create_booking_hold",
-                    buildJsonObject {
-                        put("p_goat_id", validGoatId)
-                        put("p_notes", notes.trim())
-                        put("p_customer_id", validCustomerId)
-                    }
-                )
-                val rawData = rpcResponse.data
-                Log.d(TAG, "create_booking_hold raw response: $rawData")
-                var parsedDto: BookingDto? = null
-                try {
+            var parsedDto: BookingDto? = null
+            try {
+                if (!rawData.isNullOrBlank() && rawData != "null") {
                     val elem = Json.parseToJsonElement(rawData)
                     val obj = when (elem) {
                         is JsonArray -> elem.firstOrNull()?.jsonObject
@@ -378,280 +374,91 @@ class SupabaseBookingRepositoryImpl : BookingRepository {
                                 customerId = obj["customer_id"]?.jsonPrimitive?.contentOrNull ?: validCustomerId,
                                 status = obj["status"]?.jsonPrimitive?.contentOrNull ?: "RESERVED",
                                 totalPrice = obj["total_price"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+                                depositPaid = obj["deposit_paid"]?.jsonPrimitive?.doubleOrNull ?: 0.0,
+                                customerNotes = obj["customer_notes"]?.jsonPrimitive?.contentOrNull ?: notes.trim(),
                                 bookingDate = obj["booking_date"]?.jsonPrimitive?.contentOrNull ?: currentIsoTimestamp(),
                                 holdExpiresAt = obj["hold_expires_at"]?.jsonPrimitive?.contentOrNull ?: futureIsoTimestamp(24),
-                                customerNotes = notes.trim()
+                                createdAt = obj["created_at"]?.jsonPrimitive?.contentOrNull,
+                                updatedAt = obj["updated_at"]?.jsonPrimitive?.contentOrNull
                             )
                         }
                     }
-                } catch (jsonErr: Exception) {
-                    Log.w(TAG, "Notice: Manual JSON parse failed, falling back to decodeSingleOrNull: ${jsonErr.message}")
                 }
-                parsedDto ?: rpcResponse.decodeSingleOrNull<BookingDto>()
-            } catch (rpcErr: Exception) {
-                val rawMsg = rpcErr.message ?: ""
-                val lowerMsg = rawMsg.lowercase()
-                if (lowerMsg.contains("own farm") ||
-                    lowerMsg.contains("already been reserved") ||
-                    lowerMsg.contains("already reserved") ||
-                    lowerMsg.contains("not available") ||
-                    lowerMsg.contains("no longer available") ||
-                    lowerMsg.contains("pending admin approval") ||
-                    lowerMsg.contains("not approved") ||
-                    lowerMsg.contains("authentication required") ||
-                    lowerMsg.contains("profile not found") ||
-                    lowerMsg.contains("duplicate") ||
-                    lowerMsg.contains("23505")) {
-                    Log.i(TAG, "create_booking_hold RPC returned business validation: $rawMsg")
-                    val friendlyError = UserFriendlyErrorMapper.forBooking(rpcErr)
-                    return@withContext Result.failure(IllegalStateException(friendlyError))
-                }
-                Log.w(TAG, "create_booking_hold RPC unavailable or returned ($rawMsg). Attempting direct insert fallback.", rpcErr)
-                null
+            } catch (jsonErr: Exception) {
+                Log.w(TAG, "Notice: Manual JSON parse failed, falling back to decodeSingleOrNull: ${jsonErr.message}")
             }
 
-            if (rpcBookingDto != null) {
-                val goatDto = try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                        .select { filter { eq("id", validGoatId) } }
-                        .decodeSingleOrNull<GoatDto>()
+            if (parsedDto == null) {
+                parsedDto = try {
+                    rpcResponse.decodeSingleOrNull<BookingDto>()
                 } catch (_: Exception) { null }
-
-                val targetFarmId = (rpcBookingDto.farmId?.takeIf { it.isNotBlank() } ?: goatDto?.farmId ?: "").trim()
-                val farmDto = try {
-                    if (targetFarmId.isNotBlank()) {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                            .select { filter { eq("id", targetFarmId) } }
-                            .decodeSingleOrNull<FarmDto>()
-                    } else null
-                } catch (_: Exception) { null }
-
-                val customerDto = try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
-                        .select { filter { eq("id", validCustomerId) } }
-                        .decodeSingleOrNull<ProfileDto>()
-                } catch (_: Exception) { null }
-
-                val resolvedPhoto = GoatImageResolver.resolvePrimaryPhoto(validGoatId).ifBlank {
-                    goatDto?.toDomain()?.photos?.firstOrNull() ?: ""
-                }
-
-                val nowMillisTs = parseIsoTimestamp(rpcBookingDto.bookingDate) ?: System.currentTimeMillis()
-                val expiresMillis = parseIsoTimestamp(rpcBookingDto.holdExpiresAt) ?: (nowMillisTs + (24 * 3600 * 1000L))
-
-                val newBooking = Booking(
-                    id = rpcBookingDto.id,
-                    bookingCode = rpcBookingDto.bookingCode?.takeIf { it.isNotBlank() } ?: ("AGF-" + rpcBookingDto.id.take(6).uppercase()),
-                    goatId = validGoatId,
-                    goatCode = goatDto?.goatCode?.takeIf { it.isNotBlank() } ?: ("GOAT-" + validGoatId.take(4).uppercase()),
-                    goatName = goatDto?.name?.ifBlank { "Goat #${validGoatId.take(6)}" } ?: "Goat #${validGoatId.take(6)}",
-                    goatBreed = goatDto?.breedName?.ifBlank { "Certified Breed" } ?: "Certified Breed",
-                    goatPhoto = resolvedPhoto,
-                    farmId = targetFarmId,
-                    farmName = farmDto?.name?.ifBlank { "Partner Farm" } ?: "Partner Farm",
-                    customerId = validCustomerId,
-                    customerName = customerDto?.fullName ?: "Customer",
-                    customerPhone = customerDto?.phone ?: "",
-                    amount = rpcBookingDto.totalPrice ?: 0.0,
-                    status = AvailabilityStatus.RESERVED,
-                    bookingDate = nowMillisTs,
-                    reservationExpiryDate = expiresMillis,
-                    notes = notes.trim()
-                )
-                return@withContext Result.success(newBooking)
             }
 
-            // 2. Direct Fallback: Fetch authoritative goat details from database
-            val goatDto = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                .select {
-                    filter {
-                        eq("id", validGoatId)
-                    }
-                }.decodeSingleOrNull<GoatDto>()
-                ?: return@withContext Result.failure(IllegalArgumentException("Goat listing not found."))
-
-            val statusUpper = goatDto.status.uppercase().trim()
-            if (statusUpper in listOf("SOLD", "COMPLETED", "INACTIVE")) {
-                return@withContext Result.failure(IllegalStateException("Goat is no longer available for booking."))
+            if (parsedDto == null) {
+                throw IllegalStateException("Failed to parse booking response from server.")
             }
 
-            if (!goatDto.isApprovedByAdmin) {
-                return@withContext Result.failure(IllegalStateException("Goat listing is pending admin approval and cannot be booked."))
-            }
+            val targetBookingDto = parsedDto
 
-            val effectiveFarmId = ensureValidUuid(goatDto.farmId)
-
-            // 3. Fetch customer profile and validate own-farm booking restriction
-            val customerDto = try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
-                    .select {
-                        filter {
-                            eq("id", validCustomerId)
-                        }
-                    }.decodeSingleOrNull<ProfileDto>()
+            // Fetch goat and farm details for domain model enrichment
+            val goatDto = try {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                    .select { filter { eq("id", validGoatId) } }
+                    .decodeSingleOrNull<GoatDto>()
             } catch (_: Exception) { null }
 
-            if (customerDto?.role?.uppercase() == "FARM_ADMIN") {
-                val userFarmId = customerDto.farmId ?: try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                        .select {
-                            filter {
-                                eq("owner_id", validCustomerId)
-                            }
-                        }.decodeList<FarmDto>().firstOrNull()?.id
-                } catch (_: Exception) { null }
-
-                val goatFarmDto = try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                        .select {
-                            filter {
-                                eq("id", effectiveFarmId)
-                            }
-                        }.decodeSingleOrNull<FarmDto>()
-                } catch (_: Exception) { null }
-
-                val isOwnFarm = (userFarmId != null && userFarmId == effectiveFarmId) ||
-                        (goatFarmDto != null && goatFarmDto.ownerId == validCustomerId)
-
-                if (isOwnFarm) {
-                    return@withContext Result.failure(IllegalStateException("You cannot book goats listed by your own farm."))
-                }
-            }
-
-            // 4. Calculate authoritative final price snapshot
-            val effectiveGoatPrice = goatDto.toDomain().finalPrice
-            val newBookingId = UUID.randomUUID().toString()
-            val nowIso = currentIsoTimestamp()
-            val expiresIso = futureIsoTimestamp(24)
-            val resolvedPhoto = GoatImageResolver.resolvePrimaryPhoto(validGoatId).ifBlank {
-                goatDto.toDomain().photos.firstOrNull() ?: ""
-            }
-
-            val generatedCode = "AGF-" + newBookingId.take(6).uppercase()
-
-            val bookingDto = BookingDto(
-                id = newBookingId,
-                bookingCode = generatedCode,
-                goatId = validGoatId,
-                farmId = effectiveFarmId,
-                customerId = validCustomerId,
-                status = "RESERVED",
-                totalPrice = effectiveGoatPrice,
-                depositPaid = 0.0,
-                customerNotes = notes.trim(),
-                bookingDate = nowIso,
-                holdExpiresAt = expiresIso,
-                createdAt = nowIso,
-                updatedAt = nowIso
-            )
-
-            // 5. Remote insert into Supabase bookings table
-            var remoteInsertSuccess = false
-            try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].insert(bookingDto)
-                remoteInsertSuccess = true
-            } catch (insertErr: Exception) {
-                val insertMsg = (insertErr.message ?: "") + " " + insertErr.toString() + " " + (insertErr.cause?.message ?: "")
-                val isTriggerMismatch = insertMsg.contains("has no field", ignoreCase = true) ||
-                        insertMsg.contains("listing_fee_paid", ignoreCase = true) ||
-                        insertMsg.contains("record \"old\"", ignoreCase = true) ||
-                        insertMsg.contains("record old", ignoreCase = true) ||
-                        insertMsg.contains("trigger", ignoreCase = true) ||
-                        insertMsg.contains("P0001", ignoreCase = true) ||
-                        insertMsg.contains("42703", ignoreCase = true)
-                if (isTriggerMismatch) {
-                    Log.w(TAG, "Notice: remote server trigger field mismatch during booking insert ($insertMsg). Proceeding with verified reservation.")
-                } else {
-                    throw insertErr
-                }
-            }
-
-            // 6. Update goat availability status to RESERVED
-            try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].update(
-                    buildJsonObject { put("status", "RESERVED") }
-                ) {
-                    filter {
-                        eq("id", validGoatId)
-                    }
-                }
-            } catch (_: Exception) {}
-
+            val targetFarmId = (targetBookingDto.farmId?.takeIf { it.isNotBlank() } ?: goatDto?.farmId ?: "").trim()
             val farmDto = try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                    .select { filter { eq("id", effectiveFarmId) } }
-                    .decodeSingleOrNull<FarmDto>()
+                if (targetFarmId.isNotBlank()) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select { filter { eq("id", targetFarmId) } }
+                        .decodeSingleOrNull<FarmDto>()
+                } else null
             } catch (_: Exception) { null }
+
+            val bookingCustomerId = targetBookingDto.customerId?.takeIf { it.isNotBlank() } ?: validCustomerId
+            val customerDto = try {
+                if (bookingCustomerId.isNotBlank()) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
+                        .select { filter { eq("id", bookingCustomerId) } }
+                        .decodeSingleOrNull<ProfileDto>()
+                } else null
+            } catch (_: Exception) { null }
+
+            val resolvedPhoto = GoatImageResolver.resolvePrimaryPhoto(validGoatId).ifBlank {
+                goatDto?.toDomain()?.photos?.firstOrNull() ?: ""
+            }
+
+            val nowMillisTs = parseIsoTimestamp(targetBookingDto.bookingDate) ?: System.currentTimeMillis()
+            val expiresMillis = parseIsoTimestamp(targetBookingDto.holdExpiresAt) ?: (nowMillisTs + (24 * 3600 * 1000L))
 
             val newBooking = Booking(
-                id = newBookingId,
-                bookingCode = generatedCode,
+                id = targetBookingDto.id,
+                bookingCode = targetBookingDto.bookingCode?.takeIf { it.isNotBlank() } ?: ("AGF-" + targetBookingDto.id.take(6).uppercase()),
                 goatId = validGoatId,
-                goatCode = goatDto.goatCode?.takeIf { it.isNotBlank() } ?: ("GOAT-" + validGoatId.take(4).uppercase()),
-                goatName = goatDto.name.ifBlank { "Goat #${validGoatId.take(6)}" },
-                goatBreed = goatDto.breedName.ifBlank { "Certified Breed" },
+                goatCode = goatDto?.goatCode?.takeIf { it.isNotBlank() } ?: ("GOAT-" + validGoatId.take(4).uppercase()),
+                goatName = goatDto?.name?.ifBlank { "Goat #${validGoatId.take(6)}" } ?: "Goat #${validGoatId.take(6)}",
+                goatBreed = goatDto?.breedName?.ifBlank { "Certified Breed" } ?: "Certified Breed",
                 goatPhoto = resolvedPhoto,
-                farmId = effectiveFarmId,
+                farmId = targetFarmId,
                 farmName = farmDto?.name?.ifBlank { "Partner Farm" } ?: "Partner Farm",
-                customerId = validCustomerId,
-                customerName = customerDto?.fullName ?: "Customer",
+                customerId = bookingCustomerId,
+                customerName = customerDto?.fullName?.ifBlank { "Customer" } ?: "Customer",
                 customerPhone = customerDto?.phone ?: "",
-                amount = effectiveGoatPrice,
+                amount = targetBookingDto.totalPrice ?: 0.0,
                 status = AvailabilityStatus.RESERVED,
-                bookingDate = nowMillis,
-                reservationExpiryDate = nowMillis + (24 * 3600 * 1000L),
-                notes = notes.trim()
+                bookingDate = nowMillisTs,
+                reservationExpiryDate = expiresMillis,
+                notes = targetBookingDto.customerNotes?.ifBlank { notes.trim() } ?: notes.trim()
             )
 
             // Cache in local memory so UI displays the active booking immediately
-            localBookings.removeAll { it.id == newBookingId }
-            localBookings.add(0, newBooking)
+            updateLocalBooking(newBooking)
 
             Result.success(newBooking)
         } catch (e: Exception) {
-            val fullErrorText = (e.message ?: "") + " " + e.toString() + " " + (e.cause?.message ?: "")
-            val isTriggerMismatch = fullErrorText.contains("has no field", ignoreCase = true) ||
-                    fullErrorText.contains("listing_fee_paid", ignoreCase = true) ||
-                    fullErrorText.contains("record \"old\"", ignoreCase = true) ||
-                    fullErrorText.contains("record old", ignoreCase = true)
-
-            if (isTriggerMismatch) {
-                Log.w(TAG, "Notice: remote server trigger field mismatch in createBooking ($fullErrorText). Creating fallback verified booking.")
-                val fallbackId = UUID.randomUUID().toString()
-                val fallbackBooking = Booking(
-                    id = fallbackId,
-                    bookingCode = "AGF-" + fallbackId.take(6).uppercase(),
-                    goatId = goatId,
-                    goatCode = "GOAT-" + goatId.take(4).uppercase(),
-                    goatName = "Reserved Goat",
-                    goatBreed = "Certified Breed",
-                    goatPhoto = GoatImageResolver.resolvePrimaryPhoto(goatId),
-                    farmId = "",
-                    farmName = "Partner Farm",
-                    customerId = customerId ?: "",
-                    customerName = "Customer",
-                    customerPhone = "",
-                    amount = 0.0,
-                    status = AvailabilityStatus.RESERVED,
-                    bookingDate = System.currentTimeMillis(),
-                    reservationExpiryDate = System.currentTimeMillis() + (24 * 3600 * 1000L),
-                    notes = notes.trim()
-                )
-                localBookings.removeAll { it.id == fallbackId }
-                localBookings.add(0, fallbackBooking)
-                return@withContext Result.success(fallbackBooking)
-            }
-
             val rawMsg = e.message ?: ""
-            val lowerMsg = rawMsg.lowercase()
-            if (lowerMsg.contains("already been reserved") ||
-                lowerMsg.contains("already reserved") ||
-                lowerMsg.contains("own farm") ||
-                lowerMsg.contains("not available")) {
-                Log.w(TAG, "Booking constraint: $rawMsg")
-            } else {
-                Log.e(TAG, "Error: createBooking failed: ${e.message}", e)
-            }
+            Log.e(TAG, "Error: createBooking failed: $rawMsg", e)
             val friendlyError = UserFriendlyErrorMapper.forBooking(e)
             Result.failure(IllegalStateException(friendlyError))
         }
@@ -952,6 +759,50 @@ class SupabaseBookingRepositoryImpl : BookingRepository {
                 resolvedCustomerName = profile?.fullName,
                 resolvedCustomerPhone = profile?.phone
             )
+        }
+    }
+
+    private suspend fun ensureCustomerProfileExists(customerId: String, forceSync: Boolean = false) {
+        if (!SupabaseConfig.isConfigured) return
+        try {
+            val validId = ensureValidUuid(customerId)
+            if (!forceSync) {
+                val existing = try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
+                        .select {
+                            filter { eq("id", validId) }
+                        }.decodeSingleOrNull<ProfileDto>()
+                } catch (qErr: Exception) {
+                    Log.w(TAG, "Notice checking customer profile ($validId): ${qErr.message}")
+                    null
+                }
+                if (existing != null) return
+            }
+
+            // Profile is missing in table profiles. Reconstruct from Supabase auth session or metadata.
+            val authUser = try { SupabaseModule.auth.currentUserOrNull() } catch (_: Exception) { null }
+            val meta = authUser?.userMetadata
+            val metaName = meta?.get("full_name")?.jsonPrimitive?.contentOrNull
+                ?: meta?.get("name")?.jsonPrimitive?.contentOrNull
+                ?: authUser?.email?.substringBefore("@")?.replaceFirstChar { it.uppercase() }
+                ?: "Customer"
+            val metaPhone = meta?.get("phone")?.jsonPrimitive?.contentOrNull
+                ?: authUser?.phone
+                ?: ""
+            val metaEmail = authUser?.email ?: ""
+            val metaRole = meta?.get("role")?.jsonPrimitive?.contentOrNull ?: "CUSTOMER"
+
+            val profileToInsert = ProfileDto(
+                id = validId,
+                email = metaEmail.ifBlank { null },
+                fullName = metaName,
+                phone = metaPhone.ifBlank { null },
+                role = metaRole
+            )
+            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].upsert(profileToInsert)
+            Log.i(TAG, "Successfully ensured profile exists for customer ID $validId")
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice: ensureCustomerProfileExists failed: ${e.message}")
         }
     }
 }
