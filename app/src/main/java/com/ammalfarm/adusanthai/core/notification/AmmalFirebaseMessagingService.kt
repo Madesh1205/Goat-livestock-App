@@ -14,8 +14,7 @@ import java.util.UUID
 
 /**
  * Single FirebaseMessagingService to handle incoming FCM push messages and token refreshes.
- * Deduplicates incoming notifications via NotificationDeliveryTracker to avoid duplicates across
- * FCM, WorkManager polling, and Supabase Realtime subscriptions.
+ * Deduplicates incoming notifications across FCM, WorkManager polling, and Supabase Realtime.
  */
 class AmmalFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -40,7 +39,6 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
         try {
             val data = remoteMessage.data
             val notificationPayload = remoteMessage.notification
-
             val notifId = data["id"] ?: data["notification_id"] ?: UUID.randomUUID().toString()
             val title = notificationPayload?.title ?: data["title"] ?: "Adu Santhai Update"
             val body = notificationPayload?.body ?: data["message"] ?: data["body"] ?: ""
@@ -48,15 +46,13 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
             val referenceId = data["reference_id"] ?: data["referenceId"] ?: ""
             val deepLinkRoute = data["deep_link_route"] ?: data["deepLinkRoute"]
             val recipientUserId = data["recipient_user_id"] ?: data["user_id"] ?: ""
-
             val activeUserId = NotificationConfig.activeUserId ?: recipientUserId
 
-            // Deduplication check: skip if notification has already been displayed locally
-            if (activeUserId.isNotBlank() && notifId.isNotBlank()) {
-                if (NotificationDeliveryTracker.isDelivered(applicationContext, activeUserId, notifId)) {
-                    Log.d(TAG, "Notification $notifId already delivered locally; skipping duplicate FCM display.")
-                    return
-                }
+            if (activeUserId.isNotBlank() && notifId.isNotBlank() &&
+                NotificationDeliveryTracker.isDelivered(applicationContext, activeUserId, notifId)
+            ) {
+                Log.d(TAG, "Notification $notifId already delivered locally; skipping duplicate FCM display.")
+                return
             }
 
             val type = try {
@@ -77,9 +73,11 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
                 timestamp = System.currentTimeMillis()
             )
 
-            NotificationHelper.showSystemNotification(applicationContext, appNotification)
-            if (activeUserId.isNotBlank() && notifId.isNotBlank()) {
+            val displayed = NotificationHelper.showSystemNotification(applicationContext, appNotification)
+            if (displayed && activeUserId.isNotBlank() && notifId.isNotBlank()) {
                 NotificationDeliveryTracker.markDelivered(applicationContext, activeUserId, notifId)
+            } else if (!displayed) {
+                Log.w(TAG, "System notification $notifId was not displayed; it remains eligible for retry through notification sync.")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error processing incoming FCM message: ${e.message}", e)
@@ -99,9 +97,10 @@ class AmmalFirebaseMessagingService : FirebaseMessagingService() {
                     return@launch
                 }
                 val app = applicationContext as? AmmalFarmApplication ?: AmmalFarmApplication.instance
-                val marketplaceRepo = app.container.marketplaceRepository
-                val deviceId = NotificationConfig.getDeviceId(applicationContext)
-                marketplaceRepo.registerFcmDeviceToken(token, deviceId)
+                app.container.marketplaceRepository.registerFcmDeviceToken(
+                    token,
+                    NotificationConfig.getDeviceId(applicationContext)
+                )
                 Log.d(TAG, "Triggered RPC registration for refreshed FCM device token.")
             } catch (e: Exception) {
                 Log.w(TAG, "Deferred FCM token registration sync: ${e.message}")
