@@ -855,9 +855,24 @@ class SupabaseMarketplaceRepositoryImpl(
             val farm = getFarmById(validFarmId).firstOrNull()
                 ?: return@withContext Result.failure(IllegalArgumentException("Farm not found: $farmId"))
 
-            val generatedRcpt = receiptNumber?.takeIf { it.isNotBlank() }
-                ?: "RCPT-APPR-${System.currentTimeMillis().toString().takeLast(6)}"
+            if (!SupabaseConfig.isConfigured) {
+                return@withContext Result.failure(
+                    IllegalStateException("Supabase is not configured; farm approval was not saved.")
+                )
+            }
+            if (SupabaseModule.auth.currentUserOrNull() == null) {
+                return@withContext Result.failure(IllegalStateException("Authentication required"))
+            }
+            if (amount <= 0.0) {
+                return@withContext Result.failure(IllegalArgumentException("Approval payment amount must be greater than zero."))
+            }
+
             val paymentId = UUID.randomUUID().toString()
+            val generatedReceipt = receiptNumber?.takeIf { it.isNotBlank() }
+                ?: "RCPT-APPR-${System.currentTimeMillis().toString().takeLast(6)}"
+            val paymentReference = paymentRef?.trim()?.takeIf { it.isNotBlank() }
+                ?: "MANUAL-APPR-${validFarmId.take(6)}-${paymentId.take(6)}"
+            val slotsAdded = if (farm.goatListingLimit <= 0) 2 else 0
 
             val payment = ListingPayment(
                 id = paymentId,
@@ -866,41 +881,38 @@ class SupabaseMarketplaceRepositoryImpl(
                 amount = amount,
                 currency = "INR",
                 paymentType = "FARM_APPROVAL",
-                slotsAdded = 2,
+                slotsAdded = slotsAdded,
                 status = PaymentStatus.PAID,
-                orderId = paymentRef?.takeIf { it.isNotBlank() } ?: "MANUAL-APPR-${validFarmId.take(6)}",
-                razorpayPaymentId = paymentRef,
-                receiptNumber = generatedRcpt,
+                orderId = paymentReference,
+                razorpayPaymentId = null,
+                receiptNumber = generatedReceipt,
                 paymentMethod = "Manual Payment",
-                notes = notes ?: "Super Admin Partner Farm Approval with 2 free listing slots",
+                notes = notes?.takeIf { it.isNotBlank() }
+                    ?: "Super Admin partner farm approval payment recorded manually.",
                 createdAt = System.currentTimeMillis()
             )
 
-            // 1. Approve farm & award initial 2 free slots
-            updateFarmVerification(validFarmId, VerificationStatus.APPROVED)
-            if (farm.goatListingLimit <= 0) {
-                updateFarmListingLimit(validFarmId, 2)
+            // One server-side transaction authorizes the Super Admin, approves the farm,
+            // preserves any existing non-zero listing quota, and stores the manual receipt.
+            val parameters = buildJsonObject {
+                put("p_payment_id", paymentId)
+                put("p_farm_id", validFarmId)
+                put("p_amount", amount)
+                put("p_payment_ref", paymentReference)
+                put("p_receipt_number", generatedReceipt)
+                put("p_notes", payment.notes)
             }
+            SupabaseModule.client.postgrest.rpc(
+                function = "admin_approve_partner_farm",
+                parameters = parameters
+            )
 
-            // 2. Persist payment in local cache
+            // Cache only after the database transaction succeeds.
             FarmLocalCache.saveListingPayment(payment)
-
-            // 3. Persist payment in Supabase postgrest if configured
-            if (SupabaseConfig.isConfigured) {
-                try {
-                    val authUser = SupabaseModule.auth.currentUserOrNull()
-                    val payerId = farm.ownerId.ifBlank { authUser?.id ?: "" }
-                    val dto = ListingPaymentDto.fromDomain(payment, payerId = payerId)
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS].insert<ListingPaymentDto>(dto)
-                } catch (postgrestErr: Exception) {
-                    Log.w(TAG, "Notice: remote listing_payments insert deferred: ${postgrestErr.message}")
-                }
-            }
-
-            Log.d(TAG, "Recorded farm approval receipt $generatedRcpt for farm ${farm.name}")
+            Log.i(TAG, "Farm ${farm.name} approved and manual receipt ${payment.receiptNumber} persisted.")
             Result.success(payment)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to record farm approval payment: ${e.message}", e)
+            Log.e(TAG, "Failed to approve farm and record manual payment: ${e.message}", e)
             Result.failure(e)
         }
     }
