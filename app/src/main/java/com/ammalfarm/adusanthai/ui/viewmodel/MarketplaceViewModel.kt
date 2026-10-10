@@ -1506,29 +1506,42 @@ class MarketplaceViewModel(
 
             result.onSuccess { payment ->
                 _uiState.update { state ->
+                    val originalFarm = state.farms.firstOrNull { it.id == farmId }
+                    val preservedLimit = originalFarm?.goatListingLimit ?: 0
+                    val effectiveLimit = if (preservedLimit <= 0) 2 else preservedLimit
                     val updatedFarms = state.farms.map {
                         if (it.id == farmId) it.copy(
                             verificationStatus = VerificationStatus.APPROVED,
-                            goatListingLimit = maxOf(it.goatListingLimit, 2)
+                            goatListingLimit = effectiveLimit
                         ) else it
                     }
                     val updatedPayments = (listOf(payment) + state.listingPayments).distinctBy { it.id }
+                    val message = if (payment.slotsAdded > 0) {
+                        "Farm approved! Initial 2 free slots activated. Receipt #${payment.receiptNumber} recorded."
+                    } else {
+                        "Farm approved! Existing listing limit of $effectiveLimit preserved. Receipt #${payment.receiptNumber} recorded."
+                    }
                     state.copy(
                         farms = updatedFarms,
                         listingPayments = updatedPayments,
-                        successMessage = "Farm approved! Initial 2 free slots activated. Receipt #${payment.receiptNumber} recorded."
+                        successMessage = message
                     )
                 }
 
-                // Dispatch notification for farm approval and payment
+                // Dispatch the partner-farm approval notification only after the server transaction succeeds.
                 val targetFarm = _uiState.value.farms.find { it.id == farmId }
                 val farmOwnerId = targetFarm?.ownerId ?: ""
+                val approvalMessage = if (payment.slotsAdded > 0) {
+                    "Your farm '${targetFarm?.name ?: "Farm"}' has been approved with 2 free listing slots. Receipt #${payment.receiptNumber} is available."
+                } else {
+                    "Your farm '${targetFarm?.name ?: "Farm"}' has been approved. Its existing listing limit of ${targetFarm?.goatListingLimit ?: 0} goats was preserved. Receipt #${payment.receiptNumber} is available."
+                }
                 val notification = AppNotification(
                     id = UUID.randomUUID().toString(),
                     recipientUserId = farmOwnerId,
                     targetRole = UserRole.FARM_ADMIN,
                     title = "Partner Farm Approved!",
-                    message = "Your farm '${targetFarm?.name ?: "Farm"}' has been approved with 2 free listing slots. Receipt #${payment.receiptNumber} is available.",
+                    message = approvalMessage,
                     type = NotificationType.FARM_APPROVED,
                     referenceId = farmId,
                     deepLinkRoute = "farm_admin"
