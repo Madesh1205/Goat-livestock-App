@@ -302,7 +302,7 @@ data class FarmDto(
     @SerialName("address") val address: String? = null,
     @SerialName("contact_phone") val contactPhone: String? = null,
     @SerialName("contact_email") val contactEmail: String? = null,
-    val status: String? = "APPROVED",
+    val status: String? = null,
     @SerialName("is_ammal_own_farm") val isAmmalOwnFarm: Boolean = false,
     @SerialName("verified_at") val verifiedAt: String? = null,
     @SerialName("logo_url") val logoUrl: String? = null,
@@ -319,14 +319,13 @@ data class FarmDto(
         val effectiveState = locationState?.trim()?.ifBlank { "Tamil Nadu" } ?: "Tamil Nadu"
         val effectivePhone = contactPhone?.trim() ?: ""
         val effectiveEmail = contactEmail?.trim() ?: ""
+        val isAmmal = isAmmalOwnFarm || id == SEED_AMMAL_FARM_UUID
         val effectiveStatus = try {
-            VerificationStatus.valueOf((status ?: "APPROVED").uppercase())
+            VerificationStatus.valueOf((status?.trim()?.takeIf { it.isNotBlank() } ?: (if (isAmmal) "APPROVED" else "PENDING")).uppercase())
         } catch (_: Exception) {
-            VerificationStatus.APPROVED
+            if (isAmmal) VerificationStatus.APPROVED else VerificationStatus.PENDING
         }
 
-        // Ownership / hub status is resolved by DB column is_ammal_own_farm or seeded central hub UUID
-        val isAmmal = isAmmalOwnFarm || id == SEED_AMMAL_FARM_UUID
         val effectiveLimit = customLimit ?: (if (isAmmal) 1000 else (goatListingLimit ?: (if (effectiveStatus == VerificationStatus.APPROVED) 2 else 0)))
         val locationStr = if (effectiveDistrict.isNotBlank()) "$effectiveDistrict, $effectiveState" else effectiveState
         val rawCode = farmCode?.trim()?.ifBlank { null }

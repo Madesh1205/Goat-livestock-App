@@ -70,13 +70,13 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
     }.flowOn(Dispatchers.IO)
 
     override fun getAllFarmsForAdmin(): Flow<List<Farm>> = flow {
-        val cached = FarmLocalCache.getAllCachedFarms().filter { it.isAmmalOwnFarm || it.ownerId.isNotBlank() }
+        val cached = FarmLocalCache.getAllCachedFarms()
         if (!SupabaseConfig.isConfigured) {
             emit(cached)
             return@flow
         }
         try {
-            val allFarms = fetchFarmsFromSupabase().filter { it.isAmmalOwnFarm || it.ownerId.isNotBlank() }
+            val allFarms = fetchFarmsFromSupabase()
             emit(allFarms)
         } catch (e: Exception) {
             if (e is CancellationException) throw e

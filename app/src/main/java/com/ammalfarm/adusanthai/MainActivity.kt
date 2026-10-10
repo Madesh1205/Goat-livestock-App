@@ -1114,7 +1114,12 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.updateGoat(goat)
                                     Toast.makeText(context, "Goat listing updated.", Toast.LENGTH_SHORT).show()
                                 },
-                                onApproveFarm = { farmId ->
+                                                                 onApproveFarmWithPayment = { farmId, amount, paymentRef, notes ->
+                                     marketplaceViewModel.approveFarmWithPayment(farmId, amount, paymentRef, notes) {
+                                         Toast.makeText(context, "Farm approved and manual payment recorded!", Toast.LENGTH_SHORT).show()
+                                     }
+                                 },
+                                 onApproveFarm = { farmId ->
                                     // The ViewModel reports success or failure only after Supabase confirms the update.
                                     marketplaceViewModel.updateFarmVerification(farmId, com.ammalfarm.adusanthai.model.VerificationStatus.APPROVED)
                                 },

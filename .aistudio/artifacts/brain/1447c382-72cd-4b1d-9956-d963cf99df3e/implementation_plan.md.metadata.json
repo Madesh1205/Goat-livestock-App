@@ -1,6 +1,6 @@
 {
-  "summary":  "Fix farm status mapping in MarketplaceDto to correctly persist and display PENDING verification status in Super Admin console",
-  "updatedAt":  "2026-10-10T14:44:03.883138480Z",
+  "summary":  "Implementation plan for fixing pending farm admin display in SuperAdminScreen and robust status mapping in SupabaseFarmRepositoryImpl",
+  "updatedAt":  "2026-10-10T16:27:36.207858636Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

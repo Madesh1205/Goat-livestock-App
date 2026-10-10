@@ -129,7 +129,6 @@ fun SuperAdminScreen(
     var farmToSetLimit by remember { mutableStateOf<Farm?>(null) }
     var farmToApproveWithPayment by remember { mutableStateOf<Farm?>(null) }
     var farmToAddQuota by remember { mutableStateOf<Farm?>(null) }
-    var paymentReceiptToView by remember { mutableStateOf<ListingPayment?>(null) }
     var showPricingConfigDialog by remember { mutableStateOf(false) }
     var goatToEdit by remember { mutableStateOf<Goat?>(null) }
     var reportToInvestigate by remember { mutableStateOf<PlatformReport?>(null) }
@@ -325,12 +324,6 @@ fun SuperAdminScreen(
                     },
                     icon = { Icon(Icons.Default.Report, contentDescription = null, modifier = Modifier.size(16.dp)) }
                 )
-                Tab(
-                    selected = selectedTab == 6,
-                    onClick = { selectedTab = 6 },
-                    text = { Text("Listing Fees (${uiState.listingPayments.size})") },
-                    icon = { Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                )
             }
 
             Box(modifier = Modifier.weight(1f)) {
@@ -382,14 +375,6 @@ fun SuperAdminScreen(
                         onInvestigateReport = { reportToInvestigate = it },
                         onUpdateReportStatus = onUpdateReportStatus
                     )
-                    6 -> SuperAdminListingFeesTab(
-                        payments = uiState.listingPayments,
-                        goats = allPlatformGoats,
-                        stats = uiState.platformStats,
-                        pricing = uiState.platformPricing,
-                        onOpenPricingConfig = { showPricingConfigDialog = true },
-                        onViewReceipt = { paymentReceiptToView = it }
-                    )
                 }
             }
         }
@@ -432,12 +417,6 @@ fun SuperAdminScreen(
         )
     }
 
-    paymentReceiptToView?.let { payment ->
-        SuperAdminReceiptDetailDialog(
-            payment = payment,
-            onDismiss = { paymentReceiptToView = null }
-        )
-    }
 
     if (showPricingConfigDialog) {
         SuperAdminPricingConfigDialog(
@@ -3906,145 +3885,4 @@ fun SuperAdminAddQuotaDialog(
     )
 }
 
-@Composable
-fun SuperAdminReceiptDetailDialog(
-    payment: com.ammalfarm.adusanthai.model.ListingPayment,
-    onDismiss: () -> Unit
-) {
-    val dateStr = try {
-        java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", java.util.Locale.getDefault()).format(java.util.Date(payment.createdAt))
-    } catch (_: Exception) {
-        "N/A"
-    }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Receipt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Payment Receipt", fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(payment.receiptNumber ?: "RCPT-${payment.id.take(8).uppercase()}", fontWeight = FontWeight.Black, fontSize = 16.sp)
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text("₹${payment.amount.toInt()} ${payment.currency}", fontSize = 22.sp, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = when (payment.status) {
-                                com.ammalfarm.adusanthai.model.PaymentStatus.PAID -> Color(0xFF13663C)
-                                com.ammalfarm.adusanthai.model.PaymentStatus.PENDING -> Color(0xFFD48B06)
-                                com.ammalfarm.adusanthai.model.PaymentStatus.FAILED -> Color(0xFFC62828)
-                                else -> Color.Gray
-                            }
-                        ) {
-                            Text(
-                                payment.status.name,
-                                color = Color.White,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-
-                Divider()
-
-                ReceiptRow(label = "Farm Name", value = payment.farmName.ifBlank { "Partner Farm" })
-                ReceiptRow(
-                    label = "Payment Type",
-                    value = when (payment.paymentType) {
-                        com.ammalfarm.adusanthai.model.PaymentType.FARM_APPROVAL -> "Farm Approval (2 Free Slots Included)"
-                        com.ammalfarm.adusanthai.model.PaymentType.ADDITIONAL_QUOTA -> "Additional Quota (+${payment.slotsAdded} Slots)"
-                        else -> "Goat Listing Fee"
-                    }
-                )
-                ReceiptRow(label = "Date & Time", value = dateStr)
-                ReceiptRow(label = "Payment Method", value = payment.paymentMethod)
-                if (!payment.razorpayPaymentId.isNullOrBlank()) {
-                    ReceiptRow(label = "Ref / UTR #", value = payment.razorpayPaymentId)
-                }
-                if (!payment.notes.isNullOrBlank()) {
-                    ReceiptRow(label = "Notes / Memo", value = payment.notes)
-                }
-            }
-        },
-        confirmButton = {
-            val context = androidx.compose.ui.platform.LocalContext.current
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            val file = com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.generateReceiptPdf(context, payment)
-                            if (file != null) {
-                                com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.sharePdf(context, file)
-                            }
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("Share PDF", fontSize = 11.sp)
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            val file = com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.generateReceiptPdf(context, payment)
-                            if (file != null) {
-                                com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.openPdf(context, file)
-                            }
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("View PDF", fontSize = 11.sp)
-                    }
-                }
-
-                Button(
-                    onClick = onDismiss,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Text("Close", fontSize = 12.sp)
-                }
-            }
-        },
-        dismissButton = {}
-    )
-}
-
-@Composable
-private fun ReceiptRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-    }
-}

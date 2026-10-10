@@ -541,11 +541,6 @@ fun FarmAdminScreen(
                     onClick = { selectedTab = 3 },
                     text = { Text("Farm Profile") }
                 )
-                Tab(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
-                    text = { Text("Receipts (${myPayments.size})") }
-                )
             }
 
             when (selectedTab) {
@@ -1018,25 +1013,8 @@ fun FarmAdminScreen(
                         }
                     }
                 }
-
-                4 -> {
-                    // --- TAB 4: LISTING FEE RECEIPTS & TRANSACTIONS ---
-                    FarmListingPaymentsTab(
-                        payments = myPayments,
-                        isAmmalFarm = isAmmalFarm,
-                        myGoats = myGoats,
-                        onViewReceipt = { selectedPaymentReceipt = it }
-                    )
-                }
             }
         }
-    }
-
-    selectedPaymentReceipt?.let { payment ->
-        SuperAdminReceiptDetailDialog(
-            payment = payment,
-            onDismiss = { selectedPaymentReceipt = null }
-        )
     }
 
     // --- PENDING ALERT MODAL ---
