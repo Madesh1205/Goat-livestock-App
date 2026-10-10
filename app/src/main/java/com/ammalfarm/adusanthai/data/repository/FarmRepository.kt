@@ -12,6 +12,7 @@ import com.ammalfarm.adusanthai.core.util.FarmLocalCache
 import com.ammalfarm.adusanthai.model.Farm
 import com.ammalfarm.adusanthai.model.VerificationStatus
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -295,52 +296,27 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val validFarmId = ensureValidUuid(farmId)
-
-            if (SupabaseConfig.isConfigured) {
-                val authUser = SupabaseModule.auth.currentUserOrNull()
-                    ?: return@withContext Result.failure(IllegalStateException("Authentication required"))
-                val profile = try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
-                        .select { filter { eq("id", authUser.id) } }
-                        .decodeSingleOrNull<ProfileDto>()
-                } catch (_: Exception) { null }
-                val isSuperAdmin = profile?.role == "SUPER_ADMIN"
-
-                if (!isSuperAdmin) {
-                    return@withContext Result.failure(SecurityException("Only Super Admin can update farm verification status"))
-                }
-
-                val updatePayload = buildJsonObject {
-                    put("status", status.name)
-                    if (status == VerificationStatus.APPROVED) {
-                        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                            timeZone = TimeZone.getTimeZone("UTC")
-                        }
-                        put("verified_at", isoFormat.format(Date()))
-                    }
-                }
-
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(updatePayload) {
-                    filter {
-                        eq("id", validFarmId)
-                    }
-                }
-
-                if (status == VerificationStatus.APPROVED) {
-                    val currentLimit = localFarmLimits[validFarmId] ?: localFarmLimits[farmId] ?: 0
-                    if (currentLimit <= 0) {
-                        localFarmLimits[validFarmId] = 2
-                        localFarmLimits[farmId] = 2
-                        try {
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(buildJsonObject {
-                                put("goat_listing_limit", 2)
-                            }) {
-                                filter { eq("id", validFarmId) }
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
+            if (!SupabaseConfig.isConfigured) {
+                return@withContext Result.failure(
+                    IllegalStateException("Supabase is not configured; farm status was not changed.")
+                )
             }
+            if (SupabaseModule.auth.currentUserOrNull() == null) {
+                return@withContext Result.failure(IllegalStateException("Authentication required"))
+            }
+
+            // The database RPC checks the caller's authoritative profiles.role, locks the farm,
+            // and raises an error unless exactly one existing farm row is updated.
+            val parameters = buildJsonObject {
+                put("p_farm_id", validFarmId)
+                put("p_status", status.name)
+            }
+            SupabaseModule.client.postgrest.rpc(
+                function = "admin_update_farm_verification",
+                parameters = parameters
+            )
+
+            Log.i(TAG, "Farm $validFarmId verification set to ${status.name} by secure RPC")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update farm verification: ${e.message}", e)
@@ -354,38 +330,31 @@ class SupabaseFarmRepositoryImpl : FarmRepository {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val validFarmId = ensureValidUuid(farmId)
-
-            if (SupabaseConfig.isConfigured) {
-                val authUser = SupabaseModule.auth.currentUserOrNull()
-                    ?: return@withContext Result.failure(IllegalStateException("Authentication required"))
-                val profile = try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
-                        .select { filter { eq("id", authUser.id) } }
-                        .decodeSingleOrNull<ProfileDto>()
-                } catch (_: Exception) { null }
-                val isSuperAdmin = profile?.role == "SUPER_ADMIN"
-
-                if (!isSuperAdmin) {
-                    return@withContext Result.failure(SecurityException("Only Super Admin can update farm listing limit"))
-                }
-
-                val updatePayload = buildJsonObject {
-                    put("goat_listing_limit", limit)
-                }
-
-                try {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(updatePayload) {
-                        filter {
-                            eq("id", validFarmId)
-                        }
-                    }
-                } catch (postgrestErr: Exception) {
-                    Log.w(TAG, "Supabase goat_listing_limit column update notice: ${postgrestErr.message}")
-                }
+            if (limit < 0) {
+                return@withContext Result.failure(IllegalArgumentException("Listing limit cannot be negative"))
             }
+            if (!SupabaseConfig.isConfigured) {
+                return@withContext Result.failure(
+                    IllegalStateException("Supabase is not configured; farm listing limit was not changed.")
+                )
+            }
+            if (SupabaseModule.auth.currentUserOrNull() == null) {
+                return@withContext Result.failure(IllegalStateException("Authentication required"))
+            }
+
+            // The database RPC validates Super Admin permission and rejects limits below consumed slots.
+            val parameters = buildJsonObject {
+                put("p_farm_id", validFarmId)
+                put("p_limit", limit)
+            }
+            SupabaseModule.client.postgrest.rpc(
+                function = "admin_update_farm_listing_limit",
+                parameters = parameters
+            )
 
             localFarmLimits[validFarmId] = limit
             localFarmLimits[farmId] = limit
+            Log.i(TAG, "Farm $validFarmId listing limit set to $limit by secure RPC")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update farm listing limit: ${e.message}", e)
