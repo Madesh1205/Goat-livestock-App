@@ -85,6 +85,7 @@ class MarketplaceViewModel(
     private var notificationsJob: Job? = null
 
     private fun startNotificationObserver(user: UserProfile) {
+        if (user.id.isBlank()) return
         val currentJob = notificationsJob
         if (activeSubscribedUserId == user.id && currentJob != null && currentJob.isActive) {
             return
@@ -320,7 +321,7 @@ class MarketplaceViewModel(
     }
 
     fun loadRoleScopedData(user: UserProfile?) {
-        if (user == null) {
+        if (user == null || user.id.isBlank()) {
             stopNotificationObserver()
             _uiState.update {
                 it.copy(
@@ -527,7 +528,10 @@ class MarketplaceViewModel(
 
     fun loadAllPlatformData() {
         loadPublicMarketplaceData()
-        loadRoleScopedData(_uiState.value.currentUser)
+        val user = _uiState.value.currentUser
+        if (user != null && user.id.isNotBlank()) {
+            loadRoleScopedData(user)
+        }
     }
 
     private fun observeFilteredGoats() {
@@ -590,7 +594,7 @@ class MarketplaceViewModel(
     fun setUser(user: UserProfile?) {
         val prevUser = _uiState.value.currentUser
         _uiState.update { it.copy(currentUser = user) }
-        if (user != prevUser) {
+        if (user?.id != prevUser?.id || user?.role != prevUser?.role || user?.farmId != prevUser?.farmId) {
             loadRoleScopedData(user)
         }
     }

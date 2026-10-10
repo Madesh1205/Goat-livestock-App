@@ -437,9 +437,10 @@ class SupabaseMarketplaceRepositoryImpl(
 
         // 3. Fallback periodic refresh (every 20s) to keep notifications updated
         pollingJob = launch {
-            var pollingIntervalMs = 30_000L
+            var pollingIntervalMs = 60_000L
             while (isActive) {
                 delay(pollingIntervalMs)
+                if (!isActive) break
                 if (!com.ammalfarm.adusanthai.core.util.NetworkConnectivityObserver.isCurrentlyOnline()) {
                     continue
                 }
@@ -450,6 +451,8 @@ class SupabaseMarketplaceRepositoryImpl(
                                 eq("user_id", validUserId)
                             }
                         }.decodeList<NotificationDto>()
+
+                    if (!isActive) break
 
                     val appContext = SupabaseModule.getApplicationContext()
                     val now = System.currentTimeMillis()
@@ -469,9 +472,10 @@ class SupabaseMarketplaceRepositoryImpl(
                         notificationMap[notif.id] = notif
                     }
                     trySend(notificationMap.values.sortedByDescending { it.timestamp })
-                    pollingIntervalMs = 30_000L // Reset backoff on success
+                    pollingIntervalMs = 60_000L // Reset backoff on success
+                } catch (e: CancellationException) {
+                    break
                 } catch (e: Exception) {
-                    if (e is CancellationException) throw e
                     val msg = e.message ?: ""
                     val isNetworkError = msg.contains("resolve host", ignoreCase = true) ||
                             msg.contains("SocketException", ignoreCase = true) ||
@@ -480,7 +484,7 @@ class SupabaseMarketplaceRepositoryImpl(
                             msg.contains("ConnectException", ignoreCase = true)
                     if (isNetworkError) {
                         Log.d(TAG, "Notice: offline/network retry for notifications: $msg")
-                        pollingIntervalMs = (pollingIntervalMs * 2).coerceAtMost(60_000L)
+                        pollingIntervalMs = (pollingIntervalMs * 2).coerceAtMost(120_000L)
                     } else {
                         Log.w(TAG, "Notice: notification polling check notice: $msg")
                     }

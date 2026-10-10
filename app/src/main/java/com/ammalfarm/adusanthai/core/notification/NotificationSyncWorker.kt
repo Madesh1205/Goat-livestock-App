@@ -78,7 +78,7 @@ class NotificationSyncWorker(
 
                 WorkManager.getInstance(context).enqueueUniqueWork(
                     ONE_TIME_WORK_NAME,
-                    ExistingWorkPolicy.REPLACE,
+                    ExistingWorkPolicy.KEEP,
                     syncRequest
                 )
             } catch (e: Exception) {
