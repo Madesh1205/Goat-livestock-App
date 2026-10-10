@@ -374,7 +374,7 @@ data class FarmDto(
                 address = if (district.isNotBlank()) "$district, ${domain.state.trim().ifBlank { "Tamil Nadu" }}" else domain.state.trim().ifBlank { "Tamil Nadu" },
                 contactPhone = domain.contactNumber.trim().ifBlank { null },
                 contactEmail = domain.email.trim().ifBlank { null },
-                status = if (isAmmal) "APPROVED" else (if (domain.verificationStatus == VerificationStatus.PENDING) "APPROVED" else domain.verificationStatus.name),
+                status = if (isAmmal) "APPROVED" else domain.verificationStatus.name,
                 isAmmalOwnFarm = isAmmal,
                 goatListingLimit = domain.goatListingLimit,
                 description = domain.description.takeIf { it.isNotBlank() },

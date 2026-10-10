@@ -3,19 +3,24 @@ package com.ammalfarm.adusanthai.core.util
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import com.ammalfarm.adusanthai.core.supabase.SupabaseConfig
 import com.ammalfarm.adusanthai.core.supabase.SupabaseModule
 import com.ammalfarm.adusanthai.model.PlatformPricing
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Manages platform pricing configurations dynamically.
  * Allows Super Admin to configure and update:
- * 1. Farm Initial Approval Fee (replaces hardcoded ₹100)
- * 2. Additional Goat Listing Slot Price (replaces hardcoded ₹100)
+ * 1. Farm Initial Approval Fee (default ₹500)
+ * 2. Additional Goat Listing Slot Price (default ₹150)
+ * 3. Default Initial Goat Slots (default 2)
  *
- * Persisted locally and synchronized reactively across all screens.
+ * Persisted locally and synchronized with Supabase server-side settings.
  */
 object PlatformPricingManager {
 
@@ -71,8 +76,8 @@ object PlatformPricingManager {
         context: Context? = null
     ): Result<PlatformPricing> {
         return try {
-            if (approvalPrice <= 0 || slotPrice <= 0) {
-                return Result.failure(IllegalArgumentException("Prices must be greater than 0"))
+            if (approvalPrice < 0 || slotPrice < 0) {
+                return Result.failure(IllegalArgumentException("Prices cannot be negative"))
             }
             val now = System.currentTimeMillis()
             val prefs = getPrefs(context)
@@ -92,6 +97,30 @@ object PlatformPricingManager {
             Result.success(newPricing)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to update platform pricing: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updatePricingRemote(
+        approvalPrice: Double,
+        slotPrice: Double,
+        context: Context? = null
+    ): Result<PlatformPricing> {
+        return try {
+            if (approvalPrice < 0 || slotPrice < 0) {
+                return Result.failure(IllegalArgumentException("Prices cannot be negative"))
+            }
+            if (SupabaseConfig.isConfigured) {
+                val params = buildJsonObject {
+                    put("p_farm_approval_fee", approvalPrice)
+                    put("p_additional_slot_price", slotPrice)
+                    put("p_default_initial_slots", 2)
+                }
+                SupabaseModule.client.postgrest.rpc("update_platform_settings", params)
+            }
+            updatePricing(approvalPrice, slotPrice, context)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update remote platform pricing: ${e.message}", e)
             Result.failure(e)
         }
     }

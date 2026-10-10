@@ -3987,10 +3987,54 @@ fun SuperAdminReceiptDetailDialog(
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Close")
+            val context = androidx.compose.ui.platform.LocalContext.current
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick = {
+                            val file = com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.generateReceiptPdf(context, payment)
+                            if (file != null) {
+                                com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.sharePdf(context, file)
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("Share PDF", fontSize = 11.sp)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val file = com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.generateReceiptPdf(context, payment)
+                            if (file != null) {
+                                com.ammalfarm.adusanthai.util.ReceiptPdfGenerator.openPdf(context, file)
+                            }
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("View PDF", fontSize = 11.sp)
+                    }
+                }
+
+                Button(
+                    onClick = onDismiss,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Text("Close", fontSize = 12.sp)
+                }
             }
-        }
+        },
+        dismissButton = {}
     )
 }
 

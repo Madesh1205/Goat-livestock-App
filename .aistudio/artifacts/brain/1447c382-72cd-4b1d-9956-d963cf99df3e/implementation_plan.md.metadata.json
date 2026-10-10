@@ -1,6 +1,6 @@
 {
-  "summary":  "Revised implementation plan for Firebase Cloud Messaging (FCM) integration into Adu Santhai. Features explicit deduplication analysis using existing NotificationDeliveryTracker, NotificationHelper, and NotificationSyncWorker to prevent duplicate notifications or redundant background services.",
-  "updatedAt":  "2026-10-10T01:54:48.574278026Z",
+  "summary":  "Fix farm status mapping in MarketplaceDto to correctly persist and display PENDING verification status in Super Admin console",
+  "updatedAt":  "2026-10-10T14:44:03.883138480Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

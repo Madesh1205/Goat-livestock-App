@@ -991,7 +991,7 @@ class SupabaseMarketplaceRepositoryImpl(
         approvalPrice: Double,
         slotPrice: Double
     ): Result<PlatformPricing> = withContext(Dispatchers.IO) {
-        com.ammalfarm.adusanthai.core.util.PlatformPricingManager.updatePricing(approvalPrice, slotPrice)
+        com.ammalfarm.adusanthai.core.util.PlatformPricingManager.updatePricingRemote(approvalPrice, slotPrice)
     }
 
     override suspend fun initiateListingPayment(goatId: String): Result<ListingPaymentInitiation> = withContext(Dispatchers.IO) {
