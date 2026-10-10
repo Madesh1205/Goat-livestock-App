@@ -7,9 +7,9 @@ function pemBytes(p:string){
   let value=p.trim();
   if((value.startsWith('"')&&value.endsWith('"'))||(value.startsWith("'")&&value.endsWith("'"))) value=value.slice(1,-1);
   value=value.replace(/\\r/g,"\r").replace(/\\n/g,"\n");
-  const match=value.match(/-----BEGIN PRIVATE KEY-----([\\s\\S]*?)-----END PRIVATE KEY-----/);
+  const match=value.match(/-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/);
   if(!match) throw new Error("FCM private key must be a PKCS8 PRIVATE KEY PEM");
-  const b64=match[1].replace(/\\s/g,"");
+  const b64=match[1].replace(/\s/g,"");
   if(!b64||!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)||b64.length%4===1) throw new Error("FCM private key PEM body is not valid base64");
   return Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
 }
