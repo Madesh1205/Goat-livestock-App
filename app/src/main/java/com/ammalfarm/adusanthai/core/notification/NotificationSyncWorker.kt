@@ -136,9 +136,13 @@ class NotificationSyncWorker(
 
                 // Check local delivery status to avoid duplicates
                 if (!NotificationDeliveryTracker.isDelivered(applicationContext, currentUserId, notification.id)) {
-                    NotificationHelper.showSystemNotification(applicationContext, notification)
-                    NotificationDeliveryTracker.markDelivered(applicationContext, currentUserId, notification.id)
-                    newNotificationsShown++
+                    val displayed = NotificationHelper.showSystemNotification(applicationContext, notification)
+                    if (displayed) {
+                        NotificationDeliveryTracker.markDelivered(applicationContext, currentUserId, notification.id)
+                        newNotificationsShown++
+                    } else {
+                        Log.w(TAG, "Notification ${notification.id} was not displayed; leaving it eligible for a later sync.")
+                    }
                 }
             }
 
