@@ -1115,8 +1115,8 @@ class MainActivity : ComponentActivity() {
                                     Toast.makeText(context, "Goat listing updated.", Toast.LENGTH_SHORT).show()
                                 },
                                 onApproveFarm = { farmId ->
+                                    // The ViewModel reports success or failure only after Supabase confirms the update.
                                     marketplaceViewModel.updateFarmVerification(farmId, com.ammalfarm.adusanthai.model.VerificationStatus.APPROVED)
-                                    Toast.makeText(context, "Farm verified & approved!", Toast.LENGTH_SHORT).show()
                                 },
                                 onRejectFarm = { farmId ->
                                     marketplaceViewModel.updateFarmVerification(farmId, com.ammalfarm.adusanthai.model.VerificationStatus.REJECTED)
