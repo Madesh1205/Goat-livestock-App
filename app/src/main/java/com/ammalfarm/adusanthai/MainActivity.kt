@@ -320,7 +320,7 @@ class MainActivity : ComponentActivity() {
                         }
                         context.startActivity(browserIntent)
                     } catch (_: Exception) {
-                        Toast.makeText(context, "Opening $url", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Unable to open web page", Toast.LENGTH_SHORT).show()
                     }
                 }
 
@@ -853,7 +853,6 @@ class MainActivity : ComponentActivity() {
                                             Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
                                         } else if (authUiState.isAuthenticated || currentUser != null) {
                                             marketplaceViewModel.createBooking(goatId, notes) {
-                                                Toast.makeText(context, "24-Hour Reservation Placed! Farm owner notified.", Toast.LENGTH_LONG).show()
                                                 navController.navigate(Screen.Orders.route)
                                             }
                                         } else {
@@ -958,19 +957,13 @@ class MainActivity : ComponentActivity() {
                                 FarmAdminScreen(
                                 uiState = uiState,
                                 onAddGoat = { goat ->
-                                    marketplaceViewModel.addGoatListing(goat) {
-                                        Toast.makeText(context, "Goat listing submitted for approval!", Toast.LENGTH_SHORT).show()
-                                    }
+                                    marketplaceViewModel.addGoatListing(goat)
                                 },
                                 onEditGoat = { goat ->
-                                    marketplaceViewModel.updateGoatListing(goat) {
-                                        Toast.makeText(context, "Goat updated successfully!", Toast.LENGTH_SHORT).show()
-                                    }
+                                    marketplaceViewModel.updateGoatListing(goat)
                                 },
                                 onDeleteGoat = { goatId ->
-                                    marketplaceViewModel.deleteGoatListing(goatId) {
-                                        Toast.makeText(context, "Goat listing removed.", Toast.LENGTH_SHORT).show()
-                                    }
+                                    marketplaceViewModel.deleteGoatListing(goatId)
                                 },
                                 onConfirmBooking = { bookingId ->
                                     marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.CONFIRMED)
@@ -982,14 +975,10 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.updateBookingStatus(bookingId, AvailabilityStatus.COMPLETED)
                                 },
                                 onUpdateFarmProfile = { farm ->
-                                    marketplaceViewModel.updateFarmProfile(farm) {
-                                        Toast.makeText(context, "Farm profile updated successfully!", Toast.LENGTH_SHORT).show()
-                                    }
+                                    marketplaceViewModel.updateFarmProfile(farm)
                                 },
                                 onUpdateFarmLogo = { farmId, logoUrl ->
-                                    marketplaceViewModel.updateFarmLogo(farmId, logoUrl) {
-                                        Toast.makeText(context, "Farm logo updated successfully!", Toast.LENGTH_SHORT).show()
-                                    }
+                                    marketplaceViewModel.updateFarmLogo(farmId, logoUrl)
                                 },
                                 onSyncRole = {
                                     authViewModel.refreshUserProfile()

@@ -60,6 +60,12 @@ fun NotificationCenterScreen(
     var selectedFilter by remember { mutableStateOf(NotificationFilterTab.ALL) }
     var showMoreMenu by remember { mutableStateOf(false) }
 
+    LaunchedEffect(uiState.currentUser?.id) {
+        if (uiState.currentUser != null && uiState.currentUser.id.isNotBlank()) {
+            onMarkAllAsRead()
+        }
+    }
+
     val currentRole = uiState.currentUser?.role ?: UserRole.CUSTOMER
     val isCustomer = currentRole == UserRole.CUSTOMER
     val allNotifications = uiState.notifications

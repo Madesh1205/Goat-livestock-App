@@ -1034,7 +1034,7 @@ class MarketplaceViewModel(
         _uiState.update { it.copy(selectedBookingIdForDetail = null) }
     }
 
-    fun addGoatListing(goat: Goat, onSuccess: () -> Unit) {
+    fun addGoatListing(goat: Goat, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             val opKey = "add_goat_${goat.id}_${goat.name}"
             if (!inFlightOperations.add(opKey)) return@launch
@@ -1759,69 +1759,129 @@ class MarketplaceViewModel(
     }
 
     // --- NOTIFICATION ACTIONS ---
+    private val inFlightReadNotificationIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var markAllInFlight = false
+
     fun markNotificationAsRead(notificationId: String) {
-        viewModelScope.launch {
-            val result = repository.markNotificationAsRead(notificationId)
-            result.onSuccess {
-                _uiState.update { s ->
-                    s.copy(
-                        notifications = s.notifications.map {
-                            if (it.id == notificationId) it.copy(isRead = true) else it
-                        }
-                    )
+        if (notificationId.isBlank()) return
+        val user = _uiState.value.currentUser ?: return
+        if (user.id.isBlank()) return
+
+        // Skip if already read in local state
+        val targetNotif = _uiState.value.notifications.find { it.id == notificationId }
+        if (targetNotif != null && targetNotif.isRead) {
+            return
+        }
+
+        // Prevent duplicate concurrent requests for the same notification ID
+        if (!inFlightReadNotificationIds.add(notificationId)) {
+            return
+        }
+
+        // Optimistically update local UI state immediately
+        _uiState.update { s ->
+            s.copy(
+                notifications = s.notifications.map {
+                    if (it.id == notificationId) it.copy(isRead = true) else it
                 }
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to mark notification as read.")) }
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val result = repository.markNotificationAsRead(notificationId)
+                result.onFailure { err ->
+                    // Rollback local read status on failure
+                    _uiState.update { s ->
+                        s.copy(
+                            notifications = s.notifications.map {
+                                if (it.id == notificationId) it.copy(isRead = false) else it
+                            },
+                            errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to mark notification as read.")
+                        )
+                    }
+                }
+            } finally {
+                inFlightReadNotificationIds.remove(notificationId)
             }
         }
     }
 
     fun markAllNotificationsAsRead() {
         val user = _uiState.value.currentUser ?: return
+        if (user.id.isBlank()) return
+
+        if (markAllInFlight) return
+        markAllInFlight = true
+
+        val unreadNotifs = _uiState.value.notifications.filter { !it.isRead }
+
+        // Optimistically mark all loaded notifications as read in local UI state
+        if (unreadNotifs.isNotEmpty()) {
+            _uiState.update { s ->
+                s.copy(
+                    notifications = s.notifications.map { it.copy(isRead = true) }
+                )
+            }
+        }
+
         viewModelScope.launch {
-            val result = repository.markAllNotificationsAsRead(user.id, user.role)
-            result.onSuccess {
-                _uiState.update { s ->
-                    s.copy(
-                        notifications = s.notifications.map { it.copy(isRead = true) },
-                        successMessage = "All notifications marked as read."
-                    )
+            try {
+                val result = repository.markAllNotificationsAsRead(user.id, user.role)
+                result.onFailure { err ->
+                    // Rollback unread state on failure if we modified local items
+                    if (unreadNotifs.isNotEmpty()) {
+                        val unreadIds = unreadNotifs.map { it.id }.toSet()
+                        _uiState.update { s ->
+                            s.copy(
+                                notifications = s.notifications.map {
+                                    if (unreadIds.contains(it.id)) it.copy(isRead = false) else it
+                                },
+                                errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to mark all notifications as read.")
+                            )
+                        }
+                    } else {
+                        _uiState.update { s ->
+                            s.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to mark all notifications as read."))
+                        }
+                    }
                 }
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to mark all notifications as read.")) }
+            } finally {
+                markAllInFlight = false
             }
         }
     }
 
     fun deleteNotification(notificationId: String) {
+        if (notificationId.isBlank()) return
         viewModelScope.launch {
+            _uiState.update { s ->
+                s.copy(notifications = s.notifications.filterNot { it.id == notificationId })
+            }
             val result = repository.deleteNotification(notificationId)
-            result.onSuccess {
-                _uiState.update { s ->
-                    s.copy(
-                        notifications = s.notifications.filterNot { it.id == notificationId },
-                        successMessage = "Notification removed."
-                    )
-                }
-            }.onFailure { err ->
+            result.onFailure { err ->
                 _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to delete notification.")) }
+                _uiState.value.currentUser?.let { user ->
+                    startNotificationObserver(user)
+                }
             }
         }
     }
 
     fun clearAllNotifications() {
         val user = _uiState.value.currentUser ?: return
+        if (user.id.isBlank()) return
         viewModelScope.launch {
+            val previousNotifs = _uiState.value.notifications
+            _uiState.update { s -> s.copy(notifications = emptyList()) }
             val result = repository.clearAllNotifications(user.id, user.role)
-            result.onSuccess {
+            result.onFailure { err ->
                 _uiState.update { s ->
                     s.copy(
-                        notifications = emptyList(),
-                        successMessage = "Notifications cleared."
+                        notifications = previousNotifs,
+                        errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to clear notifications.")
                     )
                 }
-            }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = UserFriendlyErrorMapper.toUserMessage(err, "Failed to clear notifications.")) }
             }
         }
     }

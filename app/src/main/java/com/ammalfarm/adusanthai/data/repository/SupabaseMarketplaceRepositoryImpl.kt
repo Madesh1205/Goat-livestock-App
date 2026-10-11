@@ -551,6 +551,7 @@ class SupabaseMarketplaceRepositoryImpl(
 
     override suspend fun markNotificationAsRead(notificationId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (notificationId.isBlank()) return@withContext Result.success(Unit)
             val validId = ensureValidUuid(notificationId)
             SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].update(
                 buildJsonObject { put("is_read", true) }
@@ -568,12 +569,14 @@ class SupabaseMarketplaceRepositoryImpl(
 
     override suspend fun markAllNotificationsAsRead(userId: String, role: UserRole): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (userId.isBlank()) return@withContext Result.success(Unit)
             val validUserId = ensureValidUuid(userId)
             SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].update(
                 buildJsonObject { put("is_read", true) }
             ) {
                 filter {
                     eq("user_id", validUserId)
+                    eq("is_read", false)
                 }
             }
             Result.success(Unit)
