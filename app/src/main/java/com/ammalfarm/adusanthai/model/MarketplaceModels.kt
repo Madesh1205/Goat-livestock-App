@@ -1,6 +1,8 @@
 package com.ammalfarm.adusanthai.model
 
+import com.ammalfarm.adusanthai.core.util.FarmLocations
 import com.ammalfarm.adusanthai.core.util.PriceUtils
+
 
 enum class UserRole {
     SUPER_ADMIN,
@@ -510,11 +512,15 @@ data class GoatFilterCriteria(
 
         // Location filter
         if (!location.isNullOrBlank()) {
-            val loc = location.trim().lowercase()
-            val matchesLoc = goat.farmLocation.lowercase().contains(loc) ||
-                    goat.farmName.lowercase().contains(loc)
+            val cleanTargetLoc = FarmLocations.cleanDistrictName(location).lowercase()
+            val cleanGoatLoc = FarmLocations.cleanDistrictName(goat.farmLocation).lowercase()
+            val rawTargetLoc = location.trim().lowercase()
+            val matchesLoc = (cleanTargetLoc.isNotBlank() && cleanGoatLoc.contains(cleanTargetLoc)) ||
+                    goat.farmLocation.lowercase().contains(rawTargetLoc) ||
+                    goat.farmName.lowercase().contains(rawTargetLoc)
             if (!matchesLoc) return false
         }
+
 
         // Availability filter
         if (availability != null && goat.availabilityStatus != availability) return false

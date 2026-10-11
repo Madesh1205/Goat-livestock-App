@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.ammalfarm.adusanthai.core.supabase.SupabaseConfig
+import com.ammalfarm.adusanthai.core.util.FarmLocations
+
 import com.ammalfarm.adusanthai.model.*
 import com.ammalfarm.adusanthai.ui.components.ActiveFilterChips
 import com.ammalfarm.adusanthai.ui.components.DatabaseConnectionErrorScreen
@@ -443,23 +445,11 @@ fun MarketplaceHomeScreen(
                 // --- LOCATION SELECTOR CONTROL (Immediately Below Search Bar) ---
                 val availableLocations = remember(uiState.approvedFarms, uiState.farms, uiState.goats) {
                     val allFarms = (uiState.approvedFarms + uiState.farms).distinctBy { it.id }
-                    val farmLocs = allFarms.map { it.location.trim() }
-                    val goatLocs = uiState.goats.map { it.farmLocation.trim() }
-                    val farmStates = allFarms.map { it.state.trim() }
-                    val rawList = (farmLocs + goatLocs + farmStates).filter { it.isNotBlank() }
-
-                    val distinctLocs = mutableSetOf<String>()
-                    rawList.forEach { loc ->
-                        val parts = loc.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                        parts.forEach { distinctLocs.add(it) }
-                        if (loc.isNotBlank()) distinctLocs.add(loc)
-                    }
-
-                    distinctLocs
-                        .filter { it.isNotBlank() && !it.equals("All locations", ignoreCase = true) }
-                        .distinct()
-                        .sorted()
+                    val farmLocs = allFarms.map { it.location }
+                    val goatLocs = uiState.goats.map { it.farmLocation }
+                    FarmLocations.extractActiveDistricts(farmLocs + goatLocs)
                 }
+
 
                 var locationDropdownExpanded by remember { mutableStateOf(false) }
 
@@ -507,9 +497,13 @@ fun MarketplaceHomeScreen(
                                         MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                val selectedDistrictDisplay = remember(criteria.location) {
+                                    val raw = criteria.location
+                                    if (raw.isNullOrBlank()) "All locations"
+                                    else FarmLocations.cleanDistrictName(raw).ifBlank { raw }
+                                }
                                 Text(
-                                    text = criteria.location.takeIf { !it.isNullOrBlank() } ?: "All locations",
+                                    text = selectedDistrictDisplay,
                                     fontSize = 12.sp,
                                     fontWeight = if (criteria.location.isNullOrBlank()) FontWeight.Medium else FontWeight.Bold,
                                     color = if (criteria.location.isNullOrBlank())
@@ -519,6 +513,7 @@ fun MarketplaceHomeScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
+
                             }
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -590,8 +585,9 @@ fun MarketplaceHomeScreen(
                                     enabled = false
                                 )
                             } else {
-                                availableLocations.forEach { loc ->
+                                for (loc in availableLocations) {
                                     val isSelected = criteria.location.equals(loc, ignoreCase = true)
+
                                     DropdownMenuItem(
                                         text = {
                                             Row(

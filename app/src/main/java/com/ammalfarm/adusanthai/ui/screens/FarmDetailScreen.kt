@@ -235,10 +235,11 @@ fun FarmDetailScreen(
                             )
                         }
                         Text(
-                            text = "${farm.location}, ${farm.state}",
+                            text = com.ammalfarm.adusanthai.core.util.FarmLocations.cleanDistrictName(farm.location).ifBlank { farm.location },
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
                     }
                 },
                 navigationIcon = {
@@ -476,10 +477,11 @@ fun FarmDetailScreen(
                                         )
                                         Spacer(modifier = Modifier.width(2.dp))
                                         Text(
-                                            text = "${farm.location}, ${farm.state}",
+                                            text = com.ammalfarm.adusanthai.core.util.FarmLocations.cleanDistrictName(farm.location).ifBlank { farm.location },
                                             fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+
                                     }
                                 }
                             }

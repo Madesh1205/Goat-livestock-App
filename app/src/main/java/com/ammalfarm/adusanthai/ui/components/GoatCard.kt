@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
+import com.ammalfarm.adusanthai.core.util.FarmLocations
+
 import com.ammalfarm.adusanthai.model.AvailabilityStatus
 import com.ammalfarm.adusanthai.model.Goat
 import com.ammalfarm.adusanthai.model.GoatGender
@@ -508,14 +510,16 @@ fun GoatListCard(
                         modifier = Modifier.size(13.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
+                    val cleanLoc = FarmLocations.cleanDistrictName(goat.farmLocation)
                     Text(
-                        text = "${goat.farmName} (${goat.farmLocation})",
+                        text = if (cleanLoc.isNotBlank()) "${goat.farmName} ($cleanLoc)" else goat.farmName,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))

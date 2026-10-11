@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for restructuring Amazon-style filter UI categories in Adu Santhai app. Combines Gender, Age, and Weight into Goat Specs, combines Sort By and New Arrivals into Sorting & New Arrivals, and completely removes Farm Verification, Health & Docs, and Horn Status filters.",
-  "updatedAt":  "2026-10-11T15:08:31.711928230Z",
+  "summary":  "Plan to clean up location display across Adu Santhai to show only clean, distinct district names in location selectors, filters, goat cards, and detail screens.",
+  "updatedAt":  "2026-10-11T16:00:02.558566926Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

@@ -20,8 +20,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ammalfarm.adusanthai.core.util.FarmLocations
 import com.ammalfarm.adusanthai.model.*
 import java.util.Locale
+
 
 data class ActiveFilterChipModel(
     val key: String,
@@ -142,7 +144,8 @@ fun ActiveFilterChips(
             ActiveFilterChipModel(
                 key = "location",
                 label = "Location",
-                valueText = criteria.location,
+                valueText = FarmLocations.cleanDistrictName(criteria.location),
+
                 onRemove = onRemoveLocation
             )
         )

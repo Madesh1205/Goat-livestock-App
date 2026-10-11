@@ -68,17 +68,13 @@ fun GoatFilterBottomSheet(
         (goatBreeds + defaults).distinct().sorted()
     }
 
-    // Dynamic district list sorted alphabetically
+    // Dynamic district list sorted alphabetically (active districts only)
     val districtOptions = remember(availableFarms, allGoats) {
-        val farmLocs = availableFarms.map { it.location.trim() }
-        val goatLocs = allGoats.map { it.farmLocation.trim() }
-        val rawList = (farmLocs + goatLocs + FarmLocations.TAMIL_NADU_DISTRICTS).filter { it.isNotBlank() }
-        val distinct = mutableSetOf<String>()
-        rawList.forEach { loc ->
-            loc.split(",").map { it.trim() }.filter { it.isNotBlank() }.forEach { distinct.add(it) }
-        }
-        distinct.sorted()
+        val farmLocs = availableFarms.map { it.location }
+        val goatLocs = allGoats.map { it.farmLocation }
+        FarmLocations.extractActiveDistricts(farmLocs + goatLocs)
     }
+
 
     // Dynamic count matching current draft criteria
     val matchingGoatCount = remember(draftCriteria, allGoats, totalMatchingCount) {

@@ -99,7 +99,10 @@ fun GoatDetailScreen(
         uiState.farms.find { it.id == goat.farmId }
     }
     val displayFarmName = resolvedFarm?.name?.takeIf { it.isNotBlank() } ?: goat.farmName.ifBlank { "Ammal Farm" }
-    val displayFarmLocation = resolvedFarm?.location?.takeIf { it.isNotBlank() } ?: goat.farmLocation.ifBlank { "Salem, Tamil Nadu" }
+    val rawLoc = resolvedFarm?.location?.takeIf { it.isNotBlank() } ?: goat.farmLocation.ifBlank { "Salem" }
+    val displayFarmLocation = com.ammalfarm.adusanthai.core.util.FarmLocations.cleanDistrictName(rawLoc).ifBlank { "Salem" }
+
+
     val isFarmVerified = resolvedFarm?.verificationStatus == VerificationStatus.APPROVED
 
     // Availability & Approval State Analysis
