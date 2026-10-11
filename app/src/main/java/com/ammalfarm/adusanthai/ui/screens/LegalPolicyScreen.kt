@@ -63,7 +63,7 @@ fun LegalPolicyScreen(
                 id = "priv_overview",
                 title = "1. Introduction & Overview",
                 icon = Icons.Outlined.Shield,
-                summary = "We respect your digital privacy and are committed to protecting the personal data of livestock buyers, breeders, and farm partners.",
+                summary = "We respect your digital privacy and are committed to protecting the personal data of livestock buyers, farm owners, and farm partners.",
                 details = listOf(
                     "This Privacy Policy outlines how the Livestock Marketplace Platform collects, processes, securely stores, and protects personal information in accordance with applicable data protection regulations and electronic commerce guidelines.",
                     "By creating an account, browsing livestock listings, booking reservations, or registering as a Farm Partner, you consent to the data practices described in this policy.",
@@ -78,8 +78,8 @@ fun LegalPolicyScreen(
                 summary = "We collect necessary identity, farm accreditation, and booking communication details.",
                 details = listOf(
                     "Customer Account Data: Name, verified email address, phone number, and primary district or delivery location.",
-                    "Farm Partner Data: Farm business name, government farm registration number, physical address, GPS coordinates, breeder certification details, and veterinarian health certificates.",
-                    "Livestock Listing Media: High-resolution photographs, breed pedigrees, weight/age records, vaccination records, and pricing information provided by breeders.",
+                    "Farm Partner Data: Farm business name, government farm registration number, physical address, GPS coordinates, farm owner certification details, and veterinarian health certificates.",
+                    "Livestock Listing Media: High-resolution photographs, breed pedigrees, weight/age records, vaccination records, and pricing information provided by farm owners.",
                     "Reservation & Booking Data: Booking timestamps, 24-hour reservation statuses, and direct seller notes.",
                     "Technical Diagnostics: Device hardware model, operating system version, and application crash diagnostics used solely to improve stability."
                 ),
@@ -104,8 +104,8 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.ManageAccounts,
                 summary = "Data is used strictly to facilitate livestock transactions, ensure breed integrity, and prevent fraud.",
                 details = listOf(
-                    "Platform Facilitation: Facilitating authentic 24-hour livestock reservations between buyers and licensed farm breeders.",
-                    "Quality & Pedigree Verification: Reviewing breeder credentials, breed purity claims, and health documentation to safeguard livestock buyers.",
+                    "Platform Facilitation: Facilitating authentic 24-hour livestock reservations between buyers and licensed farm owners.",
+                    "Quality & Pedigree Verification: Reviewing farm owner credentials, breed purity claims, and health documentation to safeguard livestock buyers.",
                     "In-App Notifications: Dispatching updates regarding reservation confirmations, farm approvals, report resolutions, and important safety announcements.",
                     "Fraud Prevention: Detecting duplicate listings, spam communications, or unauthorized trading."
                 ),
@@ -117,7 +117,7 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.Share,
                 summary = "We never sell or rent your personal data to external advertisers or brokers.",
                 details = listOf(
-                    "Transaction Counterparts: When a customer places a 24-hour reservation, their contact name and verified phone number are shared exclusively with the respective farm breeder to arrange animal inspection and pickup.",
+                    "Transaction Counterparts: When a customer places a 24-hour reservation, their contact name and verified phone number are shared exclusively with the respective farm owner to arrange animal inspection and pickup.",
                     "Regulatory & Legal Compliance: We may disclose information if mandated by law, judicial subpoena, or animal health regulatory agencies investigating livestock welfare violations.",
                     "Service Infrastructure: Data is hosted in secure, certified cloud server facilities adhering to standard industry data compliance protocols."
                 ),
@@ -160,7 +160,7 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.Gavel,
                 summary = "Using this marketplace constitutes full agreement with these binding conditions.",
                 details = listOf(
-                    "These Terms and Conditions govern the access and use of the Livestock Marketplace Application, connecting buyers, livestock farmers, and certified breeders.",
+                    "These Terms and Conditions govern the access and use of the Livestock Marketplace Application, connecting buyers, livestock farmers, and certified farm owners.",
                     "If you do not agree with any provision of these Terms, you must immediately cease accessing the platform and delete the application from your device.",
                     "Users must be at least 18 years of age or represent a legally recognized agricultural business or farm enterprise."
                 ),
@@ -173,19 +173,19 @@ fun LegalPolicyScreen(
                 summary = "The app is an informational and reservation coordination marketplace, not an animal owner or logistics agent.",
                 details = listOf(
                     "Platform Scope: The application acts as a digital marketplace allowing registered farm partners to display verified livestock listings and allowing interested customers to hold 24-hour reservations.",
-                    "Direct Transactions: Physical livestock examination, veterinary check, and financial transactions take place directly between the buyer and the farm breeder at the farm location.",
-                    "Independent Breeders: Registered farms are independent agricultural entities and do not constitute employees, subsidiaries, or legal agents of the application."
+                    "Direct Transactions: Physical livestock examination, veterinary check, and financial transactions take place directly between the buyer and the farm owner at the farm location.",
+                    "Independent Farm Owners: Registered farms are independent agricultural entities and do not constitute employees, subsidiaries, or legal agents of the application."
                 ),
-                highlights = listOf("Direct farm-gate transactions", "Breeder independence")
+                highlights = listOf("Direct farm-gate transactions", "Farm Owner independence")
             ),
             PolicySection(
                 id = "term_breeder",
-                title = "3. Farm Partner & Breeder Obligations",
+                title = "3. Farm Partner & Farm Owner Obligations",
                 icon = Icons.Outlined.Agriculture,
-                summary = "Breeder partners must maintain strict standards of breed purity, accurate descriptions, and health transparency.",
+                summary = "Farm Owner partners must maintain strict standards of breed purity, accurate descriptions, and health transparency.",
                 details = listOf(
                     "Accurate Representation: All photographs, weights, age estimations, and pedigree claims must be accurate and unmanipulated.",
-                    "Mandatory Health Disclosures: Breeders must disclose any known pre-existing medical conditions, vaccination history, deworming dates, and breeding history prior to finalizing reservations.",
+                    "Mandatory Health Disclosures: Farm Owners must disclose any known pre-existing medical conditions, vaccination history, deworming dates, and breeding history prior to finalizing reservations.",
                     "Administrative Verification: New farm profiles remain in PENDING status until credentials are authenticated by Super Administrators. Unapproved farms cannot publish public livestock listings."
                 ),
                 highlights = listOf("Strict breed pedigree accuracy", "Super Admin farm verification")
@@ -194,12 +194,12 @@ fun LegalPolicyScreen(
                 id = "term_reservation",
                 title = "4. 24-Hour Reservation System",
                 icon = Icons.Outlined.Timer,
-                summary = "Reservations protect buyers and breeders by holding livestock for inspection for up to 24 hours.",
+                summary = "Reservations protect buyers and farm owners by holding livestock for inspection for up to 24 hours.",
                 details = listOf(
                     "Reservation Window: When a customer reserves a goat, the listing status transitions to RESERVED for a maximum duration of 24 hours.",
-                    "Farm Visit & Inspection: The buyer must coordinate with the breeder to visit the farm or arrange certified livestock logistics before the 24-hour period elapses.",
-                    "Breeder Confirmation: The verified farm partner reserves the right to confirm, fulfill, or reject reservations based on livestock availability and genuine intent.",
-                    "Automated Expiry: If no transaction takes place within 24 hours and the breeder does not mark the booking complete, the livestock listing automatically reverts to AVAILABLE."
+                    "Farm Visit & Inspection: The buyer must coordinate with the farm owner to visit the farm or arrange certified livestock logistics before the 24-hour period elapses.",
+                    "Farm Owner Confirmation: The verified farm partner reserves the right to confirm, fulfill, or reject reservations based on livestock availability and genuine intent.",
+                    "Automated Expiry: If no transaction takes place within 24 hours and the farm owner does not mark the booking complete, the livestock listing automatically reverts to AVAILABLE."
                 ),
                 highlights = listOf("24-Hour exclusive hold", "Automated expiration on no-show")
             ),
@@ -210,7 +210,7 @@ fun LegalPolicyScreen(
                 summary = "Strict zero-tolerance policy against animal cruelty, neglect, or illegal livestock trafficking.",
                 details = listOf(
                     "Legal Compliance: All livestock transactions and farm operations must strictly adhere to the Prevention of Cruelty to Animals Act, 1960 and transport of animals guidelines.",
-                    "Humane Transportation: Buyers and breeders must guarantee humane, adequately ventilated, and stress-free transport arrangements for purchased livestock.",
+                    "Humane Transportation: Buyers and farm owners must guarantee humane, adequately ventilated, and stress-free transport arrangements for purchased livestock.",
                     "Immediate Sanctions: Any partner reported or verified to engage in animal neglect, inhumane confinement, or illegal trafficking will face permanent ban and referral to veterinary authorities."
                 ),
                 highlights = listOf("Zero tolerance for animal cruelty", "Transport compliance mandatory")
@@ -221,7 +221,7 @@ fun LegalPolicyScreen(
                 icon = Icons.Outlined.Groups,
                 summary = "Members must maintain ethical communication and constructive livestock trade practices.",
                 details = listOf(
-                    "Professional Engagement: Customers and breeders must interact respectfully regarding livestock inquiries, appointments, and farm visits.",
+                    "Professional Engagement: Customers and farm owners must interact respectfully regarding livestock inquiries, appointments, and farm visits.",
                     "Prohibited Content: Defamatory remarks, profane language, unverified competitor sabotage, and spam inquiries are strictly prohibited.",
                     "Moderation: Super Administrators monitor all platform reports and reserve the right to penalize malicious users or disable abusive accounts."
                 ),
@@ -456,7 +456,7 @@ fun LegalPolicyScreen(
                     item {
                         HighlightChip(
                             icon = Icons.Outlined.Verified,
-                            text = "Verified Farm Breeders",
+                            text = "Verified Farm Owners",
                             color = MaterialTheme.colorScheme.primaryContainer,
                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                         )

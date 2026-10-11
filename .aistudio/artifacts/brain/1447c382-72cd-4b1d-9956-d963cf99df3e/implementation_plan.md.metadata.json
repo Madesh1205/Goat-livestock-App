@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for fixing pending farm admin display in SuperAdminScreen and robust status mapping in SupabaseFarmRepositoryImpl",
-  "updatedAt":  "2026-10-10T16:27:36.207858636Z",
+  "summary":  "Implementation plan for replacing 'Goat breeder' terminology with 'Farm owner' across the Adu Santhai application.",
+  "updatedAt":  "2026-10-11T01:51:45.936174328Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

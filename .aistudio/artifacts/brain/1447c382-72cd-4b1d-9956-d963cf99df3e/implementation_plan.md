@@ -1,36 +1,17 @@
-# Implementation Plan - Fix Pending Farm Admin Display in Super Admin Page
+# Replace 'Goat breeder' with 'Farm owner' Terminology
 
-## Overview & Goal
-Ensure newly registered pending partner farms are correctly fetched, mapped, and displayed in the Super Admin Farm Management page (`SuperAdminScreen.kt` & `SupabaseFarmRepositoryImpl.kt`), fixing status mapping discrepancies between Supabase (`farm_status` enum) and Android domain models.
+## Summary
+Update all user-facing strings, UI labels, dialogs, headers, and references in the Adu Santhai Android application from "Goat breeder" to "Farm owner" to match the user's branding and terminology preferences.
 
-## User Review & Critical Decisions
-> [!IMPORTANT]
-> - **Status Mapping**: Ensure `VerificationStatus` handles `PENDING`, `APPROVED`, `SUSPENDED`, and `REJECTED` robustly from Supabase strings.
-> - **Fallback & Cache**: Ensure `SupabaseFarmRepositoryImpl` correctly merges remote pending farms into local cache and display lists without filtering them out incorrectly.
+## 1. Overview & Scope
+- **Objective**: Ensure professional and consistent terminology ("Farm owner") across all screens, navigation items, role badges, dialog titles, and notification messages.
+- **Affected Components**: 
+  - `strings.xml` (string resources)
+  - Jetpack Compose UI screens (`SuperAdminScreen.kt`, `MarketplaceScreen.kt`, `ProfileScreen.kt`, authentication screens, dialogs, etc.)
+  - ViewModel messages or toast notifications referencing "goat breeder".
 
----
-
-## 1. Technical Analysis & Root Cause
-1. **Status Mapping in `FarmDto`**:
-   - `status` column in Supabase `farms` table can be `"PENDING"`, `"APPROVED"`, etc.
-   - `FarmDto.toDomain()` correctly parses `VerificationStatus.valueOf(...)`, but ensure fallback handles case-insensitivity or nulls safely as `VerificationStatus.PENDING` when unverified.
-2. **Filtering in `FarmRepository`**:
-   - `getAllFarmsForAdmin()` filters: `it.isAmmalOwnFarm || it.ownerId.isNotBlank()`.
-   - Ensure pending farms created by farm admins have non-blank `owner_id` and are successfully fetched and returned in `getAllFarmsForAdmin()`.
-3. **UI Display & Filter in `SuperAdminScreen`**:
-   - Ensure the Super Admin farm tab (`SuperAdminFarmsTab`) and filters correctly show `PENDING` farms with actionable "Approve KYC" and "Reject" buttons.
-
----
-
-## 2. Proposed Changes
-- **`FarmDto` & `FarmRepository`**:
-  - Audit `FarmDto.toDomain()` status parsing to ensure robust parsing of `"PENDING"`, `"APPROVED"`, `"SUSPENDED"`, `"REJECTED"`.
-  - Ensure `getAllFarmsForAdmin()` and `fetchFarmsFromSupabase()` correctly retrieve and include all pending partner farms.
-- **`SuperAdminScreen`**:
-  - Verify `SuperAdminFarmsTab` displays `PENDING` status badge (orange/amber) and the approval actions correctly.
-
----
-
-## 3. Verification Plan
-- Compile the app using `compile_applet`.
-- Verify no compilation errors and clean state handling.
+## 2. Implementation Steps
+1. **Search & Locate**: Find all occurrences of "Goat Breeder", "goat breeder", "GoatBreeder", etc., in `app/src/main/`.
+2. **String Resources**: Update `res/values/strings.xml` labels and descriptions.
+3. **Composable UI & Composables**: Update screen titles, button texts, cards, status chips, and helper text.
+4. **Verification**: Compile the app using `compile_applet` to ensure zero compilation errors.

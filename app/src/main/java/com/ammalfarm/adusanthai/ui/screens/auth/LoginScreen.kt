@@ -384,7 +384,7 @@ fun LoginScreen(
                             modifier = Modifier.size(20.dp)
                         )
                         Text(
-                            text = "Are you a Goat Breeder or Farm Owner?",
+                            text = "Are you a Farm Owner?",
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer

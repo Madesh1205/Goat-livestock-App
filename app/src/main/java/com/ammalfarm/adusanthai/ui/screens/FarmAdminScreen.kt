@@ -237,7 +237,7 @@ fun FarmAdminScreen(
     val consumedListingSlots = remember(myGoats, myFarmId, totalGoats) {
         com.ammalfarm.adusanthai.core.util.FarmLocalCache.getConsumedListingSlots(myFarmId, totalGoats)
     }
-    val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else if (isFarmApproved) 2 else 0)
+    val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else if (isFarmApproved) uiState.platformPricing.defaultInitialSlots else 0)
     val isLimitReached = !isAmmalFarm && !isSuperAdmin && (consumedListingSlots >= goatListingLimit || !isFarmApproved)
     var showLimitReachedAlert by remember { mutableStateOf(false) }
 

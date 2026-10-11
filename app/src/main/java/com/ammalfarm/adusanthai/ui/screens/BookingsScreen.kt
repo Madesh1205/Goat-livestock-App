@@ -595,7 +595,7 @@ fun BookingCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Contact Farm Breeder Button (for active/confirmed bookings)
+                    // Contact Farm Owner Button (for active/confirmed bookings)
                     val farmContact = FarmLocalCache.getCachedFarm(booking.farmId)?.contactNumber?.trim()?.takeIf { it.isNotBlank() }
                     if ((booking.status == AvailabilityStatus.CONFIRMED || booking.status == AvailabilityStatus.BOOKING_PENDING || booking.status == AvailabilityStatus.RESERVED) && !farmContact.isNullOrBlank()) {
                         OutlinedButton(
@@ -783,7 +783,7 @@ fun BookingDetailContent(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // FARM / BREEDER CONTACT CARD
+        // FARM / FARM OWNER CONTACT CARD
         val cachedFarm = FarmLocalCache.getCachedFarm(booking.farmId)
         val farmLocation = cachedFarm?.location?.trim()?.takeIf { it.isNotBlank() }
         val farmContact = cachedFarm?.contactNumber?.trim()?.takeIf { it.isNotBlank() }
@@ -796,7 +796,7 @@ fun BookingDetailContent(
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Breeder & Pickup Logistics",
+                    text = "Farm Owner & Pickup Logistics",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurface

@@ -624,7 +624,7 @@ fun GoatFilterBottomSheet(
                 // --- 7. VERIFIED FARM PARTNER ---
                 item {
                     FilterSectionHeader(
-                        title = "Farm / Breeder",
+                        title = "Farm / Farm Owner",
                         icon = Icons.Outlined.Agriculture,
                         selectedSubtitle = draftCriteria.farmName ?: "All Verified Farms"
                     )

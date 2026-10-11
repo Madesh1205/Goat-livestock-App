@@ -348,7 +348,7 @@ fun GoatDetailScreen(
                                             try {
                                                 context.startActivity(callIntent)
                                             } catch (e: Exception) {
-                                                Toast.makeText(context, "Breeder Contact: $contact", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "Farm Owner Contact: $contact", Toast.LENGTH_SHORT).show()
                                             }
                                         } else {
                                             Toast.makeText(context, "Farm contact number not available", Toast.LENGTH_SHORT).show()
@@ -362,7 +362,7 @@ fun GoatDetailScreen(
                                 ) {
                                     Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Call Breeder", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("Call Farm Owner", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
                             }
                         }
@@ -1150,7 +1150,7 @@ fun GoatDetailScreen(
 
                 // 8. FARM / SELLER INFORMATION CARD
                 Text(
-                    text = "Breeder & Seller Information",
+                    text = "Farm Owner & Seller Information",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
@@ -1271,7 +1271,7 @@ fun GoatDetailScreen(
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Breeder Action buttons: Call Breeder is gated until a booking is placed
+                        // Farm Owner Action buttons: Call Farm Owner is gated until a booking is placed
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1298,7 +1298,7 @@ fun GoatDetailScreen(
                                             try {
                                                 context.startActivity(callIntent)
                                             } catch (e: Exception) {
-                                                Toast.makeText(context, "Breeder Contact: $contact", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(context, "Farm Owner Contact: $contact", Toast.LENGTH_SHORT).show()
                                             }
                                         } else {
                                             Toast.makeText(context, "Farm contact number not available", Toast.LENGTH_SHORT).show()
@@ -1310,7 +1310,7 @@ fun GoatDetailScreen(
                                 ) {
                                     Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Call Breeder", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Call Farm Owner", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             } else {
                                 FilledTonalButton(
@@ -1374,9 +1374,9 @@ fun GoatDetailScreen(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = when (userActiveBooking.status) {
-                                            AvailabilityStatus.CONFIRMED -> "Booking Confirmed! You can coordinate pickup with breeder."
+                                            AvailabilityStatus.CONFIRMED -> "Booking Confirmed! You can coordinate pickup with farm owner."
                                             AvailabilityStatus.COMPLETED, AvailabilityStatus.SOLD -> "Livestock purchase completed."
-                                            else -> "Booking Created • Connect with breeder by phone while farm confirms."
+                                            else -> "Booking Created • Connect with farm owner by phone while farm confirms."
                                         },
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
@@ -1626,7 +1626,7 @@ fun GoatDetailScreen(
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
-                        text = "Reserve this goat with zero upfront online payment. Once submitted, $displayFarmName will receive your booking details and you can connect over the phone to confirm pickup/logistics. The breeder will then confirm your booking.",
+                        text = "Reserve this goat with zero upfront online payment. Once submitted, $displayFarmName will receive your booking details and you can connect over the phone to confirm pickup/logistics. The farm owner will then confirm your booking.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 18.sp
@@ -1755,7 +1755,7 @@ fun GoatDetailScreen(
             },
             title = {
                 Text(
-                    text = "Contact Breeder",
+                    text = "Contact Farm Owner",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     textAlign = TextAlign.Center
@@ -1764,7 +1764,7 @@ fun GoatDetailScreen(
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "To protect breeder privacy and prevent unsolicited calls, direct phone contact is unlocked immediately after you place a booking request for this goat.\n\nNo upfront payment is required.",
+                        text = "To protect farm owner privacy and prevent unsolicited calls, direct phone contact is unlocked immediately after you place a booking request for this goat.\n\nNo upfront payment is required.",
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,

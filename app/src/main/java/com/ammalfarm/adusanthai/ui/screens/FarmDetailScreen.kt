@@ -126,7 +126,7 @@ fun FarmDetailScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "This farm is currently ${farm.verificationStatus.name.lowercase()} and is not approved for public customer listings. Our marketplace only displays verified, compliant livestock breeders.",
+                            text = "This farm is currently ${farm.verificationStatus.name.lowercase()} and is not approved for public customer listings. Our marketplace only displays verified, compliant livestock farm owners.",
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             textAlign = TextAlign.Center,
@@ -509,7 +509,7 @@ fun FarmDetailScreen(
                                         )
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
-                                            text = "Verified Breeder",
+                                            text = "Verified Farm Owner",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 12.sp,
                                             color = Color(0xFF2E7D32)
@@ -586,7 +586,7 @@ fun FarmDetailScreen(
                         FarmStatBox(
                             icon = Icons.Default.VerifiedUser,
                             value = "Verified",
-                            label = "Breeder Status",
+                            label = "Farm Owner Status",
                             tint = Color(0xFF1976D2)
                         )
                         FarmStatBox(
@@ -997,7 +997,7 @@ fun FarmDetailScreen(
             },
             title = {
                 Text(
-                    text = "Report Breeder / Farm",
+                    text = "Report Farm Owner / Farm",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )

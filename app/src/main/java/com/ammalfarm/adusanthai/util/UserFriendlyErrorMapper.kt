@@ -136,7 +136,7 @@ object UserFriendlyErrorMapper {
         if (msg.contains("own farm") ||
             msg.contains("own listings") ||
             msg.contains("cannot book goats listed by your own farm") ||
-            msg.contains("breeders cannot place booking holds on their own")
+            msg.contains("farm owners cannot place booking holds on their own")
         ) {
             return "You cannot book goats listed by your own farm."
         }

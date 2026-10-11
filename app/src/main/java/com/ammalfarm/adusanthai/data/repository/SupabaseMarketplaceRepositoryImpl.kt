@@ -872,7 +872,7 @@ class SupabaseMarketplaceRepositoryImpl(
                 ?: "RCPT-APPR-${System.currentTimeMillis().toString().takeLast(6)}"
             val paymentReference = paymentRef?.trim()?.takeIf { it.isNotBlank() }
                 ?: "MANUAL-APPR-${validFarmId.take(6)}-${paymentId.take(6)}"
-            val slotsAdded = if (farm.goatListingLimit <= 0) 2 else 0
+            val slotsAdded = if (farm.goatListingLimit <= 0) com.ammalfarm.adusanthai.core.util.PlatformPricingManager.getPricing().defaultInitialSlots else 0
 
             val payment = ListingPayment(
                 id = paymentId,
@@ -924,62 +924,61 @@ class SupabaseMarketplaceRepositoryImpl(
         paymentRef: String?,
         receiptNumber: String?,
         notes: String?
-    ): Result<ListingPayment> = withContext(Dispatchers.IO) {
+    ): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val validFarmId = ensureValidUuid(farmId)
-            val farm = getFarmById(validFarmId).firstOrNull()
-                ?: return@withContext Result.failure(IllegalArgumentException("Farm not found: $farmId"))
-
             if (slotsToAdd <= 0) {
                 return@withContext Result.failure(IllegalArgumentException("Slots to add must be greater than 0"))
             }
 
-            val currentLimit = farm.goatListingLimit
-            val newLimit = currentLimit + slotsToAdd
+            if (!SupabaseConfig.isConfigured) {
+                return@withContext Result.failure(IllegalStateException("Supabase is not configured"))
+            }
+            val authUser = SupabaseModule.auth.currentUserOrNull()
+                ?: return@withContext Result.failure(IllegalStateException("Authentication required"))
+            
+            val profile = try {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
+                    .select { filter { eq("id", authUser.id) } }
+                    .decodeSingleOrNull<ProfileDto>()
+            } catch (_: Exception) { null }
 
-            val generatedRcpt = receiptNumber?.takeIf { it.isNotBlank() }
-                ?: "RCPT-QUOTA-${System.currentTimeMillis().toString().takeLast(6)}"
-            val paymentId = UUID.randomUUID().toString()
-
-            val payment = ListingPayment(
-                id = paymentId,
-                farmId = validFarmId,
-                farmName = farm.name,
-                amount = amount,
-                currency = "INR",
-                paymentType = "ADDITIONAL_QUOTA",
-                slotsAdded = slotsToAdd,
-                status = PaymentStatus.PAID,
-                orderId = paymentRef?.takeIf { it.isNotBlank() } ?: "MANUAL-QUOTA-${validFarmId.take(6)}",
-                razorpayPaymentId = paymentRef,
-                receiptNumber = generatedRcpt,
-                paymentMethod = "Manual Payment",
-                notes = notes ?: "Additional $slotsToAdd goat listing slots purchased (Limit: $currentLimit -> $newLimit)",
-                createdAt = System.currentTimeMillis()
-            )
-
-            // 1. Update listing limit
-            updateFarmListingLimit(validFarmId, newLimit)
-
-            // 2. Persist in local cache
-            FarmLocalCache.saveListingPayment(payment)
-
-            // 3. Persist in Supabase if configured
-            if (SupabaseConfig.isConfigured) {
-                try {
-                    val authUser = SupabaseModule.auth.currentUserOrNull()
-                    val payerId = farm.ownerId.ifBlank { authUser?.id ?: "" }
-                    val dto = ListingPaymentDto.fromDomain(payment, payerId = payerId)
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PAYMENTS].insert<ListingPaymentDto>(dto)
-                } catch (postgrestErr: Exception) {
-                    Log.w(TAG, "Notice: remote listing_payments insert deferred: ${postgrestErr.message}")
-                }
+            val isSuperAdmin = profile?.role == "SUPER_ADMIN"
+            if (!isSuperAdmin) {
+                return@withContext Result.failure(SecurityException("Unauthorized: Only Super Admin can increase listing quota"))
             }
 
-            Log.d(TAG, "Recorded quota payment receipt $generatedRcpt for farm ${farm.name} (+$slotsToAdd slots)")
-            Result.success(payment)
+            val farmDto = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                .select { filter { eq("id", validFarmId) } }
+                .decodeSingleOrNull<FarmDto>()
+                ?: return@withContext Result.failure(IllegalArgumentException("Farm not found: $farmId"))
+
+            val currentLimit = farmDto.goatListingLimit ?: com.ammalfarm.adusanthai.core.util.PlatformPricingManager.getPricing().defaultInitialSlots
+            val newLimit = currentLimit + slotsToAdd
+
+            val parameters = buildJsonObject {
+                put("p_farm_id", validFarmId)
+                put("p_limit", newLimit)
+            }
+            SupabaseModule.client.postgrest.rpc(
+                function = "admin_update_farm_listing_limit",
+                parameters = parameters
+            )
+
+            val verifyDto = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                .select { filter { eq("id", validFarmId) } }
+                .decodeSingleOrNull<FarmDto>()
+                ?: return@withContext Result.failure(IllegalStateException("Failed to verify farm quota update"))
+
+            val verifiedLimit = verifyDto.goatListingLimit ?: newLimit
+            if (verifiedLimit < newLimit) {
+                return@withContext Result.failure(IllegalStateException("Database confirmation failed: limit is $verifiedLimit, expected $newLimit"))
+            }
+
+            Log.i(TAG, "Farm $validFarmId listing limit successfully increased from $currentLimit to $newLimit by Super Admin")
+            Result.success(newLimit)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to record quota increase payment: ${e.message}", e)
+            Log.e(TAG, "Failed to increase quota: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -989,9 +988,10 @@ class SupabaseMarketplaceRepositoryImpl(
 
     override suspend fun updatePlatformPricing(
         approvalPrice: Double,
-        slotPrice: Double
+        slotPrice: Double,
+        defaultInitialSlots: Int
     ): Result<PlatformPricing> = withContext(Dispatchers.IO) {
-        com.ammalfarm.adusanthai.core.util.PlatformPricingManager.updatePricingRemote(approvalPrice, slotPrice)
+        com.ammalfarm.adusanthai.core.util.PlatformPricingManager.updatePricingRemote(approvalPrice, slotPrice, defaultInitialSlots)
     }
 
     override suspend fun initiateListingPayment(goatId: String): Result<ListingPaymentInitiation> = withContext(Dispatchers.IO) {

@@ -58,7 +58,7 @@ fun SuperAdminScreen(
     onDeleteFarm: (String) -> Unit = {},
     onApproveFarmWithPayment: (String, Double, String, String) -> Unit = { _, _, _, _ -> },
     onIncreaseFarmQuota: (String, Int, Double, String, String) -> Unit = { _, _, _, _, _ -> },
-    onUpdatePlatformPricing: (Double, Double) -> Unit = { _, _ -> },
+    onUpdatePlatformPricing: (Double, Double, Int) -> Unit = { _, _, _ -> },
     onUpdateFarmListingLimit: (String, Int) -> Unit = { _, _ -> },
     onUpdateUserSuspension: (String, Boolean) -> Unit = { _, _ -> },
     onUpdateReportStatus: (String, ReportStatus, String?) -> Unit = { _, _, _ -> },
@@ -422,8 +422,8 @@ fun SuperAdminScreen(
         SuperAdminPricingConfigDialog(
             currentPricing = uiState.platformPricing,
             onDismiss = { showPricingConfigDialog = false },
-            onSave = { approvalPrice, slotPrice ->
-                onUpdatePlatformPricing(approvalPrice, slotPrice)
+            onSave = { approvalPrice, slotPrice, defaultInitialSlots ->
+                onUpdatePlatformPricing(approvalPrice, slotPrice, defaultInitialSlots)
                 showPricingConfigDialog = false
             }
         )
@@ -1003,7 +1003,7 @@ private fun FarmAdminCard(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = farm.description.ifBlank { if (isAmmal) "Platform official breeder headquarters and sanctuary." else "Livestock breeding partner." },
+                text = farm.description.ifBlank { if (isAmmal) "Platform official farm owner headquarters and sanctuary." else "Livestock farm partner." },
                 fontSize = 12.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -1681,7 +1681,7 @@ private fun BookingAdminCard(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "Breeder: ${booking.farmName}",
+                        text = "Farm Owner: ${booking.farmName}",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -2265,7 +2265,7 @@ private fun SuperAdminFarmDetailDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(farm.name, fontWeight = FontWeight.Black, fontSize = 17.sp)
-                Text("Breeder / Owner: ${farm.ownerName}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Farm Owner: ${farm.ownerName}", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("District / Location: ${farm.location}, ${farm.state}", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                 Text("Contact Phone: ${farm.contactNumber}", fontSize = 12.sp)
                 Text("Email: ${farm.email}", fontSize = 12.sp)
@@ -3018,7 +3018,7 @@ private fun SuperAdminInvestigateReportDialog(
 
                 if (relatedFarm != null) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text("Related Farm / Breeder:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("Related Farm / Owner:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     Spacer(modifier = Modifier.height(4.dp))
                     Card(
                         shape = RoundedCornerShape(8.dp),
@@ -3637,57 +3637,62 @@ private fun SuperAdminListingFeesTab(
 fun SuperAdminPricingConfigDialog(
     currentPricing: com.ammalfarm.adusanthai.model.PlatformPricing,
     onDismiss: () -> Unit,
-    onSave: (approvalPrice: Double, slotPrice: Double) -> Unit
+    onSave: (approvalPrice: Double, slotPrice: Double, defaultInitialSlots: Int) -> Unit
 ) {
     var approvalPriceText by remember { mutableStateOf(currentPricing.farmApprovalPrice.toInt().toString()) }
     var slotPriceText by remember { mutableStateOf(currentPricing.additionalSlotPrice.toInt().toString()) }
-
+    var defaultSlotsText by remember { mutableStateOf(currentPricing.defaultInitialSlots.toString()) }
     val approvalPrice = approvalPriceText.toDoubleOrNull()
     val slotPrice = slotPriceText.toDoubleOrNull()
-    val isValid = approvalPrice != null && approvalPrice >= 0 && slotPrice != null && slotPrice >= 0
-
+    val defaultSlots = defaultSlotsText.toIntOrNull()
+    val isValid = approvalPrice != null && approvalPrice >= 0 && slotPrice != null && slotPrice >= 0 && defaultSlots != null && defaultSlots >= 0
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Configure Platform Pricing", fontWeight = FontWeight.Bold) },
+        title = { Text("Configure Platform Pricing & Slots", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Set dynamic fees for partner farm approvals and additional listing slots. (Changes only apply to new payments/registrations; existing accounts remain untouched).",
+                    "Set dynamic fees and default initial free listing slots for partner farm approvals and additional listing slots. (Changes apply to new registrations).",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
                 OutlinedTextField(
                     value = approvalPriceText,
                     onValueChange = { approvalPriceText = it },
-                    label = { Text("Partner Farm Approval Price (₹)") },
+                    label = { Text("Partner Farm Approval Fee (₹)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    supportingText = { Text("Includes 2 initial free listing slots") }
+                    shape = RoundedCornerShape(8.dp)
                 )
-
                 OutlinedTextField(
                     value = slotPriceText,
                     onValueChange = { slotPriceText = it },
                     label = { Text("Additional Listing Slot Price (₹/slot)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                OutlinedTextField(
+                    value = defaultSlotsText,
+                    onValueChange = { defaultSlotsText = it },
+                    label = { Text("Default Initial Listing Slots on Approval") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
-                    supportingText = { Text("Price per goat listing slot above 2") }
+                    supportingText = { Text("Free slots granted when a partner farm is approved") }
                 )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (isValid && approvalPrice != null && slotPrice != null) {
-                        onSave(approvalPrice, slotPrice)
+                    if (isValid && approvalPrice != null && slotPrice != null && defaultSlots != null) {
+                        onSave(approvalPrice, slotPrice, defaultSlots)
                     }
                 },
                 enabled = isValid
             ) {
-                Text("Save Pricing")
+                Text("Save Settings")
             }
         },
         dismissButton = {

@@ -232,6 +232,7 @@ data class AppNotification(
 data class PlatformPricing(
     val farmApprovalPrice: Double = 500.0,
     val additionalSlotPrice: Double = 150.0,
+    val defaultInitialSlots: Int = 2,
     val updatedAt: Long = System.currentTimeMillis()
 )
 

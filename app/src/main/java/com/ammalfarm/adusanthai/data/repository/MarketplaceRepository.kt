@@ -95,7 +95,7 @@ interface MarketplaceRepository {
         paymentRef: String? = null,
         receiptNumber: String? = null,
         notes: String? = null
-    ): Result<ListingPayment>
+    ): Result<Int>
     suspend fun initiateListingPayment(goatId: String): Result<ListingPaymentInitiation>
     suspend fun verifyListingPayment(goatId: String, orderId: String, paymentId: String, signature: String, amount: Double = 100.0): Result<PaymentVerificationResult>
     suspend fun recordPaymentFailure(goatId: String, orderId: String?, error: String): Result<Unit>
@@ -103,7 +103,7 @@ interface MarketplaceRepository {
 
     // Platform Pricing Configuration
     fun getPlatformPricing(): Flow<PlatformPricing>
-    suspend fun updatePlatformPricing(approvalPrice: Double, slotPrice: Double): Result<PlatformPricing>
+    suspend fun updatePlatformPricing(approvalPrice: Double, slotPrice: Double, defaultInitialSlots: Int): Result<PlatformPricing>
 
     // Platform Stats
     fun getPlatformStats(): Flow<PlatformStats>

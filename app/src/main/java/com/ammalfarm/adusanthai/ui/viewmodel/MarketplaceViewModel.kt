@@ -229,6 +229,13 @@ class MarketplaceViewModel(
                     _uiState.update { s -> s.copy(platformPricing = pricing) }
                 }
         }
+        viewModelScope.launch {
+            try {
+                com.ammalfarm.adusanthai.core.util.PlatformPricingManager.fetchPricingRemote()
+            } catch (e: Exception) {
+                Log.w("MarketplaceVM", "Failed to fetch initial remote pricing: ${e.message}")
+            }
+        }
 
         // Initially load public marketplace data accessible to everyone
         loadPublicMarketplaceData()
@@ -1039,7 +1046,7 @@ class MarketplaceViewModel(
 
                 val isAmmal = farm?.isAmmalOwnFarm == true || farm?.id == SEED_AMMAL_FARM_UUID
                 val isSuperAdmin = state.currentUser?.role == UserRole.SUPER_ADMIN
-                val limit = farm?.goatListingLimit ?: (if (isAmmal) 1000 else 2)
+                val limit = farm?.goatListingLimit ?: (if (isAmmal) 1000 else state.platformPricing.defaultInitialSlots)
 
                 // 1. Partner farm must be approved before adding goats
                 if (!isAmmal && !isSuperAdmin && farm?.verificationStatus != VerificationStatus.APPROVED) {
@@ -1415,9 +1422,9 @@ class MarketplaceViewModel(
                             if (it.id == farmId) it.copy(verificationStatus = status) else it
                         },
                         successMessage = when (status) {
-                            VerificationStatus.APPROVED -> "Farm verification APPROVED! Breeder badge active."
+                            VerificationStatus.APPROVED -> "Farm verification APPROVED! Farm Owner badge active."
                             VerificationStatus.REJECTED -> "Farm registration rejected."
-                            VerificationStatus.SUSPENDED -> "Farm suspended. Breeder listings restricted."
+                            VerificationStatus.SUSPENDED -> "Farm suspended. Farm Owner listings restricted."
                             VerificationStatus.PENDING -> "Farm reset to pending review."
                         }
                     )
@@ -1580,18 +1587,15 @@ class MarketplaceViewModel(
             )
             _uiState.update { it.copy(isLoading = false) }
 
-            result.onSuccess { payment ->
+            result.onSuccess { newLimit ->
                 val targetFarm = _uiState.value.farms.find { it.id == farmId }
-                val newLimit = (targetFarm?.goatListingLimit ?: 0) + slotsToAdd
                 _uiState.update { state ->
                     val updatedFarms = state.farms.map {
                         if (it.id == farmId) it.copy(goatListingLimit = newLimit) else it
                     }
-                    val updatedPayments = (listOf(payment) + state.listingPayments).distinctBy { it.id }
                     state.copy(
                         farms = updatedFarms,
-                        listingPayments = updatedPayments,
-                        successMessage = "Listing quota increased to $newLimit slots (+$slotsToAdd). Receipt #${payment.receiptNumber} recorded."
+                        successMessage = "Listing quota increased to $newLimit goats (+$slotsToAdd slots added)."
                     )
                 }
 
@@ -1602,7 +1606,7 @@ class MarketplaceViewModel(
                     recipientUserId = farmOwnerId,
                     targetRole = UserRole.FARM_ADMIN,
                     title = "Listing Quota Increased!",
-                    message = "Your farm listing limit is now $newLimit goats (+$slotsToAdd slots added). Receipt #${payment.receiptNumber} is available in Fee Receipts.",
+                    message = "Your farm listing limit has been increased by $slotsToAdd slots. Your new limit is $newLimit goats.",
                     type = NotificationType.LISTING_QUOTA_INCREASED,
                     referenceId = farmId,
                     deepLinkRoute = "farm_admin"
@@ -1624,18 +1628,19 @@ class MarketplaceViewModel(
     fun updatePlatformPricing(
         approvalPrice: Double,
         slotPrice: Double,
+        defaultInitialSlots: Int,
         onSuccess: () -> Unit = {}
     ) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val result = repository.updatePlatformPricing(approvalPrice, slotPrice)
+            val result = repository.updatePlatformPricing(approvalPrice, slotPrice, defaultInitialSlots)
             _uiState.update { it.copy(isLoading = false) }
 
             result.onSuccess { pricing ->
                 _uiState.update {
                     it.copy(
                         platformPricing = pricing,
-                        successMessage = "Platform pricing updated: Farm Approval = ₹${pricing.farmApprovalPrice.toInt()}, Additional Slot = ₹${pricing.additionalSlotPrice.toInt()}."
+                        successMessage = "Platform pricing updated: Farm Approval = ₹${pricing.farmApprovalPrice.toInt()}, Additional Slot = ₹${pricing.additionalSlotPrice.toInt()}, Default Slots = ${pricing.defaultInitialSlots}."
                     )
                 }
                 onSuccess()

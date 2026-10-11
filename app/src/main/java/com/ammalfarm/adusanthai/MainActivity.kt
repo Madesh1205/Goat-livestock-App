@@ -853,7 +853,7 @@ class MainActivity : ComponentActivity() {
                                             Toast.makeText(context, "You cannot book goats listed by your own farm.", Toast.LENGTH_LONG).show()
                                         } else if (authUiState.isAuthenticated || currentUser != null) {
                                             marketplaceViewModel.createBooking(goatId, notes) {
-                                                Toast.makeText(context, "24-Hour Reservation Placed! Farm breeder notified.", Toast.LENGTH_LONG).show()
+                                                Toast.makeText(context, "24-Hour Reservation Placed! Farm owner notified.", Toast.LENGTH_LONG).show()
                                                 navController.navigate(Screen.Orders.route)
                                             }
                                         } else {
@@ -1144,6 +1144,11 @@ class MainActivity : ComponentActivity() {
                                     marketplaceViewModel.updateFarmListingLimit(farmId, limit)
                                     Toast.makeText(context, "Farm goat listing limit updated to $limit.", Toast.LENGTH_SHORT).show()
                                 },
+                                onIncreaseFarmQuota = { farmId, slotsToAdd, amount, paymentRef, notes ->
+                                    marketplaceViewModel.increaseFarmListingQuota(farmId, slotsToAdd, amount, paymentRef, notes) {
+                                        Toast.makeText(context, "Listing quota increased successfully!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
                                 onUpdateUserSuspension = { userId, isSuspended ->
                                     marketplaceViewModel.updateUserSuspension(userId, isSuspended)
                                     val msg = if (isSuspended) "Customer account suspended." else "Customer account reactivated."
@@ -1160,6 +1165,11 @@ class MainActivity : ComponentActivity() {
                                 onUpdateBookingStatus = { bookingId, status ->
                                     marketplaceViewModel.updateBookingStatus(bookingId, status)
                                     Toast.makeText(context, "Booking status updated.", Toast.LENGTH_SHORT).show()
+                                },
+                                onUpdatePlatformPricing = { approvalPrice, slotPrice, defaultInitialSlots ->
+                                    marketplaceViewModel.updatePlatformPricing(approvalPrice, slotPrice, defaultInitialSlots) {
+                                        Toast.makeText(context, "Platform pricing updated successfully!", Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                                 onNavigateToAmmalFarm = {
                                     navController.navigate(Screen.FarmDashboard.route)
