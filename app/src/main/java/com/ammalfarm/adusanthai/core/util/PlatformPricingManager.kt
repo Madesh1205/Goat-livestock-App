@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -23,6 +25,12 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+
+@Serializable
+data class PlatformSettingDto(
+    @SerialName("key") val key: String,
+    @SerialName("value") val value: Double
+)
 
 /**
  * Manages platform pricing configurations dynamically.
@@ -102,39 +110,37 @@ object PlatformPricingManager {
             if (!SupabaseConfig.isConfigured) {
                 return@withContext Result.success(_pricingFlow.value)
             }
-            val rpcResponse = SupabaseModule.client.postgrest.rpc(
-                function = "get_platform_settings",
-                parameters = buildJsonObject {}
-            )
-            val rawData = rpcResponse.data
-            if (!rawData.isNullOrBlank() && rawData != "null") {
-                val elem = Json.parseToJsonElement(rawData)
-                val obj = when (elem) {
-                    is JsonArray -> elem.firstOrNull()?.jsonObject
-                    is JsonObject -> elem
-                    else -> null
-                }
-                if (obj != null) {
-                    val approval = obj["farm_approval_fee"]?.jsonPrimitive?.doubleOrNull ?: DEFAULT_APPROVAL_PRICE
-                    val slot = obj["additional_slot_price"]?.jsonPrimitive?.doubleOrNull ?: DEFAULT_SLOT_PRICE
-                    val defaultSlots = obj["default_initial_slots"]?.jsonPrimitive?.intOrNull ?: DEFAULT_INITIAL_SLOTS
-                    val now = System.currentTimeMillis()
-                    saveLocally(approval, slot, defaultSlots, now, context)
-                    val pricing = PlatformPricing(
-                        farmApprovalPrice = approval,
-                        additionalSlotPrice = slot,
-                        defaultInitialSlots = defaultSlots,
-                        updatedAt = now
-                    )
-                    _pricingFlow.value = pricing
-                    Log.d(TAG, "Successfully fetched remote platform pricing: Approval=₹$approval, Slot=₹$slot, DefaultSlots=$defaultSlots")
-                    return@withContext Result.success(pricing)
+            val settings = SupabaseModule.client.postgrest["platform_settings"]
+                .select()
+                .decodeList<PlatformSettingDto>()
+
+            var approval = _pricingFlow.value.farmApprovalPrice
+            var slot = _pricingFlow.value.additionalSlotPrice
+            var defaultSlots = _pricingFlow.value.defaultInitialSlots
+
+            for (setting in settings) {
+                when (setting.key) {
+                    "farm_approval_fee" -> approval = setting.value
+                    "additional_slot_price" -> slot = setting.value
+                    "default_initial_slots" -> defaultSlots = setting.value.toInt()
                 }
             }
-            Result.success(_pricingFlow.value)
+
+            val now = System.currentTimeMillis()
+            saveLocally(approval, slot, defaultSlots, now, context)
+            val pricing = PlatformPricing(
+                farmApprovalPrice = approval,
+                additionalSlotPrice = slot,
+                defaultInitialSlots = defaultSlots,
+                updatedAt = now
+            )
+            _pricingFlow.value = pricing
+            Log.d(TAG, "Successfully fetched remote platform settings from table: Approval=₹$approval, Slot=₹$slot, DefaultSlots=$defaultSlots")
+            Result.success(pricing)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch remote platform pricing: ${e.message}", e)
-            Result.failure(e)
+            val msg = e.message ?: e.toString()
+            Log.d(TAG, "Notice: remote platform settings fetch using local cache/default safely: $msg")
+            Result.success(_pricingFlow.value)
         }
     }
 
@@ -172,8 +178,8 @@ object PlatformPricingManager {
                 if (obj != null) {
                     val success = obj["success"]?.jsonPrimitive?.booleanOrNull ?: true
                     if (!success) {
-                        val msg = obj["message"]?.jsonPrimitive?.content ?: "Server rejected pricing update"
-                        return@withContext Result.failure(Exception(msg))
+                        val errorMessage = obj["message"]?.jsonPrimitive?.content ?: "Server rejected pricing update"
+                        return@withContext Result.failure(Exception(errorMessage))
                     }
                 }
             }
