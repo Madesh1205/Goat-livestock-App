@@ -689,10 +689,12 @@ class MarketplaceViewModel(
         _uiState.update { it.copy(filterCriteria = updated) }
     }
 
-    fun clearFilters() {
+    fun clearFilters(keepSearchAndLocation: Boolean = true) {
+        val current = _filterCriteria.value
         val reset = GoatFilterCriteria(
-            searchQuery = "",
-            sortBy = SortOption.RELEVANCE
+            searchQuery = if (keepSearchAndLocation) current.searchQuery else "",
+            location = if (keepSearchAndLocation) current.location else null,
+            sortBy = current.sortBy
         )
         _filterCriteria.value = reset
         _uiState.update { it.copy(filterCriteria = reset) }
@@ -1063,7 +1065,7 @@ class MarketplaceViewModel(
                 val farmGoatsCount = state.allAdminGoats.count {
                     it.farmId == goat.farmId || (farm != null && it.farmId == farm.id)
                 }
-                val consumedSlots = com.ammalfarm.adusanthai.core.util.FarmLocalCache.getConsumedListingSlots(goat.farmId, farmGoatsCount)
+                val consumedSlots = farm?.consumedListingSlots ?: farmGoatsCount
 
                 if (!isAmmal && !isSuperAdmin && consumedSlots >= limit) {
                     val slotPrice = state.platformPricing.additionalSlotPrice.toInt()

@@ -66,6 +66,7 @@ fun MarketplaceHomeScreen(
     onRemoveBreed: () -> Unit,
     onRemoveFarm: () -> Unit,
     onRemoveGender: () -> Unit,
+    onRemoveHornStatus: () -> Unit = {},
     onRemoveAge: () -> Unit,
     onRemoveWeight: () -> Unit,
     onRemovePrice: () -> Unit,
@@ -435,6 +436,200 @@ fun MarketplaceHomeScreen(
                                 tint = if (activeFilterCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(24.dp)
                             )
+                        }
+                    }
+                }
+
+                // --- LOCATION SELECTOR CONTROL (Immediately Below Search Bar) ---
+                val availableLocations = remember(uiState.approvedFarms, uiState.farms, uiState.goats) {
+                    val allFarms = (uiState.approvedFarms + uiState.farms).distinctBy { it.id }
+                    val farmLocs = allFarms.map { it.location.trim() }
+                    val goatLocs = uiState.goats.map { it.farmLocation.trim() }
+                    val farmStates = allFarms.map { it.state.trim() }
+                    val rawList = (farmLocs + goatLocs + farmStates).filter { it.isNotBlank() }
+
+                    val distinctLocs = mutableSetOf<String>()
+                    rawList.forEach { loc ->
+                        val parts = loc.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                        parts.forEach { distinctLocs.add(it) }
+                        if (loc.isNotBlank()) distinctLocs.add(loc)
+                    }
+
+                    distinctLocs
+                        .filter { it.isNotBlank() && !it.equals("All locations", ignoreCase = true) }
+                        .distinct()
+                        .sorted()
+                }
+
+                var locationDropdownExpanded by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = { locationDropdownExpanded = true },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (criteria.location.isNullOrBlank())
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        else
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        border = BorderStroke(
+                            0.5.dp,
+                            if (criteria.location.isNullOrBlank())
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                            else
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("marketplace_location_selector")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.LocationOn,
+                                    contentDescription = "Location",
+                                    tint = if (criteria.location.isNullOrBlank())
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    else
+                                        MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = criteria.location.takeIf { !it.isNullOrBlank() } ?: "All locations",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (criteria.location.isNullOrBlank()) FontWeight.Medium else FontWeight.Bold,
+                                    color = if (criteria.location.isNullOrBlank())
+                                        MaterialTheme.colorScheme.onSurface
+                                    else
+                                        MaterialTheme.colorScheme.onPrimaryContainer,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (!criteria.location.isNullOrBlank()) {
+                                    IconButton(
+                                        onClick = { onRemoveLocation() },
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .testTag("clear_location_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear Location",
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Select Location",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = locationDropdownExpanded,
+                            onDismissRequest = { locationDropdownExpanded = false },
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .heightIn(max = 320.dp)
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.AllInclusive,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            "All locations",
+                                            fontWeight = if (criteria.location.isNullOrBlank()) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    locationDropdownExpanded = false
+                                    onRemoveLocation()
+                                }
+                            )
+                            HorizontalDivider()
+
+                            if (availableLocations.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            "No location data available",
+                                            fontSize = 13.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    onClick = {},
+                                    enabled = false
+                                )
+                            } else {
+                                availableLocations.forEach { loc ->
+                                    val isSelected = criteria.location.equals(loc, ignoreCase = true)
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        Icons.Outlined.Place,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp),
+                                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Spacer(Modifier.width(8.dp))
+                                                    Text(
+                                                        loc,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                                if (isSelected) {
+                                                    Icon(
+                                                        Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            locationDropdownExpanded = false
+                                            onApplyCriteria(criteria.copy(location = loc))
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -928,6 +1123,7 @@ fun MarketplaceHomeScreen(
         GoatFilterBottomSheet(
             currentCriteria = criteria,
             availableFarms = uiState.approvedFarms,
+            allGoats = (uiState.goats + uiState.allAdminGoats).distinctBy { it.id },
             totalMatchingCount = uiState.goats.size,
             onApplyFilters = { newCriteria ->
                 onApplyCriteria(newCriteria)

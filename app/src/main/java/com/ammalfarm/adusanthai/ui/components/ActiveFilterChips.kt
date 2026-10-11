@@ -36,12 +36,18 @@ fun ActiveFilterChips(
     onRemoveBreed: () -> Unit,
     onRemoveFarm: () -> Unit,
     onRemoveGender: () -> Unit,
+    onRemoveHornStatus: () -> Unit = {},
     onRemoveAge: () -> Unit,
     onRemoveWeight: () -> Unit,
     onRemovePrice: () -> Unit,
-    onRemoveLocation: () -> Unit,
+    onRemoveLocation: () -> Unit = {},
     onRemoveAvailability: () -> Unit,
     onRemoveSearchQuery: () -> Unit,
+    onRemoveDeals: () -> Unit = {},
+    onRemoveVerifiedFarms: () -> Unit = {},
+    onRemoveRating: () -> Unit = {},
+    onRemoveNewArrivals: () -> Unit = {},
+    onRemoveHealth: () -> Unit = {},
     onClearAll: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -151,6 +157,16 @@ fun ActiveFilterChips(
                 onRemove = onRemoveAvailability
             )
         )
+    }
+
+    if (criteria.onlyDeals) {
+        chips.add(ActiveFilterChipModel("deals", "Deals", "Discounted Only", onRemoveDeals))
+    }
+    if (criteria.minRating != null) {
+        chips.add(ActiveFilterChipModel("rating", "Rating", "${criteria.minRating}★+", onRemoveRating))
+    }
+    if (criteria.isNewArrival) {
+        chips.add(ActiveFilterChipModel("new", "Arrivals", "Last 30 Days", onRemoveNewArrivals))
     }
 
     if (chips.isEmpty()) return

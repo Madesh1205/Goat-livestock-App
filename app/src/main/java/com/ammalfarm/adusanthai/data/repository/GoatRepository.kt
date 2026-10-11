@@ -105,13 +105,14 @@ class SupabaseGoatRepositoryImpl : GoatRepository {
                     .thenByDescending { it.isFeatured }
                     .thenByDescending { it.createdAt }
             )
+            SortOption.TOP_RATED -> filtered.sortedByDescending { it.rating }
             SortOption.PRICE_LOW_HIGH -> filtered.sortedBy { it.finalPrice }
             SortOption.PRICE_HIGH_LOW -> filtered.sortedByDescending { it.finalPrice }
-            SortOption.AGE_YOUNGEST -> filtered.sortedBy { it.ageMonths }
-            SortOption.AGE_OLDEST -> filtered.sortedByDescending { it.ageMonths }
+            SortOption.NEWEST -> filtered.sortedByDescending { it.createdAt }
             SortOption.WEIGHT_HEAVIEST -> filtered.sortedByDescending { it.weightKg }
             SortOption.WEIGHT_LIGHTEST -> filtered.sortedBy { it.weightKg }
-            SortOption.NEWEST -> filtered.sortedByDescending { it.createdAt }
+            SortOption.AGE_YOUNGEST -> filtered.sortedBy { it.ageMonths }
+            SortOption.AGE_OLDEST -> filtered.sortedByDescending { it.ageMonths }
         }
 
         emit(filtered)

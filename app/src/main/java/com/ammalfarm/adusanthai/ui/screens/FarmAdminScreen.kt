@@ -233,9 +233,9 @@ fun FarmAdminScreen(
     val pendingListings = myGoats.count { it.approvalStatus == ApprovalStatus.PENDING_APPROVAL }
     val activeBookings = myBookings.count { it.status == AvailabilityStatus.BOOKING_PENDING || it.status == AvailabilityStatus.RESERVED }
 
-    // Limit and Auto-Approval computations (permanent slot consumption)
-    val consumedListingSlots = remember(myGoats, myFarmId, totalGoats) {
-        com.ammalfarm.adusanthai.core.util.FarmLocalCache.getConsumedListingSlots(myFarmId, totalGoats)
+    // Limit and Auto-Approval computations (consumed slot accounting)
+    val consumedListingSlots = remember(myGoats, myFarmId, totalGoats, myFarm) {
+        myFarm?.consumedListingSlots ?: totalGoats
     }
     val goatListingLimit = myFarm?.goatListingLimit ?: (if (isAmmalFarm) 1000 else if (isFarmApproved) uiState.platformPricing.defaultInitialSlots else 0)
     val isLimitReached = !isAmmalFarm && !isSuperAdmin && (consumedListingSlots >= goatListingLimit || !isFarmApproved)

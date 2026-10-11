@@ -202,6 +202,7 @@ fun FarmDetailScreen(
                     .thenByDescending { it.isFeatured }
                     .thenByDescending { it.createdAt }
             )
+            SortOption.TOP_RATED -> list.sortedByDescending { it.rating }
             SortOption.PRICE_LOW_HIGH -> list.sortedBy { it.finalPrice }
             SortOption.PRICE_HIGH_LOW -> list.sortedByDescending { it.finalPrice }
             SortOption.NEWEST -> list.sortedByDescending { it.createdAt }
@@ -953,7 +954,7 @@ fun FarmDetailScreen(
                     }
                 }
             } else {
-                items(filteredFarmGoats, key = { it.id }) { goat ->
+                items(items = filteredFarmGoats, key = { it.id }) { goat ->
                     val isWishlisted = uiState.wishlistGoatIds.contains(goat.id)
                     if (farmViewMode == ViewMode.GRID) {
                         GoatGridCard(

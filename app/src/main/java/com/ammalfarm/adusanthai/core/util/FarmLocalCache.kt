@@ -118,6 +118,7 @@ object FarmLocalCache {
                 put("totalReviews", farm.totalReviews)
                 put("totalGoatsListed", farm.totalGoatsListed)
                 put("goatListingLimit", farm.goatListingLimit)
+                put("consumedListingSlots", farm.consumedListingSlots ?: -1)
             }
             prefs.edit()
                 .putString("farm_${farm.id}", json.toString())
@@ -184,7 +185,8 @@ object FarmLocalCache {
                 rating = obj.optDouble("rating", 5.0),
                 totalReviews = obj.optInt("totalReviews", 0),
                 totalGoatsListed = obj.optInt("totalGoatsListed", 0),
-                goatListingLimit = obj.optInt("goatListingLimit", 2)
+                goatListingLimit = obj.optInt("goatListingLimit", 2),
+                consumedListingSlots = obj.optInt("consumedListingSlots", -1).takeIf { it >= 0 }
             )
             if (!isValidFarm(farm)) {
                 removeCachedFarm(targetId, context)
@@ -257,6 +259,7 @@ object FarmLocalCache {
                     put("totalReviews", farm.totalReviews)
                     put("totalGoatsListed", farm.totalGoatsListed)
                     put("goatListingLimit", farm.goatListingLimit)
+                    put("consumedListingSlots", farm.consumedListingSlots ?: -1)
                 }
                 array.put(obj)
                 if (!farm.logoUrl.isNullOrBlank()) {
@@ -315,7 +318,8 @@ object FarmLocalCache {
                     rating = obj.optDouble("rating", 5.0),
                     totalReviews = obj.optInt("totalReviews", 0),
                     totalGoatsListed = obj.optInt("totalGoatsListed", 0),
-                    goatListingLimit = obj.optInt("goatListingLimit", 2)
+                    goatListingLimit = obj.optInt("goatListingLimit", 2),
+                    consumedListingSlots = obj.optInt("consumedListingSlots", -1).takeIf { it >= 0 }
                 )
                 if (isValidFarm(farm)) {
                     list.add(farm)
@@ -336,12 +340,8 @@ object FarmLocalCache {
     fun getConsumedListingSlots(farmId: String, currentGoatsCount: Int = 0, context: Context? = null): Int {
         if (!isValidUuid(farmId)) return currentGoatsCount
         val prefs = getPrefs(context) ?: return currentGoatsCount
-        val stored = prefs.getInt("consumed_slots_$farmId", 0)
-        val maxConsumed = maxOf(stored, currentGoatsCount)
-        if (maxConsumed > stored) {
-            prefs.edit().putInt("consumed_slots_$farmId", maxConsumed).apply()
-        }
-        return maxConsumed
+        prefs.edit().putInt("consumed_slots_$farmId", currentGoatsCount).apply()
+        return currentGoatsCount
     }
 
     fun recordListingSlotConsumed(farmId: String, context: Context? = null): Int {

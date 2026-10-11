@@ -311,6 +311,7 @@ data class FarmDto(
     @SerialName("updated_at") val updatedAt: String? = null,
     @Transient val tagline: String? = null,
     @SerialName("goat_listing_limit") val goatListingLimit: Int? = 0,
+    @SerialName("consumed_listing_slots") val consumedListingSlots: Int? = null,
     val rating: Double = 0.0,
     @SerialName("review_count") val reviewCount: Int = 0
 ) {
@@ -354,6 +355,7 @@ data class FarmDto(
             totalReviews = reviewCount,
             totalGoatsListed = totalGoats,
             goatListingLimit = effectiveLimit,
+            consumedListingSlots = consumedListingSlots ?: totalGoats,
             createdAt = parsedCreatedAt
         )
     }
@@ -376,6 +378,7 @@ data class FarmDto(
                 status = if (isAmmal) "APPROVED" else domain.verificationStatus.name,
                 isAmmalOwnFarm = isAmmal,
                 goatListingLimit = domain.goatListingLimit,
+                consumedListingSlots = domain.consumedListingSlots,
                 description = domain.description.takeIf { it.isNotBlank() },
                 logoUrl = domain.logoUrl.takeIf { it.isNotBlank() },
                 bannerUrl = domain.bannerUrl.takeIf { it.isNotBlank() },

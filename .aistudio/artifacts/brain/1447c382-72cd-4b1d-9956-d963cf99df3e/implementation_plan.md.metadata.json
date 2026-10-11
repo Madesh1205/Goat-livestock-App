@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for replacing 'Goat breeder' terminology with 'Farm owner' across the Adu Santhai application.",
-  "updatedAt":  "2026-10-11T01:51:45.936174328Z",
+  "summary":  "Implementation plan for restructuring Amazon-style filter UI categories in Adu Santhai app. Combines Gender, Age, and Weight into Goat Specs, combines Sort By and New Arrivals into Sorting & New Arrivals, and completely removes Farm Verification, Health & Docs, and Horn Status filters.",
+  "updatedAt":  "2026-10-11T15:08:31.711928230Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

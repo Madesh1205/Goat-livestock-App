@@ -99,6 +99,7 @@ data class Farm(
     val totalReviews: Int = 0,
     val totalGoatsListed: Int = 0,
     val goatListingLimit: Int = 2,
+    val consumedListingSlots: Int? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -387,15 +388,22 @@ data class PlatformReport(
     val resolvedAt: Long? = null
 )
 
+enum class HornStatus(val displayName: String) {
+    HORNED("Horned"),
+    DEHORNED("Dehorned"),
+    POLLED("Polled / Hornless")
+}
+
 enum class SortOption(val displayName: String) {
     RELEVANCE("Relevance"),
+    TOP_RATED("Top Rated"),
+    NEWEST("Newest First"),
     PRICE_LOW_HIGH("Price: Low to High"),
     PRICE_HIGH_LOW("Price: High to Low"),
-    NEWEST("Newest First"),
-    AGE_YOUNGEST("Age: Youngest"),
-    AGE_OLDEST("Age: Oldest"),
     WEIGHT_HEAVIEST("Weight: Heaviest"),
-    WEIGHT_LIGHTEST("Weight: Lightest")
+    WEIGHT_LIGHTEST("Weight: Lightest"),
+    AGE_YOUNGEST("Age: Youngest"),
+    AGE_OLDEST("Age: Oldest")
 }
 
 data class GoatFilterCriteria(
@@ -404,6 +412,7 @@ data class GoatFilterCriteria(
     val farmId: String? = null,
     val farmName: String? = null,
     val gender: GoatGender? = null,
+    val hornStatus: HornStatus? = null,
     val minAgeMonths: Int? = null,
     val maxAgeMonths: Int? = null,
     val minWeightKg: Double? = null,
@@ -413,6 +422,11 @@ data class GoatFilterCriteria(
     val purpose: GoatPurpose? = null,
     val location: String? = null,
     val availability: AvailabilityStatus? = null,
+    val onlyDeals: Boolean = false,
+    val verifiedFarmsOnly: Boolean = false,
+    val minRating: Double? = null,
+    val isNewArrival: Boolean = false,
+    val healthCertifiedOnly: Boolean = false,
     val sortBy: SortOption = SortOption.RELEVANCE
 ) {
     val activeFilterCount: Int
@@ -421,12 +435,18 @@ data class GoatFilterCriteria(
             if (breed != null) count++
             if (farmId != null || farmName != null) count++
             if (gender != null) count++
+            if (hornStatus != null) count++
             if (minAgeMonths != null || maxAgeMonths != null) count++
             if (minWeightKg != null || maxWeightKg != null) count++
             if (minPrice != null || maxPrice != null) count++
             if (purpose != null) count++
             if (!location.isNullOrBlank()) count++
             if (availability != null) count++
+            if (onlyDeals) count++
+            if (verifiedFarmsOnly) count++
+            if (minRating != null) count++
+            if (isNewArrival) count++
+            if (healthCertifiedOnly) count++
             return count
         }
 
@@ -462,6 +482,17 @@ data class GoatFilterCriteria(
         // Gender filter
         if (gender != null && goat.gender != gender) return false
 
+        // Horn status filter
+        if (hornStatus != null) {
+            val desc = goat.description.lowercase()
+            val matchesHorn = when (hornStatus) {
+                HornStatus.HORNED -> desc.contains("horned") || (!desc.contains("dehorned") && !desc.contains("polled") && !desc.contains("hornless"))
+                HornStatus.DEHORNED -> desc.contains("dehorned") || desc.contains("disbudded")
+                HornStatus.POLLED -> desc.contains("polled") || desc.contains("hornless") || desc.contains("no horn")
+            }
+            if (!matchesHorn) return false
+        }
+
         // Age range filter
         if (minAgeMonths != null && goat.ageMonths < minAgeMonths) return false
         if (maxAgeMonths != null && goat.ageMonths > maxAgeMonths) return false
@@ -487,6 +518,25 @@ data class GoatFilterCriteria(
 
         // Availability filter
         if (availability != null && goat.availabilityStatus != availability) return false
+
+        // Deals / Discounts
+        if (onlyDeals && !goat.hasDiscount) return false
+
+        // Verified Farms Only
+        if (verifiedFarmsOnly && !goat.isFeatured && !goat.farmName.contains("verified", ignoreCase = true)) return false
+
+        // Customer Rating
+        if (minRating != null && goat.rating < minRating) return false
+
+        // New Arrivals (added in last 30 days)
+        if (isNewArrival && (System.currentTimeMillis() - goat.createdAt > 30L * 24 * 60 * 60 * 1000L)) return false
+
+        // Health / Vaccinated
+        if (healthCertifiedOnly) {
+            val desc = goat.description.lowercase()
+            val hasHealth = desc.contains("vaccin") || desc.contains("health") || desc.contains("certif") || desc.contains("vet") || desc.contains("deworm")
+            if (!hasHealth) return false
+        }
 
         return true
     }
