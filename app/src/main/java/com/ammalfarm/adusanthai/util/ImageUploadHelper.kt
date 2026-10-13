@@ -700,6 +700,12 @@ object ImageUploadHelper {
         return SupabaseConfig.resolveStorageUrl(storagePathOrUrl, SupabaseConfig.BUCKET_GOAT_IMAGES)
     }
 
+    fun extractStoragePath(url: String, bucketName: String = SupabaseConfig.BUCKET_GOAT_IMAGES): String {
+        if (!url.contains(bucketName)) return url
+        val parts = url.split("$bucketName/")
+        return if (parts.size > 1) parts[1] else url
+    }
+
     suspend fun uploadToSupabase(
         bytes: ByteArray,
         farmId: String,

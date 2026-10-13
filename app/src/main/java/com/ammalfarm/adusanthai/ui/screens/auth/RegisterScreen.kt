@@ -48,7 +48,7 @@ fun RegisterScreen(
     val consentManager = remember(policyConsentManager) {
         policyConsentManager ?: com.ammalfarm.adusanthai.core.util.PolicyConsentManager(context)
     }
-    var selectedTab by remember { mutableIntStateOf(if (initialFarmMode) 1 else 0) } // 0: Customer, 1: Farm Partner
+    var selectedTab by remember(initialFarmMode) { mutableIntStateOf(if (initialFarmMode) 1 else 0) } // 0: Customer, 1: Farm Partner
 
     // Common fields
     var fullName by remember { mutableStateOf("") }

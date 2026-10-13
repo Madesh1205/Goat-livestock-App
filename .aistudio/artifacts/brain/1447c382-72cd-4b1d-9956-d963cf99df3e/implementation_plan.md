@@ -1,56 +1,21 @@
-# Implementation Plan - Comprehensive End-to-End Code Audit
+# Implementation Plan - Fix Farm Admin Account Creation
 
-Audit all primary user journeys (Customer, Farm Partner, and Super Admin) and verify complete functionality from signup/authentication through booking, listing management, admin approval, and database policies.
-
-## User Review Required
-
-> [!IMPORTANT]
-> Please review the audit plan below covering the 3 user roles and backend architecture. Click **Proceed** to execute the audit and generate the comprehensive report.
-
----
-
-## 1. Scope of Audit
-
-### User Journey 1: Customer Flow
-- **Sign Up & Login**: Validate registration, profile sync, session persistence, and default `CUSTOMER` role assignment.
-- **Marketplace Browsing**: Validate goat listing display, search/filter logic, breed filtering, district location filtering, and farm seller details.
-- **Booking / Ordering**: Validate booking modal, mandatory field validation, booking submission, and order history tracking (`OrdersScreen`).
-- **Profile & Settings**: Validate profile updates, theme switching, and terms/privacy web views.
-
-### User Journey 2: Farm Partner Flow
-- **Registration**: Validate farm partner registration, automatic creation of farm record (`status = PENDING`, `goatListingLimit = 0`), and profile-to-farm linking.
-- **Farm Portal Access Guard**: Verify `isFarmPartnerOrAdmin()` role guard prevents demotion to `CUSTOMER` upon navigating to the Farm Dashboard.
-- **Goat Listing Management**: Verify adding, editing, and deleting goat listings, including strict enforcement of allocated listing quota slots.
-- **Order Fulfillment**: Verify booking status transitions (CONFIRMED, REJECTED, COMPLETED) by farm owners.
-
-### User Journey 3: Super Admin Flow
-- **Admin Console Access**: Verify strict access control restricting `SuperAdminDashboard` to `SUPER_ADMIN` users.
-- **Farm Approval Workflow**: Verify reviewing pending farm applications, approving/rejecting farms, and adjusting allocated listing quotas (`goat_listing_limit`).
-- **Platform Analytics & Oversight**: Verify global listing views, order tracking, and platform status monitoring.
-
-### Backend, Database & Security Audit
-- **Supabase Integration & RLS**: Verify SQL tables (`profiles`, `farms`, `goats`, `bookings`), foreign keys, and Row-Level Security policies.
-- **Repository Data Layer**: Verify error handling, coroutine flows, offline cache fallbacks (`FarmLocalCache`), and network resilience in `AuthRepository`, `GoatRepository`, and `MarketplaceViewModel`.
-- **Compilation Check**: Execute `compile_applet` to confirm zero syntax or build errors across all files.
-
----
+## Problem
+When a user registers as a Farm Partner (Farm Admin), the account is created as a Customer or fails to persist the `FARM_ADMIN` role and associated farm profile due to database trigger security guard constraints (`enforce_profile_security_guard`) overriding or preventing role updates from `CUSTOMER` to `FARM_ADMIN`.
 
 ## Proposed Changes
 
-1. **Perform Code Inspection Across Key Source Files**:
-   - `MainActivity.kt` (routing, role guards, tab bar)
-   - `AuthRepository.kt` & `AuthViewModel.kt` (authentication, profile/farm resolution)
-   - `GoatRepository.kt` & `MarketplaceViewModel.kt` (data fetching, listing management, booking handlers)
-   - `RegisterScreen.kt`, `ProfileScreen.kt`, `MarketplaceHomeScreen.kt`, `FarmAdminScreen.kt`, `SuperAdminDashboardScreen.kt` (UI views)
-   - `supabase/migrations/` (RLS policies, triggers, and functions)
+### 1. Database & Security Trigger Adjustment (`supabase/migrations/`)
+- Update `enforce_profile_security_guard()` in database functions and migrations to allow the initial role assignment or allow setting `FARM_ADMIN` during profile creation/upsert when transitioning from unassigned or during signup, while still protecting against unauthorized privilege escalation to `SUPER_ADMIN`.
+- Ensure `handle_new_auth_user()` and profile upsert logic in `AuthRepository` correctly handle `FARM_ADMIN` role persistence without being blocked by `NEW.role := OLD.role;`.
 
-2. **Run Verification**:
-   - Run `compile_applet` to verify compilation.
-   - Summarize code audit results, highlighting tested components, verified guarantees, and current system health.
+### 2. Authentication Repository & Local Fallback (`AuthRepository.kt`)
+- Ensure `registerFarmAdmin` correctly passes and retains `FARM_ADMIN` role and provisions the farm record atomically.
+- In local mock mode (`!SupabaseConfig.isConfigured`), ensure `registerFarmAdmin` correctly saves `FARM_ADMIN` role and farm association to persistent local cache and state.
 
----
+### 3. Verification & Testing
+- Test farm admin registration flow locally and via unit/Robolectric tests to confirm successful creation of Farm Admin accounts and farm profiles.
 
 ## Verification Plan
-
-### Automated Build Verification
-- Execute `compile_applet` to confirm complete applet compilation with zero errors.
+- Run tests and compile applet to verify clean build.
+- Verify through code audit that farm admin registration successfully creates both user profile (`FARM_ADMIN`) and farm record (`VERIFICATION_STATUS = PENDING`).

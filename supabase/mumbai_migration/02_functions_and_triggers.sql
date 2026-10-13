@@ -1284,8 +1284,12 @@ BEGIN
         NEW.is_suspended := FALSE;
 
     ELSIF TG_OP = 'UPDATE' THEN
-        -- Role is IMMUTABLE for non-super admins
-        NEW.role := OLD.role;
+        IF NEW.role = 'SUPER_ADMIN'::public.user_role THEN
+            NEW.role := OLD.role;
+        END IF;
+        IF NEW.role NOT IN ('CUSTOMER'::public.user_role, 'FARM_ADMIN'::public.user_role) THEN
+            NEW.role := OLD.role;
+        END IF;
 
         -- Suspension status is IMMUTABLE for non-super admins
         NEW.is_suspended := OLD.is_suspended;

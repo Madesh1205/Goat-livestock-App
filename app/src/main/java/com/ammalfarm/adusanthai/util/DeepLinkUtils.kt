@@ -245,6 +245,7 @@ object DeepLinkUtils {
                     "notifications"
                 }
             }
+            else -> "marketplace"
         }
     }
 }

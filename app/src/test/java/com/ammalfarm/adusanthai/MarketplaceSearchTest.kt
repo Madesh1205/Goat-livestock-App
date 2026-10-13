@@ -287,9 +287,9 @@ class MarketplaceSearchTest {
         override suspend fun recordPaymentFailure(goatId: String, orderId: String?, error: String): Result<Unit> = Result.success(Unit)
         override suspend fun recordPaymentCancellation(goatId: String, orderId: String?): Result<Unit> = Result.success(Unit)
         override suspend fun recordFarmApprovalPayment(farmId: String, amount: Double, paymentRef: String?, receiptNumber: String?, notes: String?): Result<ListingPayment> = Result.failure(NotImplementedError())
-        override suspend fun recordQuotaIncreasePayment(farmId: String, slotsToAdd: Int, amount: Double, paymentRef: String?, receiptNumber: String?, notes: String?): Result<ListingPayment> = Result.failure(NotImplementedError())
+        override suspend fun recordQuotaIncreasePayment(farmId: String, slotsToAdd: Int, amount: Double, paymentRef: String?, receiptNumber: String?, notes: String?): Result<Int> = Result.failure(NotImplementedError())
         override fun getPlatformPricing(): Flow<PlatformPricing> = flowOf(PlatformPricing())
-        override suspend fun updatePlatformPricing(approvalPrice: Double, slotPrice: Double): Result<PlatformPricing> = Result.success(PlatformPricing(approvalPrice, slotPrice))
+        override suspend fun updatePlatformPricing(approvalPrice: Double, slotPrice: Double, defaultInitialSlots: Int): Result<PlatformPricing> = Result.success(PlatformPricing(approvalPrice, slotPrice, defaultInitialSlots))
 
         override fun getPlatformStats(): Flow<PlatformStats> = flowOf(PlatformStats())
     }
