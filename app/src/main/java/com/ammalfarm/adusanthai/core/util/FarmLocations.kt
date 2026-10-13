@@ -5,7 +5,9 @@ package com.ammalfarm.adusanthai.core.util
  */
 object FarmLocations {
     val TAMIL_NADU_DISTRICTS = listOf(
+        "Ambur",
         "Ariyalur",
+        "Attur",
         "Chengalpattu",
         "Chennai",
         "Coimbatore",
@@ -13,17 +15,22 @@ object FarmLocations {
         "Dharmapuri",
         "Dindigul",
         "Erode",
+        "Hosur",
         "Kallakurichi",
         "Kanchipuram",
         "Kanyakumari",
         "Karur",
+        "Kovilpatti",
         "Krishnagiri",
         "Madurai",
         "Mayiladuthurai",
         "Nagapattinam",
         "Namakkal",
         "Nilgiris",
+        "Palani",
         "Perambalur",
+        "Pollachi",
+        "Puducherry",
         "Pudukkottai",
         "Ramanathapuram",
         "Ranipet",
@@ -42,14 +49,7 @@ object FarmLocations {
         "Tiruvarur",
         "Vellore",
         "Viluppuram",
-        "Virudhunagar",
-        "Pollachi",
-        "Puducherry",
-        "Hosur",
-        "Palani",
-        "Kovilpatti",
-        "Attur",
-        "Ambur"
+        "Virudhunagar"
     )
 
     /**

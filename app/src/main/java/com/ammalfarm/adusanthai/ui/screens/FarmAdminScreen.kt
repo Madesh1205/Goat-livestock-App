@@ -89,8 +89,12 @@ fun FarmAdminScreen(
     var showPendingBlockedAlert by remember { mutableStateOf(false) }
 
     val currentUser = uiState.currentUser
+    val hasFarm = currentUser?.id?.let { uid ->
+        FarmLocalCache.getAllCachedFarms().any { it.ownerId == uid } ||
+        uiState.farms.any { it.ownerId == uid }
+    } ?: false
     val isSuperAdmin = currentUser?.role == UserRole.SUPER_ADMIN
-    val isFarmAdmin = currentUser?.role == UserRole.FARM_ADMIN
+    val isFarmAdmin = currentUser?.role == UserRole.FARM_ADMIN || hasFarm
     val isAuthorized = isSuperAdmin || isFarmAdmin
 
     if (!isAuthorized) {

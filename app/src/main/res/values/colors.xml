@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="splash_brand_green">#064B2D</color>
     <color name="farm_primary">#006D3B</color>
     <color name="farm_primary_dark">#7DDA9B</color>
     <color name="farm_primary_container">#99F7B5</color>

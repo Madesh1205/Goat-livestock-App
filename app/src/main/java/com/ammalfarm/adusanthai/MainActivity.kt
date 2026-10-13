@@ -35,6 +35,7 @@ import com.ammalfarm.adusanthai.core.notification.NotificationConfig
 import com.ammalfarm.adusanthai.core.notification.NotificationHelper
 import com.ammalfarm.adusanthai.core.notification.NotificationSyncWorker
 import com.ammalfarm.adusanthai.core.supabase.SupabaseConfig
+import com.ammalfarm.adusanthai.core.util.FarmLocalCache
 import com.ammalfarm.adusanthai.model.AvailabilityStatus
 import com.ammalfarm.adusanthai.model.UserRole
 import com.ammalfarm.adusanthai.ui.components.DatabaseConnectionErrorScreen
@@ -268,7 +269,7 @@ class MainActivity : ComponentActivity() {
                     marketplaceViewModel.clearPendingDeepLink()
                 }
 
-                val currentRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
+                val currentRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: app.container.authRepository.currentUser.value?.role ?: UserRole.CUSTOMER
                 val unreadNotifsCount = remember(uiState.notifications, currentRole) {
                     uiState.notifications.count { !it.isRead && (it.targetRole == currentRole || it.targetRole == UserRole.CUSTOMER) }
                 }
@@ -398,9 +399,27 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                val isDatabaseConnected = SupabaseConfig.isConfigured && !(uiState.networkError != null && uiState.goats.isEmpty() && uiState.farms.isEmpty() && !uiState.isLoading)
+                val isFarmPartnerOrAdmin: () -> Boolean = {
+                    val u = authUiState.currentUser ?: uiState.currentUser ?: app.container.authRepository.currentUser.value
+                    val hasFarm = u?.id?.let { uid ->
+                        FarmLocalCache.getAllCachedFarms().any { farm -> farm.ownerId == uid } ||
+                        uiState.farms.any { farm -> farm.ownerId == uid } ||
+                        app.container.authRepository.currentFarm.value?.ownerId == uid
+                    } ?: false
+                    u?.role == UserRole.FARM_ADMIN || u?.role == UserRole.SUPER_ADMIN || hasFarm
+                }
 
-                if (!isDatabaseConnected) {
+                var isSplashTimeoutExceeded by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.delay(1200L)
+                    isSplashTimeoutExceeded = true
+                }
+                val isDatabaseConnected = SupabaseConfig.isConfigured && !(uiState.networkError != null && uiState.goats.isEmpty() && uiState.farms.isEmpty() && !uiState.isLoading)
+                val isResolvingAuth = authUiState.isLoading && !isSplashTimeoutExceeded
+
+                if (isResolvingAuth) {
+                    com.ammalfarm.adusanthai.ui.screens.SplashScreen()
+                } else if (!isDatabaseConnected) {
                     DatabaseConnectionErrorScreen(
                         errorMessage = uiState.networkError ?: if (!SupabaseConfig.isConfigured) "Database not connected: Supabase configuration (SUPABASE_URL and SUPABASE_ANON_KEY) is missing or unconfigured." else null,
                         isRetrying = uiState.isRetrying,
@@ -592,8 +611,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onNavigateToFarmAdmin = {
-                                    val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
-                                    if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
+                                    if (isFarmPartnerOrAdmin()) {
                                         navController.navigate(Screen.FarmDashboard.route)
                                     } else {
                                         Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
@@ -631,8 +649,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onNavigateToFarmAdmin = {
-                                    val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
-                                    if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
+                                    if (isFarmPartnerOrAdmin()) {
                                         navController.navigate(Screen.FarmDashboard.route)
                                     } else {
                                         Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
@@ -709,8 +726,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onNavigateToFarmAdmin = {
-                                    val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
-                                    if (authoritativeRole == UserRole.FARM_ADMIN || authoritativeRole == UserRole.SUPER_ADMIN) {
+                                    if (isFarmPartnerOrAdmin()) {
                                         navController.navigate(Screen.FarmDashboard.route)
                                     } else {
                                         Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
@@ -928,8 +944,8 @@ class MainActivity : ComponentActivity() {
 
                         // --- FARM ADMIN ROUTE (GUARDED) ---
                         composable(Screen.FarmDashboard.route) {
-                            val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
-                            if (authoritativeRole == UserRole.CUSTOMER) {
+                            val isAllowed = isFarmPartnerOrAdmin()
+                            if (!isAllowed && !authUiState.isLoading) {
                                 LaunchedEffect(Unit) {
                                     Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
                                     navController.navigate(Screen.Marketplace.route) {
@@ -937,7 +953,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 com.ammalfarm.adusanthai.ui.screens.FarmAdminAccessDeniedView(
-                                    currentRole = authoritativeRole.name,
+                                    currentRole = authUiState.currentUser?.role?.name ?: uiState.currentUser?.role?.name ?: "CUSTOMER",
                                     onNavigateBack = {
                                         navController.navigate(Screen.Marketplace.route) {
                                             popUpTo(Screen.FarmDashboard.route) { inclusive = true }
@@ -1002,8 +1018,8 @@ class MainActivity : ComponentActivity() {
 
                         // --- FARM ADMIN BOOKINGS ROUTE (GUARDED / REDIRECTED TO UNIFIED ORDERS) ---
                         composable(Screen.FarmBookings.route) {
-                            val authoritativeRole = authUiState.currentUser?.role ?: uiState.currentUser?.role ?: UserRole.CUSTOMER
-                            if (authoritativeRole == UserRole.CUSTOMER) {
+                            val isAllowed = isFarmPartnerOrAdmin()
+                            if (!isAllowed && !authUiState.isLoading) {
                                 LaunchedEffect(Unit) {
                                     Toast.makeText(context, "Access Denied: Farm Partner access required.", Toast.LENGTH_SHORT).show()
                                     navController.navigate(Screen.Marketplace.route) {
@@ -1011,7 +1027,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 com.ammalfarm.adusanthai.ui.screens.FarmAdminAccessDeniedView(
-                                    currentRole = authoritativeRole.name,
+                                    currentRole = authUiState.currentUser?.role?.name ?: uiState.currentUser?.role?.name ?: "CUSTOMER",
                                     onNavigateBack = {
                                         navController.navigate(Screen.Marketplace.route) {
                                             popUpTo(Screen.FarmBookings.route) { inclusive = true }

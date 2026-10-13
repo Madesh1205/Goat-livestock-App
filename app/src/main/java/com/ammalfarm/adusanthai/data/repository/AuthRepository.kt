@@ -277,16 +277,58 @@ class AuthRepositoryImpl(
 
             val profileRoleParsed = profileDto?.role?.let { UserRole.fromString(it) }
 
-            val rawRole = when {
-                isDesignatedSuperAdminEmail -> "SUPER_ADMIN"
-                profileRoleParsed != null -> profileDto!!.role
-                !metadataRoleStr.isNullOrBlank() -> metadataRoleStr
-                else -> _currentUser.value?.role?.name ?: "CUSTOMER"
+            // Check if user owns any registered farm in Supabase or local cache
+            val ownsFarm = try {
+                if (!networkErrorEncountered && targetId.isNotBlank()) {
+                    val farmCount = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select { filter { eq("owner_id", targetId) } }
+                        .decodeList<FarmDto>()
+                    farmCount.isNotEmpty()
+                } else false
+            } catch (_: Exception) { false }
+
+            val ownsFarmByEmail = try {
+                if (!networkErrorEncountered && !ownsFarm && targetEmail.isNotBlank()) {
+                    val farmCount = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select { filter { eq("contact_email", targetEmail) } }
+                        .decodeList<FarmDto>()
+                    farmCount.isNotEmpty()
+                } else false
+            } catch (_: Exception) { false }
+
+            val cachedRole = prefs?.getString("cached_user_role", null)?.let { UserRole.fromString(it) }
+            val inMemoryRole = _currentUser.value?.takeIf { it.id == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) }?.role
+            val hasLocalFarm = FarmLocalCache.getAllCachedFarms().any { it.ownerId == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) } ||
+                (_currentFarm.value?.let { it.ownerId == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) } == true) ||
+                (!_currentUser.value?.farmId.isNullOrBlank() && FarmLocalCache.getCachedFarm(_currentUser.value!!.farmId!!)?.let { it.ownerId == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) } == true)
+
+            val isSuperAdmin = isDesignatedSuperAdminEmail ||
+                profileRoleParsed == UserRole.SUPER_ADMIN ||
+                metadataRoleStr?.uppercase() == "SUPER_ADMIN"
+
+            val isFarmAdmin = !isSuperAdmin && (
+                profileRoleParsed == UserRole.FARM_ADMIN ||
+                metadataRoleStr?.uppercase() == "FARM_ADMIN" ||
+                metadataRoleStr?.uppercase() == "GOAT_BREEDER" ||
+                metadataRoleStr?.uppercase() == "BREEDER" ||
+                ownsFarm ||
+                ownsFarmByEmail ||
+                hasLocalFarm ||
+                inMemoryRole == UserRole.FARM_ADMIN ||
+                cachedRole == UserRole.FARM_ADMIN
+            )
+
+            var detectedRole = when {
+                isSuperAdmin -> UserRole.SUPER_ADMIN
+                isFarmAdmin -> UserRole.FARM_ADMIN
+                profileRoleParsed != null -> profileRoleParsed
+                !metadataRoleStr.isNullOrBlank() -> UserRole.fromString(metadataRoleStr)
+                inMemoryRole != null -> inMemoryRole
+                cachedRole != null -> cachedRole
+                else -> UserRole.CUSTOMER
             }
 
-            var detectedRole = UserRole.fromString(rawRole)
-
-            if (isDesignatedSuperAdminEmail || profileRoleParsed == UserRole.SUPER_ADMIN || metadataRoleStr?.uppercase() == "SUPER_ADMIN") {
+            if (isSuperAdmin) {
                 detectedRole = UserRole.SUPER_ADMIN
                 if (profileDto != null && UserRole.fromString(profileDto.role) != UserRole.SUPER_ADMIN) {
                     try {
@@ -298,26 +340,31 @@ class AuthRepositoryImpl(
                         Log.w("AuthRepository", "Notice: Updating profile role to SUPER_ADMIN for $targetEmail: ${e.message}")
                     }
                 }
+            } else if (detectedRole == UserRole.FARM_ADMIN && profileDto != null && UserRole.fromString(profileDto.role) != UserRole.FARM_ADMIN) {
+                // If remote profile was stored as CUSTOMER, attempt to persist FARM_ADMIN on server
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
+                        .update(buildJsonObject { put("role", "FARM_ADMIN") }) {
+                            filter { eq("id", targetId) }
+                        }
+                } catch (e: Exception) {
+                    Log.w("AuthRepository", "Notice: Updating profile role to FARM_ADMIN for $targetEmail: ${e.message}")
+                }
             }
 
             var effectiveFarmId: String? = null
 
-            if (!networkErrorEncountered) {
-                try {
-                    if (detectedRole == UserRole.SUPER_ADMIN) {
-                        // Super Admin real farm resolution from database:
-                        // 1. First look for farms owned by this user
+            try {
+                if (detectedRole == UserRole.SUPER_ADMIN) {
+                    // Super Admin real farm resolution from database:
+                    var ammalFarm: FarmDto? = null
+                    if (!networkErrorEncountered) {
                         val ownedFarms = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                            .select {
-                                filter {
-                                    eq("owner_id", targetId)
-                                }
-                            }.decodeList<FarmDto>()
+                            .select { filter { eq("owner_id", targetId) } }.decodeList<FarmDto>()
 
-                        val ammalFarm = if (ownedFarms.isNotEmpty()) {
+                        ammalFarm = if (ownedFarms.isNotEmpty()) {
                             ownedFarms.first()
                         } else {
-                            // 2. Look for central hub farm by SEED_AMMAL_FARM_UUID or is_ammal_own_farm
                             val hubFarms = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
                                 .select {
                                     filter {
@@ -327,77 +374,107 @@ class AuthRepositoryImpl(
                                         }
                                     }
                                 }.decodeList<FarmDto>()
-
-                            // Only use if unassigned or owned by targetId. Do NOT reassign on the fly without backend operation!
                             hubFarms.find { it.ownerId == targetId || it.ownerId.isBlank() }
                         }
+                    }
 
-                        if (ammalFarm != null) {
-                            effectiveFarmId = ammalFarm.id
-                            val farmObj = ammalFarm.toDomain()
-                            _currentFarm.value = farmObj
-                            FarmLocalCache.saveFarmProfile(farmObj)
-                        } else {
-                            _currentFarm.value = null
-                            effectiveFarmId = null
+                    if (ammalFarm != null) {
+                        effectiveFarmId = ammalFarm.id
+                        val farmObj = ammalFarm.toDomain()
+                        _currentFarm.value = farmObj
+                        FarmLocalCache.saveFarmProfile(farmObj)
+                    } else {
+                        val cached = FarmLocalCache.getCachedFarm(SEED_AMMAL_FARM_UUID)
+                            ?: FarmLocalCache.getAllCachedFarms().find { it.ownerId == targetId || it.isAmmalOwnFarm }
+                        if (cached != null) {
+                            effectiveFarmId = cached.id
+                            _currentFarm.value = cached
                         }
-                    } else if (detectedRole == UserRole.FARM_ADMIN) {
-                        // Farm Admin: Resolve farm owned by this user
-                        val ownedFarms = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                            .select {
-                                filter {
-                                    eq("owner_id", targetId)
-                                }
-                            }.decodeList<FarmDto>()
+                    }
+                } else if (detectedRole == UserRole.FARM_ADMIN) {
+                    // Farm Admin: Resolve farm owned by this user
+                    var adminFarmObj: Farm? = null
+
+                    if (!networkErrorEncountered) {
+                        val ownedFarms = try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                                .select { filter { eq("owner_id", targetId) } }.decodeList<FarmDto>()
+                        } catch (_: Exception) { emptyList() }
 
                         if (ownedFarms.isNotEmpty()) {
-                            val adminFarm = ownedFarms.first()
-                            effectiveFarmId = adminFarm.id
-                            val farmObj = adminFarm.toDomain()
-                            _currentFarm.value = farmObj
-                            FarmLocalCache.saveFarmProfile(farmObj)
-                        } else if (!profileDto?.farmId.isNullOrBlank() && FarmLocalCache.isValidUuid(profileDto.farmId)) {
-                            // Verify farm relationship
-                            val candidateId = profileDto.farmId!!
-                            val fetched = fetchFarmDto(candidateId)
-                            if (fetched != null && fetched.ownerId == targetId) {
-                                effectiveFarmId = fetched.id
-                                val farmObj = fetched.toDomain()
-                                _currentFarm.value = farmObj
-                                FarmLocalCache.saveFarmProfile(farmObj)
-                            } else {
-                                Log.w("AuthRepository", "Farm $candidateId does not belong to Farm Admin $targetId")
-                                _currentFarm.value = null
-                                effectiveFarmId = null
+                            adminFarmObj = ownedFarms.first().toDomain()
+                        } else if (targetEmail.isNotBlank()) {
+                            val byEmail = try {
+                                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                                    .select { filter { eq("contact_email", targetEmail) } }.decodeList<FarmDto>()
+                            } catch (_: Exception) { emptyList() }
+                            if (byEmail.isNotEmpty()) {
+                                adminFarmObj = byEmail.first().toDomain()
                             }
-                        } else {
-                            _currentFarm.value = null
-                            effectiveFarmId = null
+                        }
+                    }
+
+                    // Fallback to memory or local farm cache if remote returned empty
+                    if (adminFarmObj == null) {
+                        adminFarmObj = _currentFarm.value?.takeIf { it.ownerId == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) }
+                            ?: FarmLocalCache.getAllCachedFarms().find { it.ownerId == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) }
+                            ?: profileDto?.farmId?.takeIf { FarmLocalCache.isValidUuid(it) }?.let { FarmLocalCache.getCachedFarm(it) }?.takeIf { it.ownerId == targetId || (targetEmail.isNotBlank() && it.email.equals(targetEmail, ignoreCase = true)) }
+                            ?: _currentUser.value?.farmId?.takeIf { FarmLocalCache.isValidUuid(it) }?.let { FarmLocalCache.getCachedFarm(it) }
+                    }
+
+                    if (adminFarmObj != null) {
+                        effectiveFarmId = adminFarmObj.id
+                        _currentFarm.value = adminFarmObj
+                        FarmLocalCache.saveFarmProfile(adminFarmObj)
+
+                        if (!networkErrorEncountered && !ownsFarm && !ownsFarmByEmail) {
+                            try {
+                                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].upsert(
+                                    FarmDto.fromDomain(adminFarmObj)
+                                )
+                            } catch (fe: Exception) {
+                                Log.w("AuthRepository", "Notice: Server farm sync in profile resolution: ${fe.message}")
+                            }
                         }
                     } else {
-                        // Customer: NEVER receives farm ownership relationship
-                        _currentFarm.value = null
-                        effectiveFarmId = null
-                    }
-                } catch (farmErr: Exception) {
-                    Log.w("AuthRepository", "Error checking farm ownership: ${farmErr.message}")
-                }
-            } else {
-                // Offline fallback: ONLY use verified cached farm if owned by this user
-                if (detectedRole == UserRole.SUPER_ADMIN || detectedRole == UserRole.FARM_ADMIN) {
-                    val cached = FarmLocalCache.getAllCachedFarms().find { it.ownerId == targetId && FarmLocalCache.isValidFarm(it) }
-                        ?: (profileDto?.farmId?.let { FarmLocalCache.getCachedFarm(it) }?.takeIf { it.ownerId == targetId && FarmLocalCache.isValidFarm(it) })
-                    if (cached != null) {
-                        _currentFarm.value = cached
-                        effectiveFarmId = cached.id
-                    } else {
-                        _currentFarm.value = null
-                        effectiveFarmId = null
+                        // Generate reliable fallback farm for new Farm Admin
+                        val fallbackFarmId = profileDto?.farmId?.takeIf { FarmLocalCache.isValidUuid(it) }
+                            ?: _currentUser.value?.farmId?.takeIf { FarmLocalCache.isValidUuid(it) }
+                            ?: UUID.randomUUID().toString()
+                        val placeholderFarm = Farm(
+                            id = fallbackFarmId,
+                            name = if (targetEmail.isNotBlank()) "${targetEmail.substringBefore("@").replaceFirstChar { it.uppercase() }} Farm" else "Partner Farm",
+                            ownerId = targetId,
+                            ownerName = if (targetEmail.isNotBlank()) targetEmail.substringBefore("@") else "Partner",
+                            location = "Tamil Nadu",
+                            state = "Tamil Nadu",
+                            contactNumber = "",
+                            email = targetEmail,
+                            description = "",
+                            verificationStatus = VerificationStatus.PENDING,
+                            isAmmalOwnFarm = false,
+                            goatListingLimit = 0
+                        )
+                        effectiveFarmId = placeholderFarm.id
+                        _currentFarm.value = placeholderFarm
+                        FarmLocalCache.saveFarmProfile(placeholderFarm)
+                        if (!networkErrorEncountered) {
+                            try {
+                                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].upsert(
+                                    FarmDto.fromDomain(placeholderFarm)
+                                )
+                            } catch (fe: Exception) {
+                                Log.w("AuthRepository", "Notice: Server fallback farm creation in profile resolution: ${fe.message}")
+                            }
+                        }
                     }
                 } else {
+                    // Customer: NEVER receives farm ownership relationship
                     _currentFarm.value = null
                     effectiveFarmId = null
                 }
+            } catch (farmErr: Exception) {
+                Log.w("AuthRepository", "Error checking farm ownership: ${farmErr.message}")
             }
 
             val finalFullName = profileDto?.fullName?.takeIf { it.isNotBlank() }
@@ -457,22 +534,29 @@ class AuthRepositoryImpl(
             if (existing != null) {
                 Result.success(existing)
             } else {
+                val cachedRole = prefs?.getString("cached_user_role", null)?.let { UserRole.fromString(it) } ?: UserRole.CUSTOMER
+                val cachedFarmId = prefs?.getString("cached_user_farm_id", null)
+                val fallbackFarm = cachedFarmId?.let { FarmLocalCache.getCachedFarm(it) }
+                    ?: FarmLocalCache.getAllCachedFarms().find { it.ownerId == targetId }
                 val fallback = UserProfile(
                     id = targetId,
                     email = targetEmail,
-                    name = if (targetEmail.isNotBlank()) targetEmail.substringBefore("@").replaceFirstChar { it.uppercase() } else "Customer",
-                    phone = "",
-                    role = UserRole.CUSTOMER,
-                    farmId = null
+                    name = prefs?.getString("cached_user_name", null)?.takeIf { it.isNotBlank() }
+                        ?: (if (targetEmail.isNotBlank()) targetEmail.substringBefore("@").replaceFirstChar { it.uppercase() } else "User"),
+                    phone = prefs?.getString("cached_user_phone", null) ?: "",
+                    role = cachedRole,
+                    farmId = cachedFarmId ?: fallbackFarm?.id
                 )
                 _currentUser.value = fallback
-                _currentFarm.value = null
+                if (fallbackFarm != null) {
+                    _currentFarm.value = fallbackFarm
+                }
                 saveCachedProfile(fallback)
                 _authState.update {
                     it.copy(
                         isAuthenticated = true,
                         userProfile = fallback,
-                        userFarm = null
+                        userFarm = _currentFarm.value
                     )
                 }
                 Result.success(fallback)
@@ -616,14 +700,25 @@ class AuthRepositoryImpl(
                     cleanEmail.lowercase().startsWith("admin@") ||
                     user.userMetadata?.get("role")?.toString()?.contains("SUPER_ADMIN", ignoreCase = true) == true -> UserRole.SUPER_ADMIN
                     user.userMetadata?.get("role")?.toString()?.contains("FARM_ADMIN", ignoreCase = true) == true -> UserRole.FARM_ADMIN
+                    _currentUser.value?.role == UserRole.FARM_ADMIN -> UserRole.FARM_ADMIN
+                    prefs?.getString("cached_user_role", null) == "FARM_ADMIN" -> UserRole.FARM_ADMIN
+                    FarmLocalCache.getAllCachedFarms().any { it.ownerId == user.id || it.email.equals(cleanEmail, ignoreCase = true) } -> UserRole.FARM_ADMIN
                     else -> UserRole.CUSTOMER
                 }
-                val profile = profileResult.getOrNull() ?: UserProfile(
+                val fetched = profileResult.getOrNull()
+                val finalRole = when {
+                    fetched?.role == UserRole.SUPER_ADMIN || fallbackRole == UserRole.SUPER_ADMIN -> UserRole.SUPER_ADMIN
+                    fetched?.role == UserRole.FARM_ADMIN || fallbackRole == UserRole.FARM_ADMIN -> UserRole.FARM_ADMIN
+                    else -> fetched?.role ?: fallbackRole
+                }
+                val profile = (fetched ?: UserProfile(
                     id = user.id,
                     email = user.email ?: cleanEmail,
                     name = user.userMetadata?.get("full_name")?.toString()?.replace("\"", "") ?: cleanEmail.substringBefore("@"),
-                    role = fallbackRole
-                )
+                    role = finalRole
+                )).let { p ->
+                    if (p.role != finalRole) p.copy(role = finalRole) else p
+                }
                 _currentUser.value = profile
                 saveCachedProfile(profile)
                 _authState.update {
@@ -1006,42 +1101,104 @@ class AuthRepositoryImpl(
                 // 1. profile (FARM_ADMIN)
                 // 2. partner farm (owner_id = realUserId, status = PENDING, is_ammal_own_farm = false)
                 // 3. linked profile.farm_id = farm.id
-                // Reload and sync the resulting profile and farm from the database. No duplicate farm creation!
-                val syncedProfile = fetchAndSyncUserProfile(realUserId).getOrNull() ?: UserProfile(
+                // Reload and sync the resulting profile and farm from the database.
+                val fetchedProfile = fetchAndSyncUserProfile(realUserId).getOrNull()
+                
+                // If backend trigger left role as CUSTOMER or unassigned due to signup payload fallback, enforce FARM_ADMIN explicitly
+                val syncedProfile = (fetchedProfile ?: UserProfile(
                     id = realUserId,
                     email = cleanEmail,
                     name = cleanName,
                     phone = cleanPhone,
                     role = UserRole.FARM_ADMIN
-                )
-
-                val syncedFarm = _currentFarm.value ?: run {
-                    val fallbackFarm = Farm(
-                        id = syncedProfile.farmId ?: UUID.randomUUID().toString(),
-                        name = cleanFarmName,
-                        ownerId = realUserId,
-                        ownerName = cleanName,
-                        location = if (cleanDistrict.isNotBlank()) "$cleanDistrict, Tamil Nadu" else "Tamil Nadu",
-                        state = "Tamil Nadu",
-                        contactNumber = cleanPhone,
-                        email = cleanEmail,
-                        description = cleanDescription,
-                        verificationStatus = VerificationStatus.PENDING,
-                        isAmmalOwnFarm = false,
-                        goatListingLimit = 0
-                    )
-                    _currentFarm.value = fallbackFarm
-                    FarmLocalCache.saveFarmProfile(fallbackFarm)
-                    fallbackFarm
+                )).let { p ->
+                    if (p.role != UserRole.SUPER_ADMIN && p.role != UserRole.FARM_ADMIN) {
+                        p.copy(role = UserRole.FARM_ADMIN)
+                    } else p
                 }
 
-                val finalProfile = if (syncedProfile.farmId.isNullOrBlank()) {
-                    syncedProfile.copy(farmId = syncedFarm.id)
-                } else syncedProfile
+                // Ensure farm is resolved or provisioned in Supabase
+                var syncedFarm = _currentFarm.value
+                if (syncedFarm == null) {
+                    val existingOwnedFarm = try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                            .select { filter { eq("owner_id", realUserId) } }
+                            .decodeList<FarmDto>()
+                            .firstOrNull()?.toDomain()
+                    } catch (_: Exception) { null }
+
+                    syncedFarm = existingOwnedFarm ?: run {
+                        val generatedFarmId = syncedProfile.farmId?.takeIf { FarmLocalCache.isValidUuid(it) } ?: UUID.randomUUID().toString()
+                        val nowIso = currentIsoTimestamp()
+                        val newFarm = Farm(
+                            id = generatedFarmId,
+                            name = cleanFarmName,
+                            ownerId = realUserId,
+                            ownerName = cleanName,
+                            location = if (cleanDistrict.isNotBlank()) "$cleanDistrict, Tamil Nadu" else "Tamil Nadu",
+                            state = "Tamil Nadu",
+                            contactNumber = cleanPhone,
+                            email = cleanEmail,
+                            description = cleanDescription,
+                            verificationStatus = VerificationStatus.PENDING,
+                            isAmmalOwnFarm = false,
+                            goatListingLimit = 0
+                        )
+                        try {
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].upsert(
+                                FarmDto(
+                                    id = generatedFarmId,
+                                    name = cleanFarmName,
+                                    ownerId = realUserId,
+                                    tagline = null,
+                                    description = cleanDescription.takeIf { it.isNotBlank() },
+                                    locationDistrict = cleanDistrict.ifBlank { null },
+                                    locationState = "Tamil Nadu",
+                                    address = if (cleanDistrict.isNotBlank()) "$cleanDistrict, Tamil Nadu" else "Tamil Nadu",
+                                    contactPhone = cleanPhone.ifBlank { null },
+                                    contactEmail = cleanEmail.ifBlank { null },
+                                    status = "PENDING",
+                                    isAmmalOwnFarm = false,
+                                    goatListingLimit = 0,
+                                    rating = 5.0,
+                                    reviewCount = 0,
+                                    createdAt = nowIso,
+                                    updatedAt = nowIso
+                                )
+                            )
+                        } catch (fe: Exception) {
+                            Log.w("AuthRepository", "Notice: Server farm upsert during signup: ${fe.message}")
+                        }
+                        FarmLocalCache.saveFarmProfile(newFarm)
+                        newFarm
+                    }
+                }
+
+                // Explicitly update profile on server with role FARM_ADMIN and farm_id
+                try {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].upsert(
+                        ProfileDto(
+                            id = realUserId,
+                            email = cleanEmail,
+                            fullName = syncedProfile.name.ifBlank { cleanName },
+                            phone = syncedProfile.phone.ifBlank { cleanPhone },
+                            role = "FARM_ADMIN",
+                            farmId = syncedFarm.id
+                        )
+                    )
+                } catch (pe: Exception) {
+                    Log.w("AuthRepository", "Notice: Syncing profile role to FARM_ADMIN: ${pe.message}")
+                }
+
+                val finalProfile = syncedProfile.copy(
+                    role = UserRole.FARM_ADMIN,
+                    farmId = syncedFarm.id
+                )
 
                 _currentUser.value = finalProfile
                 _currentFarm.value = syncedFarm
                 saveCachedProfile(finalProfile)
+                FarmLocalCache.saveFarmProfile(syncedFarm)
                 _authState.update {
                     it.copy(
                         isLoading = false,
@@ -1166,7 +1323,7 @@ class AuthRepositoryImpl(
                                 Log.w("AuthRepository", "Notice: Server farm sync on existing user: ${fe.message}")
                             }
 
-                            val newRole = existingProfile?.role ?: UserRole.FARM_ADMIN
+                            val newRole = UserRole.FARM_ADMIN
                             val updatedProfile = (existingProfile ?: UserProfile(
                                 id = realUserId,
                                 email = cleanEmail,

@@ -105,9 +105,9 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.height(12.dp))
 
-            // App Brand Logo & Title
+            // App Brand Logo & Title (Recommended size: 120–160 dp)
             com.ammalfarm.adusanthai.ui.components.AduSanthaiLogoBadge(
-                size = 88.dp,
+                size = 140.dp,
                 elevation = 6.dp
             )
 

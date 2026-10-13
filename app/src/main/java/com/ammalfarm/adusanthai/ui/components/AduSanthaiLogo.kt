@@ -68,7 +68,7 @@ fun AduSanthaiLogoBadge(
 @Composable
 fun AduSanthaiTopBarBrand(
     modifier: Modifier = Modifier,
-    badgeSize: Dp = 38.dp,
+    badgeSize: Dp = 40.dp,
     onBrandClick: (() -> Unit)? = null
 ) {
     Row(
