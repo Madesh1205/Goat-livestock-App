@@ -100,14 +100,37 @@ class AuthRepository(private val context: Context) {
         farmDescription: String
     ): Result<UserProfile> {
         return try {
-            prefs.edit().putString("cached_user_role", UserRole.FARM_ADMIN.name).apply()
+            // The database auth.users trigger creates the profile and pending farm atomically.
+            // Keep metadata keys aligned with handle_new_auth_user().
             SupabaseModule.auth.signUpWith(Email) {
-                this.email = email
+                this.email = email.trim()
                 this.password = password
-                data = kotlinx.serialization.json.JsonObject(mapOf("name" to kotlinx.serialization.json.JsonPrimitive(name), "role" to kotlinx.serialization.json.JsonPrimitive("FARM_ADMIN")))
+                data = kotlinx.serialization.json.JsonObject(
+                    mapOf(
+                        "full_name" to kotlinx.serialization.json.JsonPrimitive(name.trim()),
+                        "phone" to kotlinx.serialization.json.JsonPrimitive(phone.trim()),
+                        "role" to kotlinx.serialization.json.JsonPrimitive("FARM_ADMIN"),
+                        "farm_name" to kotlinx.serialization.json.JsonPrimitive(farmName.trim()),
+                        "farm_district" to kotlinx.serialization.json.JsonPrimitive(farmDistrict.trim()),
+                        "farm_description" to kotlinx.serialization.json.JsonPrimitive(farmDescription.trim())
+                    )
+                )
             }
-            val profile = UserProfile(name = name, email = email, phone = phone, role = UserRole.FARM_ADMIN)
-            val farm = Farm(name = farmName, location = farmDistrict, description = farmDescription)
+
+            val session = SupabaseModule.auth.currentSessionOrNull()
+            prefs.edit().putString("cached_user_role", UserRole.FARM_ADMIN.name).apply()
+            val profile = UserProfile(
+                id = session?.user?.id ?: "",
+                name = name.trim(),
+                email = email.trim(),
+                phone = phone.trim(),
+                role = UserRole.FARM_ADMIN
+            )
+            val farm = Farm(
+                name = farmName.trim(),
+                location = farmDistrict.trim(),
+                description = farmDescription.trim()
+            )
             _authState.update { it.copy(userProfile = profile, userFarm = farm) }
             Result.success(profile)
         } catch (e: Exception) {
