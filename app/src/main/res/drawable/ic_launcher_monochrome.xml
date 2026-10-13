@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Clean monochrome goat logo silhouette centered within adaptive icon safe zone -->
+    <!-- Left Horn -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43,42 C39,33 31,28 26,30 C24,31 24.5,33 26,34 C31,36 36,41 38,47 Z" />
+
+    <!-- Right Horn -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M65,42 C69,33 77,28 82,30 C84,31 83.5,33 82,34 C77,36 72,41 70,47 Z" />
+
+    <!-- Left Ear -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M37,49 C30,51 23,55 23,59 C23,62 26,63 28,61 C33,58 38,55 41,53 Z" />
+
+    <!-- Right Ear -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M71,49 C78,51 85,55 85,59 C85,62 82,63 80,61 C75,58 70,55 67,53 Z" />
+
+    <!-- Goat Head Shield -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M54,32 C42,32 37,40 37,52 C37,62 42,70 47,77 C50,81 52,82 54,82 C56,82 58,81 61,77 C66,70 71,62 71,52 C71,40 66,32 54,32 Z M49,52 C49,49 51,47 54,47 C57,47 59,49 59,52 C59,55 57,57 54,57 C51,57 49,55 49,52 Z" />
+
+    <!-- Goat Beard -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,81 L54,91 L58,81 Z" />
+</vector>

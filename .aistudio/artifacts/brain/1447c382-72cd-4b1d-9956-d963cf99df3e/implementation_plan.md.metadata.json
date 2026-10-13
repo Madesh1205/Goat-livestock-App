@@ -1,6 +1,6 @@
 {
-  "summary":  "Plan to clean up location display across Adu Santhai to show only clean, distinct district names in location selectors, filters, goat cards, and detail screens.",
-  "updatedAt":  "2026-10-11T16:00:02.558566926Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Implementation plan to generate the standalone installable APK in the root directory for direct testing and Firebase App Distribution, resolving the AAB App bundle setup requirement.",
+  "updatedAt": "2026-10-12T16:59:28.064258523Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

@@ -130,8 +130,10 @@ object NotificationHelper {
             )
 
             val notificationId = notificationCounter.incrementAndGet()
+
             val builder = NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setColor(0xFFFFFFFF.toInt())
                 .setContentTitle(notification.title)
                 .setContentText(notification.message)
                 .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)

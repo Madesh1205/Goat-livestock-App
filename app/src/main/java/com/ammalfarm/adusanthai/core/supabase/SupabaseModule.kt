@@ -37,10 +37,10 @@ object SupabaseModule {
     fun createCustomOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .retryOnConnectionFailure(true)
-            .pingInterval(20, TimeUnit.SECONDS)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(25, TimeUnit.SECONDS)
-            .writeTimeout(25, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS) // 0 for long-lived Realtime WebSocket streaming
+            .writeTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 
@@ -73,7 +73,9 @@ object SupabaseModule {
             }
             install(Postgrest)
             install(Storage)
-            install(Realtime)
+            install(Realtime) {
+                reconnectDelay = kotlin.time.Duration.parse("15s")
+            }
         }
     }
 

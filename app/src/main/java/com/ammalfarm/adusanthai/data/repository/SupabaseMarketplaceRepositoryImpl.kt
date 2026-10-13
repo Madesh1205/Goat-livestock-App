@@ -415,16 +415,31 @@ class SupabaseMarketplaceRepositoryImpl(
                 }
             }
 
-            try {
-                channel.subscribe()
-            } catch (subErr: Throwable) {
-                if (subErr is CancellationException) throw subErr
-                Log.w(TAG, "Notice: Realtime websocket unavailable, falling back to REST polling: ${subErr.message}")
+            val activeChannel = channel
+            if (activeChannel != null) {
+                launch {
+                    try {
+                        activeChannel.status.collect { status ->
+                            if (status == RealtimeChannel.Status.UNSUBSCRIBED) {
+                                try {
+                                    SupabaseModule.client.realtime.removeChannel(activeChannel)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+
                 try {
-                    channel.unsubscribe()
-                    SupabaseModule.client.realtime.removeChannel(channel)
-                } catch (_: Exception) {}
-                channel = null
+                    activeChannel.subscribe()
+                } catch (subErr: Throwable) {
+                    if (subErr is CancellationException) throw subErr
+                    Log.w(TAG, "Notice: Realtime websocket unavailable, falling back to REST polling: ${subErr.message}")
+                    try {
+                        activeChannel.unsubscribe()
+                        SupabaseModule.client.realtime.removeChannel(activeChannel)
+                    } catch (_: Exception) {}
+                    channel = null
+                }
             }
         } catch (e: Throwable) {
             if (e is CancellationException) throw e
@@ -437,9 +452,9 @@ class SupabaseMarketplaceRepositoryImpl(
             channel = null
         }
 
-        // 3. Fallback periodic refresh (every 20s) to keep notifications updated
+        // 3. Fallback periodic refresh (15s if no realtime, 30s otherwise) to keep notifications updated
         pollingJob = launch {
-            var pollingIntervalMs = 60_000L
+            var pollingIntervalMs = if (channel == null) 15_000L else 30_000L
             while (isActive) {
                 delay(pollingIntervalMs)
                 if (!isActive) break

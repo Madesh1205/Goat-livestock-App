@@ -89,7 +89,9 @@ class SupabaseClient(
             }
             install(Postgrest)
             install(Storage)
-            install(Realtime)
+            install(Realtime) {
+                reconnectDelay = kotlin.time.Duration.parse("15s")
+            }
         }
     }
 
