@@ -1075,13 +1075,16 @@ class AuthRepositoryImpl(
                 val isDbError = signupErr.message?.contains("Database error saving new user", ignoreCase = true) == true ||
                     signupErr.message?.contains("unexpected_failure", ignoreCase = true) == true
                 if (isDbError) {
-                    Log.w("AuthRepository", "signUpWith with FARM_ADMIN metadata failed due to backend trigger schema. Retrying signup without role metadata...")
+                    Log.w("AuthRepository", "signUpWith with FARM_ADMIN metadata failed due to backend trigger schema. Retrying signup without full metadata...")
                     SupabaseModule.auth.signUpWith(Email) {
                         this.email = cleanEmail
                         this.password = password
                         this.data = buildJsonObject {
                             put("full_name", cleanName)
                             put("phone", cleanPhone)
+                            put("role", "FARM_ADMIN")
+                            put("farm_name", cleanFarmName)
+                            put("farm_district", cleanDistrict)
                         }
                     }
                 } else {
@@ -1092,6 +1095,9 @@ class AuthRepositoryImpl(
             val authUser = userInfo ?: SupabaseModule.auth.currentUserOrNull()
             val realUserId = authUser?.id?.takeIf { it.isNotBlank() }
                 ?: throw IllegalStateException("Failed to obtain authoritative user ID from authentication provider.")
+
+            // Pre-seed cached_user_role as FARM_ADMIN before resolving profile to prevent trigger override
+            prefs?.edit()?.putString("cached_user_role", "FARM_ADMIN")?.apply()
 
             val session = SupabaseModule.auth.currentSessionOrNull()
 
@@ -1257,7 +1263,7 @@ class AuthRepositoryImpl(
                         val existingFarm = _currentFarm.value ?: existingProfile?.farmId?.let { fetchFarmDto(it)?.toDomain() }
 
                         if (existingFarm != null) {
-                            val finalProfile = existingProfile ?: UserProfile(
+                            val baseProfile = existingProfile ?: UserProfile(
                                 id = realUserId,
                                 email = cleanEmail,
                                 name = cleanName,
@@ -1265,6 +1271,25 @@ class AuthRepositoryImpl(
                                 role = UserRole.FARM_ADMIN,
                                 farmId = existingFarm.id
                             )
+                            val finalProfile = if (baseProfile.role != UserRole.SUPER_ADMIN && baseProfile.role != UserRole.FARM_ADMIN) {
+                                baseProfile.copy(role = UserRole.FARM_ADMIN, farmId = existingFarm.id)
+                            } else baseProfile.copy(farmId = existingFarm.id)
+
+                            try {
+                                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].upsert(
+                                    ProfileDto(
+                                        id = realUserId,
+                                        email = cleanEmail,
+                                        fullName = finalProfile.name.ifBlank { cleanName },
+                                        phone = finalProfile.phone.ifBlank { cleanPhone },
+                                        role = "FARM_ADMIN",
+                                        farmId = existingFarm.id
+                                    )
+                                )
+                            } catch (pe: Exception) {
+                                Log.w("AuthRepository", "Notice: Syncing recovery profile role to FARM_ADMIN: ${pe.message}")
+                            }
+
                             _currentUser.value = finalProfile
                             _currentFarm.value = existingFarm
                             saveCachedProfile(finalProfile)
