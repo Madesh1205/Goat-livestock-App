@@ -1,21 +1,47 @@
-# Implementation Plan - Fix Farm Admin Account Creation
+# Implementation Plan - Production Polish, Logo Branding & Notification Icon
 
-## Problem
-When a user registers as a Farm Partner (Farm Admin), the account is created as a Customer or fails to persist the `FARM_ADMIN` role and associated farm profile due to database trigger security guard constraints (`enforce_profile_security_guard`) overriding or preventing role updates from `CUSTOMER` to `FARM_ADMIN`.
+Integrate the user-uploaded `logo.png` and `ic_notification.png` into the Android application, configure adaptive app icons across all densities, set up production notification iconography, and clean up test placeholders.
 
 ## Proposed Changes
 
-### 1. Database & Security Trigger Adjustment (`supabase/migrations/`)
-- Update `enforce_profile_security_guard()` in database functions and migrations to allow the initial role assignment or allow setting `FARM_ADMIN` during profile creation/upsert when transitioning from unassigned or during signup, while still protecting against unauthorized privilege escalation to `SUPER_ADMIN`.
-- Ensure `handle_new_auth_user()` and profile upsert logic in `AuthRepository` correctly handle `FARM_ADMIN` role persistence without being blocked by `NEW.role := OLD.role;`.
+### 1. App Launcher Icon (`app-icon-generation`)
+- **Process Uploaded Logo**: Use the 1254x1254 `logo.png` from the workspace to create:
+  - High-res drawable asset `app/src/main/res/drawable/ic_launcher_foreground_asset.png`.
+  - In-app brand logo `app/src/main/res/drawable/img_adu_santhai_logo.png`.
+  - Android adaptive icon foreground layer (`res/drawable/ic_launcher_foreground.xml`) centered inside the 66dp safe zone.
+  - Android adaptive icon background layer (`res/drawable/ic_launcher_background.xml`) with a matching primary brand background tone (`#1E3A1E` / `#0D2818`).
+- **Multi-Density Raster Mipmaps**:
+  - Generate crisp PNGs for `mipmap-mdpi` (48px), `mipmap-hdpi` (72px), `mipmap-xhdpi` (96px), `mipmap-xxhdpi` (144px), and `mipmap-xxxhdpi` (192px).
+  - Generate true round masked icons (`ic_launcher_round.png`) with transparent corners for all densities.
+  - Clean up any obsolete `.webp` template launcher icons to prevent AAPT2 conflicts.
 
-### 2. Authentication Repository & Local Fallback (`AuthRepository.kt`)
-- Ensure `registerFarmAdmin` correctly passes and retains `FARM_ADMIN` role and provisions the farm record atomically.
-- In local mock mode (`!SupabaseConfig.isConfigured`), ensure `registerFarmAdmin` correctly saves `FARM_ADMIN` role and farm association to persistent local cache and state.
+### 2. Custom Notification Icon
+- **Process Notification Icon**: Use `/app/applet/ic_notification.png` from the workspace to create:
+  - Clean monochrome/silhouette drawable `app/src/main/res/drawable/ic_notification.png` and standard notification densities (`drawable-mdpi`, `drawable-hdpi`, `drawable-xhdpi`, `drawable-xxhdpi`, `drawable-xxxhdpi`).
+  - Ensure the notification builder in notification handlers (`AmmalNotificationService`, `NotificationHelper`) references `R.drawable.ic_notification`.
 
-### 3. Verification & Testing
-- Test farm admin registration flow locally and via unit/Robolectric tests to confirm successful creation of Farm Admin accounts and farm profiles.
+### 3. In-App Brand Polish & Splash Screen (`design-guidelines`)
+- **Splash Screen Branding**:
+  - Integrate `splash-dark.png` and `Adu Santhai splash screen branding.png` into the splash screen experience.
+  - Ensure the splash screen displays the authentic logo with crisp vector/bitmap scaling and smooth transition into the main marketplace.
+- **Top App Bar & Auth Screens**:
+  - Ensure the top navigation bar and authentication headers (Login, Register, Partner Farm Onboarding) use the new logo.
+  - Remove placeholder texts, generic test strings, or unstyled badges.
+
+### 4. Production Hygiene & Test Suite Alignment
+- **Goat Model Extensions & Wishlist**:
+  - Add standard helper properties/getters on `Goat` (`hasDiscount`, `formattedPrice`, `formattedFinalPrice`, `formattedDiscountBadge`) to satisfy tests and UI formatting.
+  - Ensure `WishlistRepository` and `SupabaseWishlistRepositoryImpl` are cleanly defined and referenced.
+- **Strings & Platform Identity**:
+  - Confirm `app_name` in `strings.xml` and `metadata.json` are consistent as "Adu Santhai" (Ammal Farm Marketplace).
+- **Verification**:
+  - Run `compile_applet` and `gradle :app:testDebugUnitTest` to guarantee 100% build and test pass rate.
 
 ## Verification Plan
-- Run tests and compile applet to verify clean build.
-- Verify through code audit that farm admin registration successfully creates both user profile (`FARM_ADMIN`) and farm record (`VERIFICATION_STATUS = PENDING`).
+1. **Visual & Asset Verification**:
+   - Verify all mipmap densities for `ic_launcher.png`, `ic_launcher_round.png`, and `ic_notification.png`.
+   - Verify that `ic_launcher_foreground.xml` and `ic_launcher_background.xml` build without resource errors.
+2. **App Compilation**:
+   - Run `compile_applet` to ensure full build success.
+3. **Automated Unit Tests**:
+   - Execute `gradle :app:testDebugUnitTest` to guarantee all tests pass cleanly.

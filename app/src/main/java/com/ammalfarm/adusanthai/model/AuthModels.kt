@@ -5,7 +5,18 @@ import com.ammalfarm.adusanthai.data.dto.ApprovalStatus
 enum class UserRole {
     CUSTOMER,
     FARM_ADMIN,
-    SUPER_ADMIN
+    SUPER_ADMIN;
+
+    companion object {
+        fun fromString(value: String?): UserRole {
+            if (value.isNullOrBlank()) return CUSTOMER
+            return try {
+                valueOf(value.trim().uppercase())
+            } catch (_: Exception) {
+                CUSTOMER
+            }
+        }
+    }
 }
 
 enum class VerificationStatus {
@@ -31,6 +42,8 @@ data class UserProfile(
     val farmId: String? = null,
     val verificationStatus: VerificationStatus = VerificationStatus.PENDING,
     val avatarUrl: String? = null,
+    val isPhoneVerified: Boolean = false,
+    val isSuspended: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -38,7 +51,11 @@ data class Farm(
     val id: String = "",
     val name: String = "",
     val ownerId: String = "",
+    val ownerName: String = "",
     val location: String = "",
+    val state: String = "Tamil Nadu",
+    val contactNumber: String = "",
+    val email: String = "",
     val description: String = "",
     val imageUrl: String = "",
     val logoUrl: String = "",

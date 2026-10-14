@@ -2,10 +2,11 @@ package com.ammalfarm.adusanthai.di
 
 import android.content.Context
 import com.ammalfarm.adusanthai.data.repository.AuthRepository
+import com.ammalfarm.adusanthai.data.repository.AuthRepositoryImpl
 import com.ammalfarm.adusanthai.data.repository.MarketplaceRepository
 import com.ammalfarm.adusanthai.data.repository.SupabaseMarketplaceRepositoryImpl
 
 class AppContainer(context: Context) {
-    val authRepository = AuthRepository(context)
+    val authRepository: AuthRepository = AuthRepositoryImpl(context)
     val marketplaceRepository: MarketplaceRepository = SupabaseMarketplaceRepositoryImpl(context)
 }

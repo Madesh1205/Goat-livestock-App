@@ -1,5 +1,6 @@
 package com.ammalfarm.adusanthai.core.supabase
 
+import android.content.Context
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.auth.Auth
@@ -23,6 +24,8 @@ object SupabaseModule {
 
     val auth: Auth get() = client.auth
     val storage: Storage get() = client.storage
+
+    fun getApplicationContext(): Context? = null
 
     fun createCustomOkHttpClient(): OkHttpClient {
         return SupabaseConfig.createCustomOkHttpClient()

@@ -8,6 +8,8 @@ object SupabaseConfig {
     const val supabaseUrl = SUPABASE_URL
     const val supabaseAnonKey = SUPABASE_KEY
     const val BUCKET_GOAT_IMAGES = "goat-images"
+    const val TABLE_PROFILES = "profiles"
+    const val TABLE_FARMS = "farms"
     const val isConfigured = true
 
     fun isConfigured(): Boolean = true
