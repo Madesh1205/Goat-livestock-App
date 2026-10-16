@@ -1,6 +1,6 @@
 package com.ammalfarm.adusanthai.data.repository
 
-import com.ammalfarm.adusanthai.data.dto.ApprovalStatus
+import com.ammalfarm.adusanthai.model.ApprovalStatus
 import com.ammalfarm.adusanthai.model.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf

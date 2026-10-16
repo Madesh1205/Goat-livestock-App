@@ -27,19 +27,37 @@ fun currentIsoTimestamp(): String {
     return sdf.format(Date())
 }
 
-enum class ApprovalStatus {
-    PENDING,
-    APPROVED,
-    REJECTED,
-    SUSPENDED
-}
+@Serializable
+data class WishlistItemDto(
+    val id: String = "",
+    @SerialName("user_id") val userId: String = "",
+    @SerialName("goat_id") val goatId: String = "",
+    @SerialName("created_at") val createdAt: String? = null
+)
 
-enum class AvailabilityStatus {
-    AVAILABLE,
-    BOOKED,
-    SOLD,
-    SUSPENDED
-}
+@Serializable
+data class GoatImageDto(
+    val id: String = "",
+    @SerialName("goat_id") val goatId: String = "",
+    @SerialName("image_url") val imageUrl: String = "",
+    @SerialName("is_primary") val isPrimary: Boolean = false
+)
+
+@Serializable
+data class GoatDto(
+    val id: String = "",
+    @SerialName("goat_code") val goatCode: String? = null,
+    @SerialName("farm_id") val farmId: String = "",
+    @SerialName("farm_code") val farmCode: String? = null,
+    val name: String = "",
+    @SerialName("breed_name") val breedName: String = "Boer",
+    val gender: String = "MALE",
+    @SerialName("age_months") val ageMonths: Int = 0,
+    @SerialName("weight_kg") val weightKg: Double = 0.0,
+    val purpose: String = "BREEDING",
+    val price: Double = 0.0,
+    val description: String? = null
+)
 
 @Serializable
 data class ProfileDto(
@@ -125,17 +143,43 @@ data class FarmDto(
 
         return Farm(
             id = id,
+            farmCode = farmCode ?: "",
             name = name,
             ownerId = ownerId,
             location = if (effectiveDistrict.isNotBlank()) "$effectiveDistrict, $effectiveState" else effectiveState,
             description = description ?: "",
+            contactNumber = effectivePhone,
+            email = effectiveEmail,
             verificationStatus = effectiveStatus,
             approvalStatus = if (effectiveStatus == VerificationStatus.APPROVED) ApprovalStatus.APPROVED else ApprovalStatus.PENDING,
             goatListingLimit = customLimit ?: (goatListingLimit ?: 5),
             consumedListingSlots = consumedListingSlots ?: totalGoats,
             isAmmalOwnFarm = isAmmal,
-            logoUrl = logoUrl ?: ""
+            logoUrl = logoUrl ?: "",
+            bannerUrl = bannerUrl
         )
+    }
+
+    companion object {
+        fun fromDomain(farm: Farm): FarmDto {
+            return FarmDto(
+                id = ensureValidUuid(farm.id),
+                farmCode = farm.farmCode.ifBlank { null },
+                name = farm.name,
+                ownerId = ensureValidUuid(farm.ownerId),
+                description = farm.description.ifBlank { null },
+                contactPhone = farm.contactNumber.ifBlank { null },
+                contactEmail = farm.email.ifBlank { null },
+                status = farm.verificationStatus.name,
+                isAmmalOwnFarm = farm.isAmmalOwnFarm,
+                logoUrl = farm.logoUrl.ifBlank { null },
+                bannerUrl = farm.bannerUrl?.ifBlank { null },
+                goatListingLimit = farm.goatListingLimit,
+                consumedListingSlots = farm.consumedListingSlots,
+                rating = farm.rating,
+                reviewCount = farm.reviewCount
+            )
+        }
     }
 }
 

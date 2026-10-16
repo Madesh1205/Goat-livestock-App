@@ -13,9 +13,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ammalfarm.adusanthai.ui.navigation.Screen
-import com.ammalfarm.adusanthai.ui.screens.auth.LoginScreen
-import com.ammalfarm.adusanthai.ui.screens.auth.ProfileScreen
-import com.ammalfarm.adusanthai.ui.screens.auth.RegisterScreen
+import com.ammalfarm.adusanthai.ui.screens.*
+import com.ammalfarm.adusanthai.ui.screens.auth.*
 import com.ammalfarm.adusanthai.ui.theme.AmmalFarmTheme
 import com.ammalfarm.adusanthai.ui.viewmodel.AuthViewModel
 
@@ -56,7 +55,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToRegister = { navController.navigate(Screen.Register.createRoute(isFarm = false)) },
                                 onNavigateToRegisterFarm = { navController.navigate(Screen.Register.createRoute(isFarm = true)) },
-                                onNavigateToForgotPassword = {}
+                                onNavigateToForgotPassword = { /* navigate to forgot password if route exists */ }
                             )
                         }
                         composable(Screen.Register.route) { backStackEntry ->
@@ -84,19 +83,34 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable(Screen.MarketplaceHome.route) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                Text("Marketplace Home (Welcome!)", style = MaterialTheme.typography.titleLarge)
-                            }
+                            MarketplaceHomeScreen(
+                                authViewModel = authViewModel,
+                                uiState = uiState,
+                                onNavigateToProfile = { navController.navigate(Screen.Profile.route) },
+                                onNavigateToWishlist = { navController.navigate(Screen.Wishlist.route) },
+                                onNavigateToBookings = { /* navigate bookings */ },
+                                onNavigateToOrders = { /* navigate orders */ },
+                                onNavigateToGoatDetail = { goatId -> /* navigate detail */ }
+                            )
                         }
                         composable(Screen.FarmAdmin.route) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                Text("Farm Admin Dashboard", style = MaterialTheme.typography.titleLarge)
-                            }
+                            FarmAdminScreen(
+                                authViewModel = authViewModel,
+                                uiState = uiState,
+                                onNavigateToProfile = { navController.navigate(Screen.Profile.route) }
+                            )
                         }
                         composable(Screen.SuperAdmin.route) {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                Text("Super Admin Dashboard", style = MaterialTheme.typography.titleLarge)
-                            }
+                            SuperAdminScreen(
+                                authViewModel = authViewModel,
+                                uiState = uiState,
+                                onNavigateToProfile = { navController.navigate(Screen.Profile.route) }
+                            )
+                        }
+                        composable(Screen.Wishlist.route) {
+                            WishlistScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
                         }
                     }
                 }

@@ -1,7 +1,35 @@
 package com.ammalfarm.adusanthai.model
 
-import com.ammalfarm.adusanthai.data.dto.ApprovalStatus
-import com.ammalfarm.adusanthai.data.dto.AvailabilityStatus
+import com.ammalfarm.adusanthai.core.util.PriceUtils
+
+enum class ApprovalStatus {
+    PENDING,
+    PENDING_APPROVAL,
+    APPROVED,
+    REJECTED,
+    SUSPENDED,
+    DRAFT
+}
+
+enum class AvailabilityStatus {
+    AVAILABLE,
+    RESERVED,
+    BOOKED,
+    SOLD,
+    SUSPENDED,
+    BOOKING_PENDING
+}
+
+enum class BookingStatus {
+    PENDING,
+    BOOKING_PENDING,
+    RESERVED,
+    CONFIRMED,
+    REJECTED,
+    CANCELLED,
+    COMPLETED,
+    EXPIRED
+}
 
 enum class SortOption {
     PRICE_LOW_TO_HIGH,
@@ -13,6 +41,13 @@ enum class SortOption {
 enum class GoatGender {
     MALE,
     FEMALE,
+    OTHER
+}
+
+enum class GoatPurpose {
+    BREEDING,
+    MEAT,
+    DAIRY,
     OTHER
 }
 
@@ -62,19 +97,22 @@ data class Goat(
     val id: String = "",
     val goatCode: String = "",
     val farmId: String = "",
+    val farmCode: String = "",
     val farmName: String = "",
+    val farmLocation: String = "",
     val name: String = "",
     val breed: String = "",
     val goatBreed: String = "",
     val ageMonths: Int = 0,
     val weightKg: Double = 0.0,
     val price: Double = 0.0,
-    val finalPrice: Double = 0.0,
+    val discountPercentage: Double = 0.0,
+    val purpose: GoatPurpose = GoatPurpose.BREEDING,
     val description: String = "",
     val imageUrls: List<String> = emptyList(),
     val photos: List<String> = emptyList(),
     val goatPhoto: String? = null,
-    val gender: String = "Male",
+    val gender: GoatGender = GoatGender.MALE,
     val healthStatus: String = "Healthy",
     val isAvailable: Boolean = true,
     val isFeatured: Boolean = false,
@@ -82,11 +120,31 @@ data class Goat(
     val approvalStatus: ApprovalStatus = ApprovalStatus.PENDING,
     val listingFeePaid: Boolean = false,
     val listingFeeAmount: Double = 0.0,
+    val rating: Double = 5.0,
+    val reviewCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    val finalPrice: Double
+        get() = if (discountPercentage > 0.0) price * (1.0 - discountPercentage / 100.0) else price
+
+    fun calculateFinalPrice(): Double = finalPrice
+
+    val hasDiscount: Boolean
+        get() = discountPercentage > 0.0
+
+    val formattedPrice: String
+        get() = PriceUtils.formatCurrency(price)
+
+    val formattedFinalPrice: String
+        get() = PriceUtils.formatCurrency(finalPrice)
+
+    val formattedDiscountBadge: String
+        get() = if (hasDiscount) "${discountPercentage.toInt()}% OFF" else ""
+}
 
 data class Booking(
     val id: String = "",
+    val bookingCode: String = "",
     val goatId: String = "",
     val goatCode: String = "",
     val customerId: String = "",
@@ -99,14 +157,16 @@ data class Booking(
     val farmName: String = "",
     val amount: Double = 0.0,
     val finalPrice: Double = 0.0,
-    val status: String = "PENDING",
+    val status: Any = "PENDING",
     val paymentStatus: String = "PENDING",
     val availabilityStatus: AvailabilityStatus = AvailabilityStatus.AVAILABLE,
     val bookingDate: Long = System.currentTimeMillis(),
     val reservationExpiryDate: Long = System.currentTimeMillis(),
     val notes: String = "",
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    fun calculateFinalPrice(): Double = if (finalPrice > 0.0) finalPrice else amount
+}
 
 data class WishlistItem(
     val id: String = "",
@@ -124,7 +184,7 @@ data class AppNotification(
     val title: String = "",
     val message: String = "",
     val isRead: Boolean = false,
-    val type: String = "GENERAL",
+    val type: Any = "GENERAL",
     val notificationType: NotificationType = NotificationType.GENERAL,
     val referenceId: String? = null,
     val deepLinkRoute: String? = null,

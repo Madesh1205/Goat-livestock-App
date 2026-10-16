@@ -11,6 +11,7 @@ object SupabaseConfig {
     const val TABLE_PROFILES = "profiles"
     const val TABLE_FARMS = "farms"
     const val isConfigured = true
+    val isRemoteDatabaseEnabled: Boolean = true
 
     fun isConfigured(): Boolean = true
 

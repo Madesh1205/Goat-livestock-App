@@ -1,6 +1,6 @@
 package com.ammalfarm.adusanthai.model
 
-import com.ammalfarm.adusanthai.data.dto.ApprovalStatus
+import com.ammalfarm.adusanthai.model.ApprovalStatus
 
 enum class UserRole {
     CUSTOMER,
@@ -49,6 +49,7 @@ data class UserProfile(
 
 data class Farm(
     val id: String = "",
+    val farmCode: String = "",
     val name: String = "",
     val ownerId: String = "",
     val ownerName: String = "",
@@ -59,13 +60,19 @@ data class Farm(
     val description: String = "",
     val imageUrl: String = "",
     val logoUrl: String = "",
+    val bannerUrl: String? = null,
     val verificationStatus: VerificationStatus = VerificationStatus.PENDING,
     val approvalStatus: ApprovalStatus = ApprovalStatus.PENDING,
     val goatListingLimit: Int = 5,
     val consumedListingSlots: Int = 0,
     val isAmmalOwnFarm: Boolean = false,
+    val rating: Double = 5.0,
+    val reviewCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis()
-)
+) {
+    val totalReviews: Int get() = reviewCount
+    val totalGoatsListed: Int get() = consumedListingSlots
+}
 
 data class AuthState(
     val isAuthenticated: Boolean = false,

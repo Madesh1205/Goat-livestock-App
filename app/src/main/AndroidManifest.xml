@@ -87,14 +87,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Firebase Cloud Messaging Service -->
-        <service
-            android:name=".core.notification.AmmalFirebaseMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
 
         <!-- FileProvider for Sharing Receipts & Invoices PDF -->
         <provider
