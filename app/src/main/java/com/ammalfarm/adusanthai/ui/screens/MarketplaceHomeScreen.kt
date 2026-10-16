@@ -21,16 +21,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.ammalfarm.adusanthai.model.Goat
+import com.ammalfarm.adusanthai.model.GoatFilterCriteria
 import com.ammalfarm.adusanthai.model.GoatPurpose
-import com.ammalfarm.adusanthai.model.UserProfile
-import com.ammalfarm.adusanthai.ui.viewmodel.AuthUiState
-import com.ammalfarm.adusanthai.ui.viewmodel.AuthViewModel
+import com.ammalfarm.adusanthai.ui.viewmodel.MarketplaceUiState
+import com.ammalfarm.adusanthai.ui.viewmodel.MarketplaceViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarketplaceHomeScreen(
-    authViewModel: AuthViewModel,
-    uiState: AuthUiState,
+    marketplaceViewModel: MarketplaceViewModel,
+    marketplaceUiState: MarketplaceUiState,
     onNavigateToProfile: () -> Unit,
     onNavigateToWishlist: () -> Unit,
     onNavigateToBookings: () -> Unit,
@@ -38,49 +38,9 @@ fun MarketplaceHomeScreen(
     onNavigateToGoatDetail: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf(marketplaceUiState.searchQuery) }
     var selectedPurpose by remember { mutableStateOf<GoatPurpose?>(null) }
     var selectedTab by remember { mutableStateOf(0) }
-
-    // Dummy sample marketplace goats if repository is loading
-    val sampleGoats = remember {
-        listOf(
-            Goat(
-                id = "1",
-                goatCode = "AS-BOER-001",
-                farmName = "Ammal Pedigreed Farm",
-                farmLocation = "Salem, Tamil Nadu",
-                name = "Champion Boer Buck",
-                breed = "Purebred Boer",
-                ageMonths = 14,
-                weightKg = 45.5,
-                price = 28000.0,
-                discountPercentage = 5.0,
-                purpose = GoatPurpose.BREEDING,
-                description = "Supreme quality pure Boer buck, fully vaccinated, excellent growth rate.",
-                imageUrls = listOf("https://images.unsplash.com/photo-1524024973431-2ad916746881?auto=format&fit=crop&q=80&w=600"),
-                isAvailable = true,
-                isFeatured = true
-            ),
-            Goat(
-                id = "2",
-                goatCode = "AS-TL-002",
-                farmName = "Cauvery Valley Farm",
-                farmLocation = "Erode, Tamil Nadu",
-                name = "Thalachery Breeding Doe",
-                breed = "Thalachery",
-                ageMonths = 12,
-                weightKg = 32.0,
-                price = 18500.0,
-                discountPercentage = 0.0,
-                purpose = GoatPurpose.DAIRY,
-                description = "Healthy Thalachery milking doe with high prolificacy.",
-                imageUrls = listOf("https://images.unsplash.com/photo-1535083783855-76ae62b2914e?auto=format&fit=crop&q=80&w=600"),
-                isAvailable = true,
-                isFeatured = false
-            )
-        )
-    }
 
     Scaffold(
         topBar = {
@@ -152,7 +112,10 @@ fun MarketplaceHomeScreen(
             // Search Bar
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = {
+                    searchQuery = it
+                    marketplaceViewModel.updateFilter(marketplaceUiState.filterCriteria.copy(searchQuery = it))
+                },
                 placeholder = { Text("Search by breed, farm, or name...") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
@@ -178,92 +141,124 @@ fun MarketplaceHomeScreen(
                 }
             }
 
-            // Goat Listings
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                val filtered = sampleGoats.filter { goat ->
-                    val matchesQuery = searchQuery.isBlank() ||
-                            goat.name.contains(searchQuery, ignoreCase = true) ||
-                            goat.breed.contains(searchQuery, ignoreCase = true) ||
-                            goat.farmName.contains(searchQuery, ignoreCase = true)
-                    val matchesPurpose = selectedPurpose == null || goat.purpose == selectedPurpose
-                    matchesQuery && matchesPurpose
-                }
-
-                if (filtered.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(40.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("No livestock listings found matching your criteria.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Error Banner
+            if (marketplaceUiState.errorMessage != null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = marketplaceUiState.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { marketplaceViewModel.loadData() }) {
+                            Text("Retry", fontWeight = FontWeight.Bold)
                         }
                     }
-                } else {
-                    items(filtered) { goat ->
-                        Card(
-                            onClick = { onNavigateToGoatDetail(goat.id) },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
+                }
+            }
+
+            // Loading / Goats List
+            if (marketplaceUiState.isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    val goats = marketplaceUiState.goats.filter { goat ->
+                        selectedPurpose == null || goat.purpose == selectedPurpose
+                    }
+                    if (goats.isEmpty()) {
+                        item {
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    .padding(40.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                AsyncImage(
-                                    model = goat.imageUrls.firstOrNull(),
-                                    contentDescription = goat.name,
+                                Text("No approved livestock listings currently available.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    } else {
+                        items(goats) { goat ->
+                            Card(
+                                onClick = { onNavigateToGoatDetail(goat.id) },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
                                     modifier = Modifier
-                                        .size(100.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    verticalArrangement = Arrangement.SpaceBetween
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(goat.breed, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                                            if (goat.hasDiscount) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = MaterialTheme.colorScheme.errorContainer
-                                                ) {
-                                                    Text(
-                                                        text = goat.formattedDiscountBadge,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                                    )
+                                    AsyncImage(
+                                        model = goat.imageUrls.firstOrNull(),
+                                        contentDescription = goat.name,
+                                        modifier = Modifier
+                                            .size(100.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        verticalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(goat.breed, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                                if (goat.hasDiscount) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = MaterialTheme.colorScheme.errorContainer
+                                                    ) {
+                                                        Text(
+                                                            text = goat.formattedDiscountBadge,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
+                                            Text(goat.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text(goat.farmName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
-                                        Text(goat.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        Text(goat.farmName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("${goat.ageMonths} mos • ${goat.weightKg} kg", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text(goat.formattedPrice, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("${goat.ageMonths} mos • ${goat.weightKg} kg", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(goat.formattedPrice, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                                        }
                                     }
                                 }
                             }

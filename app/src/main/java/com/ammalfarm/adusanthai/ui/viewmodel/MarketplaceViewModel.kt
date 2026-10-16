@@ -5,10 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ammalfarm.adusanthai.data.repository.MarketplaceRepository
 import com.ammalfarm.adusanthai.model.*
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 enum class ViewMode {
@@ -19,6 +16,7 @@ enum class ViewMode {
 data class MarketplaceUiState(
     val currentUser: UserProfile? = null,
     val goats: List<Goat> = emptyList(),
+    val farmGoats: List<Goat> = emptyList(),
     val allAdminGoats: List<Goat> = emptyList(),
     val allBreeds: List<String> = emptyList(),
     val farms: List<Farm> = emptyList(),
@@ -64,25 +62,77 @@ class MarketplaceViewModel(
 
     fun loadData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
                 val pricing = repository.getPlatformPricing()
                 val stats = repository.getPlatformStats()
-                _uiState.update {
-                    it.copy(
-                        platformPricing = pricing,
-                        platformStats = stats,
-                        isLoading = false
-                    )
-                }
+                
+                // Collect goats based on current filter criteria
+                repository.searchAndFilterGoats(_uiState.value.filterCriteria)
+                    .catch { e -> _uiState.update { it.copy(errorMessage = e.message) } }
+                    .collect { goatsList ->
+                        _uiState.update {
+                            it.copy(
+                                goats = goatsList,
+                                platformPricing = pricing,
+                                platformStats = stats,
+                                isLoading = false
+                            )
+                        }
+                    }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, errorMessage = e.message) }
+                _uiState.update { it.copy(isLoading = false, errorMessage = e.message ?: "Failed to load marketplace data.") }
             }
+        }
+    }
+
+    fun loadGoatsForFarm(farmId: String) {
+        viewModelScope.launch {
+            repository.getGoatsByFarm(farmId)
+                .catch { e -> _uiState.update { it.copy(errorMessage = e.message) } }
+                .collect { list ->
+                    _uiState.update { it.copy(farmGoats = list) }
+                }
         }
     }
 
     fun updateFilter(criteria: GoatFilterCriteria) {
         _uiState.update { it.copy(filterCriteria = criteria) }
+        viewModelScope.launch {
+            repository.searchAndFilterGoats(criteria)
+                .catch { e -> _uiState.update { it.copy(errorMessage = e.message) } }
+                .collect { goatsList ->
+                    _uiState.update { it.copy(goats = goatsList) }
+                }
+        }
+    }
+
+    fun addGoatListing(goat: Goat, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.addGoatListing(goat)
+            _uiState.update { it.copy(isLoading = false) }
+            result.onSuccess {
+                _uiState.update { it.copy(successMessage = "Goat listed successfully!") }
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = err.message ?: "Failed to add goat listing.") }
+            }
+        }
+    }
+
+    fun deleteGoatListing(goatId: String, farmId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            val result = repository.deleteGoatListing(goatId)
+            _uiState.update { it.copy(isLoading = false) }
+            result.onSuccess {
+                _uiState.update { it.copy(successMessage = "Listing deleted successfully.") }
+                loadGoatsForFarm(farmId)
+            }.onFailure { err ->
+                _uiState.update { it.copy(errorMessage = err.message ?: "Failed to delete listing.") }
+            }
+        }
     }
 
     fun toggleWishlist(goatId: String) {

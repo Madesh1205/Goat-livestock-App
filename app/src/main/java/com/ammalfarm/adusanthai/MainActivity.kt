@@ -3,26 +3,29 @@ package com.ammalfarm.adusanthai
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.ammalfarm.adusanthai.ui.navigation.Screen
 import com.ammalfarm.adusanthai.ui.screens.*
 import com.ammalfarm.adusanthai.ui.screens.auth.*
 import com.ammalfarm.adusanthai.ui.theme.AmmalFarmTheme
 import com.ammalfarm.adusanthai.ui.viewmodel.AuthViewModel
+import com.ammalfarm.adusanthai.ui.viewmodel.MarketplaceViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as AmmalFarmApplication
         val authRepository = app.container.authRepository
+        val marketplaceRepository = app.container.marketplaceRepository
 
         setContent {
             AmmalFarmTheme {
@@ -32,7 +35,10 @@ class MainActivity : ComponentActivity() {
                         return AuthViewModel(authRepository) as T
                     }
                 })
+                val marketplaceViewModel: MarketplaceViewModel = viewModel(factory = MarketplaceViewModel.provideFactory(marketplaceRepository))
+
                 val uiState by authViewModel.uiState.collectAsState()
+                val marketplaceUiState by marketplaceViewModel.uiState.collectAsState()
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -55,7 +61,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onNavigateToRegister = { navController.navigate(Screen.Register.createRoute(isFarm = false)) },
                                 onNavigateToRegisterFarm = { navController.navigate(Screen.Register.createRoute(isFarm = true)) },
-                                onNavigateToForgotPassword = { /* navigate to forgot password if route exists */ }
+                                onNavigateToForgotPassword = { navController.navigate("forgot_password") }
                             )
                         }
                         composable(Screen.Register.route) { backStackEntry ->
@@ -73,24 +79,53 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
+                        composable("forgot_password") {
+                            ForgotPasswordScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
                         composable(Screen.Profile.route) {
                             ProfileScreen(
                                 authViewModel = authViewModel,
                                 uiState = uiState,
                                 onLogoutSuccess = { navController.navigate(Screen.Login.route) { popUpTo(Screen.Profile.route) { inclusive = true } } },
                                 onNavigateBack = { navController.popBackStack() },
-                                onNavigateToLogin = { navController.navigate(Screen.Login.route) }
+                                onNavigateToLogin = { navController.navigate(Screen.Login.route) },
+                                onNavigateToOrders = { navController.navigate("orders") },
+                                onNavigateToWishlist = { navController.navigate(Screen.Wishlist.route) },
+                                onNavigateToSuperAdmin = { navController.navigate(Screen.SuperAdmin.route) },
+                                onNavigateToFarmAdmin = { navController.navigate(Screen.FarmAdmin.route) }
                             )
                         }
                         composable(Screen.MarketplaceHome.route) {
                             MarketplaceHomeScreen(
-                                authViewModel = authViewModel,
-                                uiState = uiState,
+                                marketplaceViewModel = marketplaceViewModel,
+                                marketplaceUiState = marketplaceUiState,
                                 onNavigateToProfile = { navController.navigate(Screen.Profile.route) },
                                 onNavigateToWishlist = { navController.navigate(Screen.Wishlist.route) },
-                                onNavigateToBookings = { /* navigate bookings */ },
-                                onNavigateToOrders = { /* navigate orders */ },
-                                onNavigateToGoatDetail = { goatId -> /* navigate detail */ }
+                                onNavigateToBookings = { navController.navigate("bookings") },
+                                onNavigateToOrders = { navController.navigate("orders") },
+                                onNavigateToGoatDetail = { goatId -> navController.navigate("goat_detail/$goatId") }
+                            )
+                        }
+                        composable(
+                            route = "goat_detail/{goatId}",
+                            arguments = listOf(navArgument("goatId") { type = NavType.StringType })
+                        ) { backStackEntry ->
+                            val goatId = backStackEntry.arguments?.getString("goatId") ?: ""
+                            GoatDetailScreen(
+                                goatId = goatId,
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable("bookings") {
+                            BookingsScreen(
+                                onNavigateBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable("orders") {
+                            OrdersScreen(
+                                onNavigateBack = { navController.popBackStack() }
                             )
                         }
                         composable(Screen.FarmAdmin.route) {
