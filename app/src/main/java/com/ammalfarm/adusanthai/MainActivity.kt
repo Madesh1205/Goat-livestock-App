@@ -132,6 +132,8 @@ class MainActivity : ComponentActivity() {
                             FarmAdminScreen(
                                 authViewModel = authViewModel,
                                 uiState = uiState,
+                                marketplaceViewModel = marketplaceViewModel,
+                                marketplaceUiState = marketplaceUiState,
                                 onNavigateToProfile = { navController.navigate(Screen.Profile.route) }
                             )
                         }
@@ -139,6 +141,8 @@ class MainActivity : ComponentActivity() {
                             SuperAdminScreen(
                                 authViewModel = authViewModel,
                                 uiState = uiState,
+                                marketplaceViewModel = marketplaceViewModel,
+                                marketplaceUiState = marketplaceUiState,
                                 onNavigateToProfile = { navController.navigate(Screen.Profile.route) }
                             )
                         }
