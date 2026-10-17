@@ -83,6 +83,7 @@ data class Farm(
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val totalGoatsListed: Int get() = consumedListingSlots
+    val hasRemainingListingQuota: Boolean get() = isAmmalOwnFarm || consumedListingSlots < goatListingLimit
 }
 
 data class AuthState(

@@ -121,6 +121,9 @@ data class Goat(
         get() = if (finalPrice > 0.0 && finalPrice < price) finalPrice
         else if (discountPercentage > 0.0) price * (1.0 - discountPercentage / 100.0)
         else price
+
+    val primaryPhoto: String
+        get() = imageUrl.ifBlank { imageUrls.firstOrNull() ?: "" }
 }
 
 data class Booking(

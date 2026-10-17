@@ -38,6 +38,14 @@ object SupabaseConfig {
     const val BUCKET_GOAT_IMAGES = "goat-images"
     const val TABLE_PROFILES = "profiles"
     const val TABLE_FARMS = "farms"
+    const val TABLE_GOATS = "goats"
+    const val TABLE_GOAT_IMAGES = "goat_images"
+    const val TABLE_BOOKINGS = "bookings"
+    const val TABLE_WISHLIST = "wishlist"
+    const val TABLE_NOTIFICATIONS = "notifications"
+    const val TABLE_REPORTS = "reports"
+    const val TABLE_REVIEWS = "reviews"
+    const val TABLE_PLATFORM_SETTINGS = "platform_settings"
 
     val isConfigured: Boolean
         get() = SUPABASE_URL.isNotBlank() &&
@@ -52,8 +60,15 @@ object SupabaseConfig {
         return OkHttpClient.Builder().build()
     }
 
-    fun resolveStorageUrl(path: String, bucket: String): String {
-        return "$SUPABASE_URL/storage/v1/object/public/$bucket/$path"
+    fun resolveStorageUrl(path: String?, bucket: String = BUCKET_GOAT_IMAGES): String {
+        val clean = path?.trim().orEmpty()
+        if (clean.isBlank()) return ""
+        if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) {
+            return clean
+        }
+        val normalizedBase = SUPABASE_URL.trimEnd('/')
+        val normalizedPath = clean.trimStart('/')
+        return "$normalizedBase/storage/v1/object/public/$bucket/$normalizedPath"
     }
 
     fun extractStoragePath(url: String, bucketName: String = BUCKET_GOAT_IMAGES): String {

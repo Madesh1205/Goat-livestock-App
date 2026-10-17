@@ -138,7 +138,14 @@ class AuthRepositoryImpl(
             }
         }
 
-        _authState.update { it.copy(isAuthenticated = true, userProfile = restored, userFarm = _currentFarm.value) }
+        _authState.update {
+            it.copy(
+                isAuthenticated = true,
+                userProfile = restored,
+                userFarm = _currentFarm.value,
+                isLoading = SupabaseConfig.isConfigured
+            )
+        }
     }
 
     private fun saveCachedProfile(profile: UserProfile) {
@@ -159,6 +166,7 @@ class AuthRepositoryImpl(
 
     override suspend fun checkExistingSession(): Result<UserProfile?> {
         if (!SupabaseConfig.isConfigured) {
+            _authState.update { it.copy(isLoading = false) }
             return Result.success(null)
         }
         return try {
@@ -168,18 +176,21 @@ class AuthRepositoryImpl(
                 val profile = profileResult.getOrNull() ?: _currentUser.value
                 if (profile != null && profile.isSuspended) {
                     logout()
+                    _authState.update { it.copy(isLoading = false) }
                     Result.success(null)
                 } else {
+                    _authState.update { it.copy(isLoading = false) }
                     Result.success(profile)
                 }
             } else {
                 clearLocalCache()
                 _currentUser.value = null
                 _currentFarm.value = null
-                _authState.update { it.copy(isAuthenticated = false, userProfile = null, userFarm = null) }
+                _authState.update { it.copy(isAuthenticated = false, userProfile = null, userFarm = null, isLoading = false) }
                 Result.success(null)
             }
         } catch (e: Exception) {
+            _authState.update { it.copy(isLoading = false) }
             Result.success(null)
         }
     }
@@ -279,6 +290,12 @@ class AuthRepositoryImpl(
                         .decodeList<FarmDto>()
                     resolvedFarm = farmDtos.firstOrNull()?.toDomain()
                 }
+                if (resolvedFarm == null && !networkErrorEncountered && profileRoleParsed == UserRole.SUPER_ADMIN) {
+                    val farmDtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select { filter { eq("is_ammal_own_farm", true) } }
+                        .decodeList<FarmDto>()
+                    resolvedFarm = farmDtos.firstOrNull()?.toDomain()
+                }
             } catch (_: Exception) {}
 
             // Never grant SUPER_ADMIN from client metadata or hardcoded emails; derive from trusted database profile.
@@ -289,6 +306,7 @@ class AuthRepositoryImpl(
 
             val resolvedRole = when {
                 profileRoleParsed != null -> profileRoleParsed
+                resolvedFarm?.isAmmalOwnFarm == true -> UserRole.SUPER_ADMIN
                 resolvedFarm != null -> UserRole.FARM_ADMIN
                 sanitizedMetadataRole != null -> sanitizedMetadataRole
                 else -> UserRole.CUSTOMER
@@ -331,7 +349,7 @@ class AuthRepositoryImpl(
             }
             Result.success(finalProfile)
         } catch (e: Exception) {
-            Log.e(TAG, "Error syncing user profile: ${e.message}", e)
+            Log.w(TAG, "Error syncing user profile: ${e.message}")
             val existing = _currentUser.value
             if (existing != null && existing.id == targetId) {
                 Result.success(existing)
@@ -400,7 +418,7 @@ class AuthRepositoryImpl(
             }
             Result.success(user)
         } catch (e: Exception) {
-            Log.e(TAG, "Login failed: ${e.message}", e)
+            Log.w(TAG, "Login failed: ${e.message}")
             val friendlyMsg = parseAuthErrorMessage(e)
             _authState.update {
                 it.copy(

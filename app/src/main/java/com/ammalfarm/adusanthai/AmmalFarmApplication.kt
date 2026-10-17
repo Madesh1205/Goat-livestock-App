@@ -1,6 +1,7 @@
 package com.ammalfarm.adusanthai
 
 import android.app.Application
+import com.ammalfarm.adusanthai.core.supabase.SupabaseModule
 import com.ammalfarm.adusanthai.di.AppContainer
 
 class AmmalFarmApplication : Application() {
@@ -9,6 +10,7 @@ class AmmalFarmApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        SupabaseModule.init(this)
         container = AppContainer(this)
     }
 }

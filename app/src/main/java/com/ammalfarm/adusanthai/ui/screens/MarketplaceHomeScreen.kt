@@ -299,6 +299,45 @@ fun MarketplaceHomeScreen(
                 onClearAll = { marketplaceViewModel.clearFilters() }
             )
 
+            if (uiState.isLoading && uiState.filteredGoats.isNotEmpty()) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("marketplace_refresh_indicator")
+                )
+            }
+
+            if (uiState.errorMessage != null && uiState.filteredGoats.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = uiState.errorMessage ?: "Sync error",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = { marketplaceViewModel.refreshMarketplace() },
+                            modifier = Modifier.testTag("btn_retry_inline_marketplace")
+                        ) {
+                            Text("Retry")
+                        }
+                    }
+                }
+            }
+
             when {
                 uiState.isLoading && uiState.filteredGoats.isEmpty() -> {
                     Box(

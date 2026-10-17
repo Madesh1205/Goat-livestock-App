@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 },
                                 onNavigateByRole = { role ->
+                                    marketplaceViewModel.refreshMarketplace()
                                     marketplaceViewModel.loadUserSpecificData(authUiState.currentUser)
                                     val dest = destinationForRole(role)
                                     navController.navigate(dest) {
@@ -99,6 +100,7 @@ class MainActivity : ComponentActivity() {
                                     navController.navigate("forgot_password")
                                 },
                                 onNavigateByRole = { role ->
+                                    marketplaceViewModel.refreshMarketplace()
                                     marketplaceViewModel.loadUserSpecificData(authUiState.currentUser)
                                     val dest = destinationForRole(role)
                                     navController.navigate(dest) {
@@ -122,6 +124,7 @@ class MainActivity : ComponentActivity() {
                                 onNavigateToPrivacyPolicy = { navController.navigate(Screen.TermsConditions.route) },
                                 onNavigateToTermsConditions = { navController.navigate(Screen.TermsConditions.route) },
                                 onRegistrationSuccess = { role ->
+                                    marketplaceViewModel.refreshMarketplace()
                                     marketplaceViewModel.loadUserSpecificData(authUiState.currentUser)
                                     val dest = destinationForRole(role)
                                     navController.navigate(dest) {
@@ -143,38 +146,48 @@ class MainActivity : ComponentActivity() {
                         }
 
                         composable(Screen.MarketplaceHome.route) {
-                            MarketplaceHomeScreen(
-                                marketplaceViewModel = marketplaceViewModel,
-                                currentUser = authUiState.currentUser,
-                                onNavigateToGoatDetail = { goatId ->
-                                    navController.navigate(Screen.GoatDetail.createRoute(goatId))
-                                },
-                                onNavigateToFarmDetail = { farmId ->
-                                    navController.navigate(Screen.FarmDetail.createRoute(farmId))
-                                },
-                                onNavigateToWishlist = {
-                                    navController.navigate(Screen.Wishlist.route)
-                                },
-                                onNavigateToBookings = {
-                                    navController.navigate(Screen.Bookings.route)
-                                },
-                                onNavigateToOrders = {
-                                    navController.navigate(Screen.Orders.route)
-                                },
-                                onNavigateToNotifications = {
-                                    navController.navigate(Screen.Notifications.route)
-                                },
-                                onNavigateToProfile = {
-                                    navController.navigate(Screen.Profile.route)
-                                },
-                                onNavigateToAdminDashboard = {
-                                    when (authUiState.currentUser?.role) {
-                                        UserRole.SUPER_ADMIN -> navController.navigate(Screen.SuperAdmin.route)
-                                        UserRole.FARM_ADMIN -> navController.navigate(Screen.FarmAdmin.route)
-                                        else -> {}
+                            if (!authUiState.isAuthenticated || authUiState.currentUser == null) {
+                                LaunchedEffect(authUiState.isAuthenticated, authUiState.currentUser) {
+                                    if (!authUiState.isLoading) {
+                                        navController.navigate(Screen.Login.route) {
+                                            popUpTo(Screen.MarketplaceHome.route) { inclusive = true }
+                                        }
                                     }
                                 }
-                            )
+                            } else {
+                                MarketplaceHomeScreen(
+                                    marketplaceViewModel = marketplaceViewModel,
+                                    currentUser = authUiState.currentUser,
+                                    onNavigateToGoatDetail = { goatId ->
+                                        navController.navigate(Screen.GoatDetail.createRoute(goatId))
+                                    },
+                                    onNavigateToFarmDetail = { farmId ->
+                                        navController.navigate(Screen.FarmDetail.createRoute(farmId))
+                                    },
+                                    onNavigateToWishlist = {
+                                        navController.navigate(Screen.Wishlist.route)
+                                    },
+                                    onNavigateToBookings = {
+                                        navController.navigate(Screen.Bookings.route)
+                                    },
+                                    onNavigateToOrders = {
+                                        navController.navigate(Screen.Orders.route)
+                                    },
+                                    onNavigateToNotifications = {
+                                        navController.navigate(Screen.Notifications.route)
+                                    },
+                                    onNavigateToProfile = {
+                                        navController.navigate(Screen.Profile.route)
+                                    },
+                                    onNavigateToAdminDashboard = {
+                                        when (authUiState.currentUser?.role) {
+                                            UserRole.SUPER_ADMIN -> navController.navigate(Screen.SuperAdmin.route)
+                                            UserRole.FARM_ADMIN -> navController.navigate(Screen.FarmAdmin.route)
+                                            else -> {}
+                                        }
+                                    }
+                                )
+                            }
                         }
 
                         composable(

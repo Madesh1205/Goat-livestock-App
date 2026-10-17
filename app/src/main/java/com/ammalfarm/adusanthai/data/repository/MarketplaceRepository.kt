@@ -1,22 +1,22 @@
 package com.ammalfarm.adusanthai.data.repository
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import com.ammalfarm.adusanthai.core.supabase.SupabaseConfig
 import com.ammalfarm.adusanthai.core.supabase.SupabaseModule
 import com.ammalfarm.adusanthai.core.util.FarmLocalCache
+import com.ammalfarm.adusanthai.core.util.GoatImageResolver
 import com.ammalfarm.adusanthai.core.util.PlatformPricingManager
 import com.ammalfarm.adusanthai.data.dto.*
 import com.ammalfarm.adusanthai.model.*
 import com.ammalfarm.adusanthai.util.UserFriendlyErrorMapper
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -159,14 +159,15 @@ open class SupabaseMarketplaceRepositoryImpl(
             val farmsRes = refreshFarms()
             val goatsRes = refreshGoats()
             try {
-                val pricing = SupabaseModule.client.postgrest["platform_pricing_settings"]
+                val settingsRows = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PLATFORM_SETTINGS]
                     .select()
-                    .decodeList<PlatformPricingSettingsDto>()
-                    .firstOrNull()
-                if (pricing != null) {
-                    PlatformPricingManager.farmApprovalFeeInr = pricing.farmApprovalFeeInr
-                    PlatformPricingManager.goatListingPackFeeInr = pricing.goatListingPackFeeInr
-                    PlatformPricingManager.goatListingPackSize = pricing.goatListingPackSize
+                    .decodeList<PlatformSettingRowDto>()
+                for (row in settingsRows) {
+                    when (row.key) {
+                        "farm_approval_price_inr" -> if (row.value > 0) PlatformPricingManager.farmApprovalFeeInr = row.value
+                        "goat_slot_price_inr" -> if (row.value > 0) PlatformPricingManager.goatListingPackFeeInr = row.value
+                        "default_initial_goat_slots" -> if (row.value > 0) PlatformPricingManager.goatListingPackSize = row.value.toInt()
+                    }
                 }
             } catch (_: Exception) {}
 
@@ -177,12 +178,13 @@ open class SupabaseMarketplaceRepositoryImpl(
                 refreshBookings(userId = currentUserId)
             }
 
-            if (goatsRes.isFailure && farmsRes.isFailure) {
+            if (goatsRes.isFailure || (farmsRes.isFailure && _farms.value.isEmpty())) {
                 val err = goatsRes.exceptionOrNull() ?: farmsRes.exceptionOrNull()
                 val friendly = UserFriendlyErrorMapper.toUserMessage(err)
                 _errorMessage.value = friendly
                 return@withContext Result.failure(Exception(friendly, err))
             }
+            _errorMessage.value = null
             Result.success(Unit)
         } catch (e: Exception) {
             val friendly = UserFriendlyErrorMapper.toUserMessage(e)
@@ -195,30 +197,66 @@ open class SupabaseMarketplaceRepositoryImpl(
 
     override suspend fun refreshGoats(): Result<List<Goat>> = withContext(Dispatchers.IO) {
         if (!SupabaseConfig.isConfigured) {
-            return@withContext Result.failure(IllegalStateException("Backend database is not configured."))
+            val err = IllegalStateException("Backend database is not configured.")
+            _errorMessage.value = UserFriendlyErrorMapper.toUserMessage(err)
+            return@withContext Result.failure(err)
         }
         try {
-            val dtos = SupabaseModule.client.postgrest["goats"]
-                .select()
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                .select {
+                    order("created_at", Order.DESCENDING)
+                }
                 .decodeList<GoatDto>()
-            val farmMap = _farms.value.associateBy { it.id }
-            val domainList = dtos.map { dto ->
-                val domain = dto.toDomain()
-                val associatedFarm = farmMap[domain.farmId]
-                if (associatedFarm != null) {
-                    domain.copy(
-                        farmName = domain.farmName.ifBlank { associatedFarm.name },
-                        farmLocation = domain.farmLocation.ifBlank { associatedFarm.location },
-                        farmContact = domain.farmContact.ifBlank { associatedFarm.contactNumber }
-                    )
-                } else {
-                    domain
+
+            val imagesByGoatId: Map<String, List<String>> = try {
+                val imageDtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES]
+                    .select()
+                    .decodeList<GoatImageDto>()
+                imageDtos
+                    .groupBy { it.goatId }
+                    .mapValues { (_, list) ->
+                        list.sortedWith(
+                            compareByDescending<GoatImageDto> { it.isPrimary }
+                                .thenBy { it.displayOrder }
+                        ).map { it.imageUrl }
+                    }
+            } catch (imgErr: Exception) {
+                Log.w(TAG, "Could not fetch goat_images: ${imgErr.message}")
+                emptyMap()
+            }
+
+            if (_farms.value.isEmpty()) {
+                try {
+                    val farmDtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select()
+                        .decodeList<FarmDto>()
+                    val domainFarms = farmDtos.map { it.toDomain() }
+                    domainFarms.forEach { FarmLocalCache.saveFarmProfile(it) }
+                    _farms.value = domainFarms
+                } catch (farmErr: Exception) {
+                    Log.w(TAG, "Could not fetch farms during refreshGoats: ${farmErr.message}")
                 }
             }
+
+            val farmsById = _farms.value.associateBy { it.id }
+
+            val domainList = dtos.map { dto ->
+                val farm = farmsById[dto.farmId] ?: FarmLocalCache.getCachedFarm(dto.farmId)
+                val photos = imagesByGoatId[dto.id].orEmpty()
+                dto.toDomain(
+                    resolvedPhotos = photos,
+                    resolvedFarmName = farm?.name ?: "",
+                    resolvedFarmLocation = farm?.location ?: "",
+                    resolvedFarmContact = farm?.contactNumber ?: "",
+                    resolvedFarmCode = farm?.farmCode ?: ""
+                )
+            }
             _goats.value = domainList
+            _errorMessage.value = null
             Result.success(domainList)
         } catch (e: Exception) {
             Log.e(TAG, "Error loading goats: ${e.message}", e)
+            _errorMessage.value = UserFriendlyErrorMapper.toUserMessage(e)
             Result.failure(e)
         }
     }
@@ -231,12 +269,33 @@ open class SupabaseMarketplaceRepositoryImpl(
             val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
                 .select()
                 .decodeList<FarmDto>()
-            val domainList = dtos.map { it.toDomain() }
+            val usersById = _allUsers.value.associateBy { it.id }
+            val domainList = dtos.map { dto ->
+                val ownerName = usersById[dto.ownerId]?.name ?: dto.ownerName
+                val farm = dto.toDomain(resolvedOwnerName = ownerName)
+                FarmLocalCache.saveFarmProfile(farm)
+                farm
+            }
             _farms.value = domainList
-            domainList.forEach { FarmLocalCache.saveFarmProfile(it) }
+
+            if (_goats.value.isNotEmpty() && domainList.isNotEmpty()) {
+                val farmsById = domainList.associateBy { it.id }
+                _goats.update { currentGoats ->
+                    currentGoats.map { g ->
+                        val f = farmsById[g.farmId]
+                        if (f != null) {
+                            g.copy(
+                                farmName = g.farmName.ifBlank { f.name },
+                                farmLocation = g.farmLocation.ifBlank { f.location },
+                                farmContact = g.farmContact.ifBlank { f.contactNumber }
+                            )
+                        } else g
+                    }
+                }
+            }
             Result.success(domainList)
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading farms: ${e.message}", e)
+            Log.w(TAG, "Error loading farms: ${e.message}")
             Result.failure(e)
         }
     }
@@ -246,82 +305,188 @@ open class SupabaseMarketplaceRepositoryImpl(
         farmId: String?,
         isSuperAdmin: Boolean
     ): Result<List<Booking>> = withContext(Dispatchers.IO) {
-        if (!SupabaseConfig.isConfigured) {
-            return@withContext Result.failure(IllegalStateException("Backend database is not configured."))
-        }
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(emptyList())
         try {
-            val dtos = SupabaseModule.client.postgrest["bookings"]
-                .select()
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
+                .select {
+                    order("created_at", Order.DESCENDING)
+                }
                 .decodeList<BookingDto>()
-            val goatMap = _goats.value.associateBy { it.id }
-            val farmMap = _farms.value.associateBy { it.id }
-            val enriched = dtos.map { dto ->
-                val b = dto.toDomain()
-                val g = goatMap[b.goatId]
-                val f = farmMap[b.farmId]
-                b.copy(
-                    goatName = b.goatName.ifBlank { g?.name ?: "Goat Listing" },
-                    goatBreed = b.goatBreed.ifBlank { g?.breed ?: "" },
-                    goatImageUrl = b.goatImageUrl.ifBlank { g?.imageUrl ?: "" },
-                    goatPrice = if (b.goatPrice > 0.0) b.goatPrice else (g?.effectivePrice ?: 0.0),
-                    farmName = b.farmName.ifBlank { f?.name ?: g?.farmName ?: "" },
-                    farmPhone = b.farmPhone.ifBlank { f?.contactNumber ?: g?.farmContact ?: "" }
+
+            val goatsById = _goats.value.associateBy { it.id }
+            val farmsById = _farms.value.associateBy { it.id }
+            val usersById = _allUsers.value.associateBy { it.id }
+
+            val domainList = dtos.map { dto ->
+                val goat = dto.goatId?.let { goatsById[it] }
+                val farmIdKey = dto.farmId ?: ""
+                val farm = farmsById[farmIdKey] ?: FarmLocalCache.getCachedFarm(farmIdKey)
+                val customer = dto.customerId?.let { usersById[it] }
+                val resolvedPhoto = GoatImageResolver.resolveBookingGoatPhoto(
+                    goatId = dto.goatId,
+                    explicitImageUrl = dto.goatImageUrl.takeIf { it.isNotBlank() },
+                    goatPrimaryUrl = goat?.imageUrl,
+                    goatPhotos = goat?.imageUrls ?: emptyList()
+                )
+                dto.toDomain(
+                    resolvedGoatName = goat?.name ?: dto.goatName,
+                    resolvedGoatBreed = goat?.breed ?: dto.goatBreed,
+                    resolvedGoatPhoto = resolvedPhoto,
+                    resolvedFarmName = farm?.name ?: dto.farmName,
+                    resolvedFarmPhone = farm?.contactNumber ?: dto.farmPhone,
+                    resolvedCustomerName = customer?.name ?: dto.customerName,
+                    resolvedCustomerPhone = customer?.phone ?: dto.customerPhone,
+                    resolvedCustomerEmail = customer?.email ?: dto.customerEmail
                 )
             }
-            _bookings.value = enriched
-            Result.success(enriched)
+            val filtered = when {
+                isSuperAdmin -> domainList
+                !farmId.isNullOrBlank() && !userId.isNullOrBlank() ->
+                    domainList.filter { it.farmId == farmId || it.customerId == userId }
+                !farmId.isNullOrBlank() ->
+                    domainList.filter { it.farmId == farmId }
+                !userId.isNullOrBlank() ->
+                    domainList.filter { it.customerId == userId }
+                else -> domainList
+            }
+            _bookings.value = filtered
+            Result.success(filtered)
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading bookings: ${e.message}", e)
+            Log.w(TAG, "Error loading bookings: ${e.message}")
             Result.failure(e)
         }
     }
 
     override suspend fun refreshWishlist(userId: String): Result<Set<String>> = withContext(Dispatchers.IO) {
-        if (!SupabaseConfig.isConfigured || userId.isBlank()) {
-            return@withContext Result.success(_wishlistedGoatIds.value)
-        }
+        if (!SupabaseConfig.isConfigured || userId.isBlank()) return@withContext Result.success(emptySet())
         try {
-            val dtos = SupabaseModule.client.postgrest["wishlists"]
-                .select { filter { eq("user_id", userId) } }
+            val cleanUserId = ensureValidUuid(userId)
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_WISHLIST]
+                .select {
+                    filter { eq("user_id", cleanUserId) }
+                }
                 .decodeList<WishlistDto>()
             val ids = dtos.map { it.goatId }.filter { it.isNotBlank() }.toSet()
             _wishlistedGoatIds.value = ids
             Result.success(ids)
         } catch (e: Exception) {
-            Log.w(TAG, "Notice loading wishlists: ${e.message}")
+            Log.w(TAG, "Wishlist fetch notice: ${e.message}")
+            Result.success(_wishlistedGoatIds.value)
+        }
+    }
+
+    override suspend fun refreshNotifications(userId: String): Result<List<AppNotification>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured || userId.isBlank()) return@withContext Result.success(emptyList())
+        try {
+            val cleanUserId = ensureValidUuid(userId)
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS]
+                .select {
+                    filter { eq("user_id", cleanUserId) }
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<NotificationDto>()
+            val list = dtos.map { it.toDomain() }
+            _notifications.value = list
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.w(TAG, "Notifications fetch notice: ${e.message}")
+            Result.success(_notifications.value)
+        }
+    }
+
+    override suspend fun refreshAllUsers(): Result<List<UserProfile>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(emptyList())
+        try {
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
+                .select()
+                .decodeList<ProfileDto>()
+            val list = dtos.map { it.toDomain() }
+            _allUsers.value = list
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.w(TAG, "Profiles fetch notice: ${e.message}")
             Result.failure(e)
+        }
+    }
+
+    override suspend fun refreshReports(): Result<List<ListingReport>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(emptyList())
+        try {
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REPORTS]
+                .select {
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<ListingReportDto>()
+            val list = dtos.map { it.toDomain() }
+            _reports.value = list
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.w(TAG, "Reports fetch notice: ${e.message}")
+            Result.success(_reports.value)
+        }
+    }
+
+    override suspend fun loadFarmReviews(farmId: String): Result<List<FarmReview>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured || farmId.isBlank()) return@withContext Result.success(emptyList())
+        try {
+            val cleanFarmId = ensureValidUuid(farmId)
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS]
+                .select {
+                    filter { eq("farm_id", cleanFarmId) }
+                    order("created_at", Order.DESCENDING)
+                }
+                .decodeList<ReviewDto>()
+            val usersById = _allUsers.value.associateBy { it.id }
+            val list = dtos.map { dto ->
+                val customerName = usersById[dto.customerId]?.name ?: dto.customerName
+                dto.toDomain(resolvedCustomerName = customerName)
+            }
+            _farmReviews.update { current -> current + (farmId to list) }
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.w(TAG, "Reviews fetch notice: ${e.message}")
+            Result.success(_farmReviews.value[farmId] ?: emptyList())
         }
     }
 
     override suspend fun toggleWishlist(userId: String, goatId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         if (userId.isBlank() || goatId.isBlank()) {
-            return@withContext Result.failure(IllegalArgumentException("Please sign in to save goats to your wishlist."))
+            return@withContext Result.failure(IllegalArgumentException("Please sign in to save items to your wishlist."))
         }
-        val currentIds = _wishlistedGoatIds.value
-        val isCurrentlyWishlisted = currentIds.contains(goatId)
+        val cleanUserId = ensureValidUuid(userId)
+        val cleanGoatId = ensureValidUuid(goatId)
+        val currentlyWishlisted = _wishlistedGoatIds.value.contains(goatId) || _wishlistedGoatIds.value.contains(cleanGoatId)
+        val updatedSet = if (currentlyWishlisted) {
+            _wishlistedGoatIds.value - goatId - cleanGoatId
+        } else {
+            _wishlistedGoatIds.value + goatId
+        }
+        _wishlistedGoatIds.value = updatedSet
+
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Result.success(!currentlyWishlisted)
+        }
+
         try {
-            if (isCurrentlyWishlisted) {
-                SupabaseModule.client.postgrest["wishlists"].delete {
+            if (currentlyWishlisted) {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_WISHLIST].delete {
                     filter {
-                        eq("user_id", userId)
-                        eq("goat_id", goatId)
+                        eq("user_id", cleanUserId)
+                        eq("goat_id", cleanGoatId)
                     }
                 }
-                _wishlistedGoatIds.value = currentIds - goatId
-                Result.success(false)
             } else {
-                SupabaseModule.client.postgrest["wishlists"].insert(
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_WISHLIST].insert(
                     buildJsonObject {
-                        put("user_id", userId)
-                        put("goat_id", goatId)
+                        put("user_id", cleanUserId)
+                        put("goat_id", cleanGoatId)
                     }
                 )
-                _wishlistedGoatIds.value = currentIds + goatId
-                Result.success(true)
             }
+            Result.success(!currentlyWishlisted)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to toggle wishlist: ${e.message}", e)
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            Log.w(TAG, "Wishlist sync warning: ${e.message}")
+            Result.success(!currentlyWishlisted)
         }
     }
 
@@ -332,93 +497,88 @@ open class SupabaseMarketplaceRepositoryImpl(
         advanceAmount: Double,
         notes: String
     ): Result<Booking> = withContext(Dispatchers.IO) {
-        if (customer.id.isBlank()) {
-            return@withContext Result.failure(IllegalStateException("Please sign in to book a goat."))
-        }
-        if (goat.farmId.isNotBlank() && customer.farmId == goat.farmId) {
-            return@withContext Result.failure(IllegalStateException("You cannot book goats listed by your own farm."))
+        if (goat.approvalStatus != ApprovalStatus.APPROVED) {
+            return@withContext Result.failure(IllegalStateException("Only approved goat listings can be booked."))
         }
         if (goat.availabilityStatus != AvailabilityStatus.AVAILABLE || !goat.isActive) {
-            return@withContext Result.failure(IllegalStateException("This goat is no longer available. Please choose another goat."))
+            return@withContext Result.failure(IllegalStateException("This goat is currently not available for booking."))
+        }
+        if (preferredVisitDate.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Please select or enter a preferred farm visit date."))
+        }
+
+        val combinedNotes = buildString {
+            if (preferredVisitDate.isNotBlank()) {
+                append("Preferred Visit: ").append(preferredVisitDate.trim())
+            }
+            if (notes.isNotBlank()) {
+                if (isNotEmpty()) append(" | ")
+                append(notes.trim())
+            }
         }
 
         try {
-            // Try atomic RPC first if deployed, fallback to standard insert + status update
-            try {
-                SupabaseModule.client.postgrest.rpc(
-                    "create_goat_booking_atomic",
+            var createdBookingDto: BookingDto? = null
+            if (SupabaseConfig.isConfigured) {
+                createdBookingDto = SupabaseModule.client.postgrest.rpc(
+                    "create_booking_hold",
                     buildJsonObject {
-                        put("p_goat_id", goat.id)
-                        put("p_customer_id", customer.id)
-                        put("p_customer_name", customer.name)
-                        put("p_customer_phone", customer.phone)
-                        put("p_preferred_visit_date", preferredVisitDate)
-                        put("p_advance_amount", advanceAmount)
-                        put("p_notes", notes)
+                        put("p_goat_id", ensureValidUuid(goat.id))
+                        put("p_customer_notes", combinedNotes)
                     }
-                )
-            } catch (rpcErr: Exception) {
-                val msg = rpcErr.message ?: ""
-                if (msg.contains("does not exist", ignoreCase = true) || msg.contains("PGRST202", ignoreCase = true)) {
-                    val bookingId = UUID.randomUUID().toString()
-                    val code = "BK-${System.currentTimeMillis().toString().takeLast(6)}"
-                    SupabaseModule.client.postgrest["bookings"].insert(
-                        buildJsonObject {
-                            put("id", bookingId)
-                            put("booking_code", code)
-                            put("goat_id", goat.id)
-                            put("goat_name", goat.name)
-                            put("goat_breed", goat.breed)
-                            put("goat_image_url", goat.imageUrl)
-                            put("goat_price", goat.effectivePrice)
-                            put("advance_amount", advanceAmount)
-                            put("customer_id", customer.id)
-                            put("customer_name", customer.name)
-                            put("customer_phone", customer.phone)
-                            put("customer_email", customer.email)
-                            put("farm_id", goat.farmId)
-                            put("farm_name", goat.farmName)
-                            put("farm_phone", goat.farmContact)
-                            put("preferred_visit_date", preferredVisitDate)
-                            put("notes", notes)
-                            put("status", BookingStatus.PENDING.name)
-                        }
-                    )
-                    try {
-                        SupabaseModule.client.postgrest["goats"].update(
-                            { set("availability_status", AvailabilityStatus.RESERVED.name) }
-                        ) { filter { eq("id", goat.id) } }
-                    } catch (_: Exception) {}
-                } else {
-                    throw rpcErr
-                }
+                ).decodeAs<BookingDto>()
             }
 
-            refreshGoats()
-            val updatedBookings = refreshBookings(userId = customer.id).getOrNull().orEmpty()
-            val created = updatedBookings.firstOrNull { it.goatId == goat.id && it.customerId == customer.id }
-                ?: Booking(
-                    id = UUID.randomUUID().toString(),
+            val newBooking = if (createdBookingDto != null) {
+                createdBookingDto.toDomain(
+                    resolvedGoatName = goat.name,
+                    resolvedGoatBreed = goat.breed,
+                    resolvedGoatPhoto = goat.primaryPhoto,
+                    resolvedFarmName = goat.farmName,
+                    resolvedFarmPhone = goat.farmContact,
+                    resolvedCustomerName = customer.name,
+                    resolvedCustomerPhone = customer.phone,
+                    resolvedCustomerEmail = customer.email
+                ).copy(
+                    preferredVisitDate = preferredVisitDate.trim()
+                )
+            } else {
+                val bookingId = UUID.randomUUID().toString()
+                val bookingCode = "BK-${(1000..9999).random()}"
+                Booking(
+                    id = bookingId,
+                    bookingCode = bookingCode,
                     goatId = goat.id,
                     goatName = goat.name,
                     goatBreed = goat.breed,
-                    goatImageUrl = goat.imageUrl,
+                    goatImageUrl = goat.primaryPhoto,
                     goatPrice = goat.effectivePrice,
                     advanceAmount = advanceAmount,
-                    customerId = customer.id,
+                    customerId = ensureValidUuid(customer.id),
                     customerName = customer.name,
                     customerPhone = customer.phone,
                     customerEmail = customer.email,
-                    farmId = goat.farmId,
+                    farmId = ensureValidUuid(goat.farmId),
                     farmName = goat.farmName,
                     farmPhone = goat.farmContact,
-                    preferredVisitDate = preferredVisitDate,
-                    notes = notes,
-                    status = BookingStatus.PENDING
+                    preferredVisitDate = preferredVisitDate.trim(),
+                    notes = combinedNotes,
+                    status = BookingStatus.PENDING,
+                    paymentStatus = if (advanceAmount > 0) "ADVANCE_PENDING" else "PAY_AT_FARM",
+                    createdAt = currentIsoTimestamp()
                 )
-            Result.success(created)
+            }
+
+            _bookings.update { listOf(newBooking) + it }
+            _goats.update { list ->
+                list.map {
+                    if (it.id == goat.id) it.copy(availabilityStatus = AvailabilityStatus.RESERVED) else it
+                }
+            }
+            Result.success(newBooking)
         } catch (e: Exception) {
-            val friendly = UserFriendlyErrorMapper.forBooking(e)
+            Log.w(TAG, "Error creating booking: ${e.message}")
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
             Result.failure(Exception(friendly, e))
         }
     }
@@ -428,44 +588,64 @@ open class SupabaseMarketplaceRepositoryImpl(
         newStatus: BookingStatus,
         reason: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        val targetBooking = _bookings.value.find { it.id == bookingId }
         try {
-            val targetBooking = _bookings.value.find { it.id == bookingId }
-            try {
-                SupabaseModule.client.postgrest.rpc(
-                    "transition_booking_status_atomic",
-                    buildJsonObject {
-                        put("p_booking_id", bookingId)
-                        put("p_new_status", newStatus.name)
-                        put("p_reason", reason)
+            if (SupabaseConfig.isConfigured) {
+                val cleanBookingId = ensureValidUuid(bookingId)
+                when (newStatus) {
+                    BookingStatus.CONFIRMED, BookingStatus.APPROVED -> {
+                        SupabaseModule.client.postgrest.rpc(
+                            "confirm_booking",
+                            buildJsonObject { put("p_booking_id", cleanBookingId) }
+                        )
                     }
-                )
-            } catch (rpcErr: Exception) {
-                SupabaseModule.client.postgrest["bookings"].update(
-                    {
-                        set("status", newStatus.name)
-                        set("updated_at", currentIsoTimestamp())
+                    BookingStatus.COMPLETED -> {
+                        SupabaseModule.client.postgrest.rpc(
+                            "complete_booking",
+                            buildJsonObject { put("p_booking_id", cleanBookingId) }
+                        )
                     }
-                ) {
-                    filter { eq("id", bookingId) }
-                }
-                if (targetBooking != null && targetBooking.goatId.isNotBlank()) {
-                    val newGoatAvailability = when (newStatus) {
-                        BookingStatus.COMPLETED -> AvailabilityStatus.SOLD
-                        BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.EXPIRED -> AvailabilityStatus.AVAILABLE
-                        BookingStatus.CONFIRMED, BookingStatus.APPROVED, BookingStatus.PENDING -> AvailabilityStatus.RESERVED
+                    BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.EXPIRED -> {
+                        SupabaseModule.client.postgrest.rpc(
+                            "cancel_booking",
+                            buildJsonObject {
+                                put("p_booking_id", cleanBookingId)
+                                put("p_reason", reason.ifBlank { "Booking ${newStatus.name.lowercase()}" })
+                            }
+                        )
                     }
-                    try {
-                        SupabaseModule.client.postgrest["goats"].update(
-                            { set("availability_status", newGoatAvailability.name) }
-                        ) { filter { eq("id", targetBooking.goatId) } }
-                    } catch (_: Exception) {}
+                    BookingStatus.PENDING -> {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].update(
+                            buildJsonObject {
+                                put("status", "RESERVED")
+                                put("updated_at", currentIsoTimestamp())
+                            }
+                        ) {
+                            filter { eq("id", cleanBookingId) }
+                        }
+                    }
                 }
             }
-            refreshGoats()
-            refreshBookings()
+
+            val nextGoatAvail = when (newStatus) {
+                BookingStatus.COMPLETED -> AvailabilityStatus.SOLD
+                BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.EXPIRED -> AvailabilityStatus.AVAILABLE
+                BookingStatus.CONFIRMED, BookingStatus.APPROVED, BookingStatus.PENDING -> AvailabilityStatus.RESERVED
+            }
+
+            _bookings.update { list ->
+                list.map { if (it.id == bookingId) it.copy(status = newStatus) else it }
+            }
+            if (targetBooking != null && targetBooking.goatId.isNotBlank()) {
+                _goats.update { list ->
+                    list.map {
+                        if (it.id == targetBooking.goatId) it.copy(availabilityStatus = nextGoatAvail) else it
+                    }
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            val friendly = UserFriendlyErrorMapper.forBooking(e)
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
             Result.failure(Exception(friendly, e))
         }
     }
@@ -475,84 +655,215 @@ open class SupabaseMarketplaceRepositoryImpl(
         imageBytesList: List<ByteArray>,
         isSuperAdmin: Boolean
     ): Result<Goat> = withContext(Dispatchers.IO) {
+        if (goat.name.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter the goat's name or title."))
+        }
+        if (goat.breed.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Please select the goat's breed."))
+        }
+        if (goat.price <= 0) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid price greater than ₹0."))
+        }
+        if (goat.weightKg <= 0) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid weight in kg."))
+        }
+
+        val isExisting = _goats.value.any { it.id == goat.id }
+        val farm = _farms.value.find { it.id == goat.farmId }
+
+        if (!isExisting && !isSuperAdmin && farm != null && !farm.isAmmalOwnFarm) {
+            if (!farm.verificationStatus.isApprovedOrVerified) {
+                return@withContext Result.failure(
+                    IllegalStateException("Your farm must be verified by Super Admin before publishing goat listings.")
+                )
+            }
+            val currentFarmGoatCount = _goats.value.count { it.farmId == farm.id && it.isActive }
+            if (currentFarmGoatCount >= farm.goatListingLimit && !farm.hasRemainingListingQuota) {
+                return@withContext Result.failure(
+                    IllegalStateException("You have reached your goat listing limit (${farm.goatListingLimit}). Request additional slots from your Farm Dashboard.")
+                )
+            }
+        }
+
         try {
             val uploadedUrls = mutableListOf<String>()
-            for ((index, bytes) in imageBytesList.withIndex()) {
-                val fileName = "${goat.farmId.ifBlank { "farm" }}/${UUID.randomUUID()}_$index.jpg"
-                try {
-                    val bucket = SupabaseModule.client.storage[SupabaseConfig.BUCKET_GOAT_IMAGES]
-                    bucket.upload(fileName, bytes) { upsert = true }
-                    val publicUrl = SupabaseConfig.resolveStorageUrl(fileName, SupabaseConfig.BUCKET_GOAT_IMAGES)
-                    uploadedUrls.add(publicUrl)
-                } catch (uploadErr: Exception) {
-                    Log.w(TAG, "Image upload notice: ${uploadErr.message}")
+            if (SupabaseConfig.isConfigured && imageBytesList.isNotEmpty()) {
+                val bucket = SupabaseModule.storage.from(SupabaseConfig.BUCKET_GOAT_IMAGES)
+                imageBytesList.forEachIndexed { index, bytes ->
+                    try {
+                        val path = "goats/${goat.farmId.ifBlank { "default" }}/${goat.id}_${System.currentTimeMillis()}_$index.jpg"
+                        bucket.upload(path, bytes) { upsert = true }
+                        uploadedUrls.add(SupabaseConfig.resolveStorageUrl(path, SupabaseConfig.BUCKET_GOAT_IMAGES))
+                    } catch (uploadErr: Exception) {
+                        Log.w(TAG, "Image upload warning: ${uploadErr.message}")
+                    }
                 }
             }
 
-            val mergedImageUrls = (goat.imageUrls + uploadedUrls).filter { it.isNotBlank() }.distinct()
-            val primaryImage = mergedImageUrls.firstOrNull() ?: goat.imageUrl
+            val mergedImages = (uploadedUrls + goat.imageUrls + listOfNotNull(goat.imageUrl.takeIf { it.isNotBlank() }))
+                .distinct()
+                .filter { it.isNotBlank() }
 
-            val finalId = goat.id.ifBlank { UUID.randomUUID().toString() }
-            val effectiveApproval = if (isSuperAdmin) ApprovalStatus.APPROVED else goat.approvalStatus
-            val computedFinalPrice = if (goat.discountPercentage > 0.0) {
-                goat.price * (1.0 - goat.discountPercentage / 100.0)
+            val primaryImage = mergedImages.firstOrNull() ?: ""
+            val autoApprove = isSuperAdmin || (farm?.isAmmalOwnFarm == true)
+            val resolvedApproval = if (isExisting) {
+                goat.approvalStatus
+            } else if (autoApprove) {
+                ApprovalStatus.APPROVED
+            } else {
+                ApprovalStatus.PENDING
+            }
+
+            val cleanGoatId = ensureValidUuid(goat.id.ifBlank { UUID.randomUUID().toString() })
+            val cleanFarmId = ensureValidUuid(goat.farmId.ifBlank { SEED_AMMAL_FARM_UUID })
+            val finalPrice = if (goat.discountPercentage > 0) {
+                goat.price * (1.0 - (goat.discountPercentage / 100.0))
             } else {
                 goat.price
             }
 
-            val payload = buildJsonObject {
-                put("id", finalId)
-                if (goat.goatCode.isNotBlank()) put("goat_code", goat.goatCode)
-                put("tag_id", goat.tagId.ifBlank { "GT-${finalId.take(6).uppercase()}" })
-                put("name", goat.name.trim())
-                put("breed", goat.breed.trim())
-                put("gender", goat.gender.trim())
-                put("age_months", goat.ageMonths)
-                put("weight_kg", goat.weightKg)
-                put("price", goat.price)
-                put("discount_percentage", goat.discountPercentage)
-                put("final_price", computedFinalPrice)
-                put("color", goat.color.trim())
-                put("purpose", goat.purpose.trim())
-                put("description", goat.description.trim())
-                put("health_notes", goat.healthNotes.trim())
-                put("is_vaccinated", goat.isVaccinated)
-                put("is_verified", isSuperAdmin || goat.isVerified)
-                put("image_url", primaryImage)
-                put("farm_id", goat.farmId)
-                put("farm_name", goat.farmName)
-                put("farm_location", goat.farmLocation)
-                put("farm_contact", goat.farmContact)
-                put("approval_status", effectiveApproval.name)
-                put("availability_status", goat.availabilityStatus.name)
-                put("is_active", goat.isActive)
+            val updatedGoat = goat.copy(
+                id = cleanGoatId,
+                goatCode = goat.goatCode,
+                tagId = goat.tagId.ifBlank { "TAG-${(1000..9999).random()}" },
+                farmId = cleanFarmId,
+                farmName = goat.farmName.ifBlank { farm?.name ?: "Verified Farm" },
+                farmLocation = goat.farmLocation.ifBlank { farm?.location ?: "Tamil Nadu" },
+                farmContact = goat.farmContact.ifBlank { farm?.contactNumber ?: "" },
+                finalPrice = finalPrice,
+                imageUrl = primaryImage,
+                imageUrls = mergedImages,
+                approvalStatus = resolvedApproval,
+                isVerified = resolvedApproval == ApprovalStatus.APPROVED
+            )
+
+            if (SupabaseConfig.isConfigured) {
+                val dbGender = when (updatedGoat.gender.trim().uppercase()) {
+                    "FEMALE" -> "FEMALE"
+                    "CASTRATED" -> "CASTRATED"
+                    else -> "MALE"
+                }
+                val dbPurpose = when (updatedGoat.purpose.trim().uppercase()) {
+                    "MEAT" -> "MEAT"
+                    "MILK", "DAIRY" -> "MILK"
+                    "SHOW" -> "SHOW"
+                    "PET" -> "PET"
+                    else -> "BREEDING"
+                }
+                val dbStatus = when {
+                    !updatedGoat.isActive -> "INACTIVE"
+                    updatedGoat.availabilityStatus == AvailabilityStatus.UNAVAILABLE -> "INACTIVE"
+                    updatedGoat.availabilityStatus == AvailabilityStatus.SOLD -> "SOLD"
+                    updatedGoat.availabilityStatus == AvailabilityStatus.RESERVED -> "RESERVED"
+                    else -> "AVAILABLE"
+                }
+
+                val payload = buildJsonObject {
+                    put("id", cleanGoatId)
+                    put("farm_id", cleanFarmId)
+                    put("name", updatedGoat.name.trim())
+                    put("breed_name", updatedGoat.breed.trim())
+                    put("gender", dbGender)
+                    put("age_months", updatedGoat.ageMonths.coerceAtLeast(1))
+                    put("weight_kg", updatedGoat.weightKg)
+                    put("purpose", dbPurpose)
+                    put("price", updatedGoat.price)
+                    put("discount_percentage", updatedGoat.discountPercentage.coerceIn(0.0, 99.0))
+                    put("status", dbStatus)
+                    put("description", updatedGoat.description.trim())
+                    put("vaccination_status", updatedGoat.healthNotes.ifBlank { if (updatedGoat.isVaccinated) "Fully Vaccinated" else "Pending Vaccination" })
+                    put("is_approved_by_admin", updatedGoat.approvalStatus == ApprovalStatus.APPROVED)
+                }
+
+                val savedGoatDto = if (isExisting) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                        .update(payload) {
+                            filter { eq("id", cleanGoatId) }
+                            select()
+                        }
+                        .decodeSingleOrNull<GoatDto>()
+                } else {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                        .insert(payload) {
+                            select()
+                        }
+                        .decodeSingleOrNull<GoatDto>()
+                }
+
+                if (mergedImages.isNotEmpty()) {
+                    try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].delete {
+                            filter { eq("goat_id", cleanGoatId) }
+                        }
+                        mergedImages.forEachIndexed { idx, imgUrl ->
+                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].insert(
+                                buildJsonObject {
+                                    put("goat_id", cleanGoatId)
+                                    put("image_url", imgUrl)
+                                    put("display_order", idx)
+                                    put("is_primary", idx == 0)
+                                }
+                            )
+                        }
+                    } catch (imgDbErr: Exception) {
+                        Log.w(TAG, "goat_images insert notice: ${imgDbErr.message}")
+                    }
+                }
+
+                val finalGoat = savedGoatDto?.toDomain(
+                    resolvedPhotos = mergedImages,
+                    resolvedFarmName = updatedGoat.farmName,
+                    resolvedFarmLocation = updatedGoat.farmLocation,
+                    resolvedFarmContact = updatedGoat.farmContact
+                ) ?: updatedGoat.copy(
+                    goatCode = updatedGoat.goatCode.ifBlank { "GOAT-${cleanGoatId.take(4).uppercase()}" }
+                )
+
+                _goats.update { list ->
+                    if (isExisting) {
+                        list.map { if (it.id == finalGoat.id) finalGoat else it }
+                    } else {
+                        listOf(finalGoat) + list
+                    }
+                }
+                return@withContext Result.success(finalGoat)
             }
 
-            SupabaseModule.client.postgrest["goats"].upsert(payload)
-            refreshGoats()
-            val saved = _goats.value.find { it.id == finalId } ?: goat.copy(
-                id = finalId,
-                imageUrl = primaryImage,
-                imageUrls = mergedImageUrls,
-                finalPrice = computedFinalPrice,
-                approvalStatus = effectiveApproval
-            )
-            Result.success(saved)
+            _goats.update { list ->
+                if (isExisting) {
+                    list.map { if (it.id == updatedGoat.id) updatedGoat else it }
+                } else {
+                    listOf(updatedGoat) + list
+                }
+            }
+            Result.success(updatedGoat)
         } catch (e: Exception) {
-            val friendly = UserFriendlyErrorMapper.forGoatListing(e)
+            Log.w(TAG, "Error saving goat: ${e.message}")
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
             Result.failure(Exception(friendly, e))
         }
     }
 
     override suspend fun deleteGoat(goatId: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            SupabaseModule.client.postgrest["goats"].delete {
-                filter { eq("id", goatId) }
+            if (SupabaseConfig.isConfigured) {
+                val cleanGoatId = ensureValidUuid(goatId)
+                try {
+                    SupabaseModule.client.postgrest.rpc(
+                        "delete_goat_listing",
+                        buildJsonObject { put("p_goat_id", cleanGoatId) }
+                    )
+                } catch (_: Exception) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].delete {
+                        filter { eq("id", cleanGoatId) }
+                    }
+                }
             }
-            refreshGoats()
+            _goats.update { list -> list.filterNot { it.id == goatId } }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
@@ -562,22 +873,49 @@ open class SupabaseMarketplaceRepositoryImpl(
         rejectionReason: String?
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            SupabaseModule.client.postgrest["goats"].update(
-                {
-                    set("approval_status", status.name)
-                    set("is_verified", status == ApprovalStatus.APPROVED)
-                    if (rejectionReason != null) {
-                        set("rejection_reason", rejectionReason)
+            if (SupabaseConfig.isConfigured) {
+                val cleanGoatId = ensureValidUuid(goatId)
+                try {
+                    SupabaseModule.client.postgrest.rpc(
+                        "moderate_goat_listing",
+                        buildJsonObject {
+                            put("p_goat_id", cleanGoatId)
+                            put("p_approve", status == ApprovalStatus.APPROVED)
+                            put("p_rejection_reason", rejectionReason ?: "")
+                        }
+                    )
+                } catch (_: Exception) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].update(
+                        buildJsonObject {
+                            put("is_approved_by_admin", status == ApprovalStatus.APPROVED)
+                            if (status == ApprovalStatus.REJECTED) {
+                                put("status", "INACTIVE")
+                            } else if (status == ApprovalStatus.APPROVED) {
+                                put("status", "AVAILABLE")
+                            }
+                            put("updated_at", currentIsoTimestamp())
+                        }
+                    ) {
+                        filter { eq("id", cleanGoatId) }
                     }
-                    set("updated_at", currentIsoTimestamp())
                 }
-            ) {
-                filter { eq("id", goatId) }
             }
-            refreshGoats()
+            _goats.update { list ->
+                list.map {
+                    if (it.id == goatId) {
+                        it.copy(
+                            approvalStatus = status,
+                            isVerified = status == ApprovalStatus.APPROVED,
+                            isActive = status != ApprovalStatus.REJECTED,
+                            rejectionReason = rejectionReason
+                        )
+                    } else it
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
@@ -586,18 +924,36 @@ open class SupabaseMarketplaceRepositoryImpl(
         status: AvailabilityStatus
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            SupabaseModule.client.postgrest["goats"].update(
-                {
-                    set("availability_status", status.name)
-                    set("updated_at", currentIsoTimestamp())
+            if (SupabaseConfig.isConfigured) {
+                val dbStatus = when (status) {
+                    AvailabilityStatus.UNAVAILABLE -> "INACTIVE"
+                    AvailabilityStatus.AVAILABLE -> "AVAILABLE"
+                    AvailabilityStatus.RESERVED -> "RESERVED"
+                    AvailabilityStatus.SOLD -> "SOLD"
                 }
-            ) {
-                filter { eq("id", goatId) }
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].update(
+                    buildJsonObject {
+                        put("status", dbStatus)
+                        put("updated_at", currentIsoTimestamp())
+                    }
+                ) {
+                    filter { eq("id", ensureValidUuid(goatId)) }
+                }
             }
-            refreshGoats()
+            _goats.update { list ->
+                list.map {
+                    if (it.id == goatId) {
+                        it.copy(
+                            availabilityStatus = status,
+                            isActive = status != AvailabilityStatus.UNAVAILABLE
+                        )
+                    } else it
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
@@ -607,159 +963,178 @@ open class SupabaseMarketplaceRepositoryImpl(
         rejectionReason: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            try {
-                if (status == VerificationStatus.VERIFIED || status == VerificationStatus.APPROVED) {
-                    SupabaseModule.client.postgrest.rpc(
-                        "approve_partner_farm_manual_payment",
-                        buildJsonObject {
-                            put("p_farm_id", farmId)
-                            put("p_payment_reference", "SUPER_ADMIN_APPROVAL")
+            if (SupabaseConfig.isConfigured) {
+                val cleanFarmId = ensureValidUuid(farmId)
+                try {
+                    if (status.isApprovedOrVerified) {
+                        SupabaseModule.client.postgrest.rpc(
+                            "approve_partner_farm_with_manual_payment",
+                            buildJsonObject {
+                                put("p_farm_id", cleanFarmId)
+                                put("p_amount", PlatformPricingManager.farmApprovalFeeInr)
+                                put("p_payment_reference", "ADMIN-VERIFIED-${System.currentTimeMillis()}")
+                                put("p_receipt_number", "RCPT-${(10000..99999).random()}")
+                                put("p_notes", "Verified by Super Admin")
+                            }
+                        )
+                    } else {
+                        val dbStatus = when (status) {
+                            VerificationStatus.REJECTED -> "REJECTED"
+                            VerificationStatus.SUSPENDED -> "SUSPENDED"
+                            else -> "PENDING"
                         }
-                    )
-                } else {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                        {
-                            set("verification_status", status.name)
-                            set("updated_at", currentIsoTimestamp())
-                        }
-                    ) { filter { eq("id", farmId) } }
-                }
-            } catch (_: Exception) {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                    {
-                        set("verification_status", status.name)
-                        if (status == VerificationStatus.VERIFIED || status == VerificationStatus.APPROVED) {
-                            set("approval_fee_paid", true)
-                        }
-                        set("updated_at", currentIsoTimestamp())
+                        SupabaseModule.client.postgrest.rpc(
+                            "update_farm_verification_status",
+                            buildJsonObject {
+                                put("p_farm_id", cleanFarmId)
+                                put("p_status", dbStatus)
+                            }
+                        )
                     }
-                ) { filter { eq("id", farmId) } }
+                } catch (_: Exception) {
+                    val dbStatus = when {
+                        status.isApprovedOrVerified -> "APPROVED"
+                        status == VerificationStatus.REJECTED -> "REJECTED"
+                        status == VerificationStatus.SUSPENDED -> "SUSPENDED"
+                        else -> "PENDING"
+                    }
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
+                        buildJsonObject {
+                            put("status", dbStatus)
+                            put("updated_at", currentIsoTimestamp())
+                        }
+                    ) {
+                        filter { eq("id", cleanFarmId) }
+                    }
+                }
             }
-            refreshFarms()
+            _farms.update { list ->
+                list.map {
+                    if (it.id == farmId) {
+                        val updated = it.copy(
+                            verificationStatus = status,
+                            approvalStatus = if (status.isApprovedOrVerified) ApprovalStatus.APPROVED else ApprovalStatus.PENDING,
+                            approvalFeePaid = status.isApprovedOrVerified || it.approvalFeePaid
+                        )
+                        FarmLocalCache.saveFarmProfile(updated)
+                        updated
+                    } else it
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            val friendly = UserFriendlyErrorMapper.forFarmModeration(e)
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
             Result.failure(Exception(friendly, e))
         }
     }
 
     override suspend fun updateFarmProfile(farm: Farm): Result<Farm> = withContext(Dispatchers.IO) {
+        if (farm.name.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Farm name cannot be empty."))
+        }
         try {
-            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                {
-                    set("name", farm.name.trim())
-                    set("owner_name", farm.ownerName.trim())
-                    set("location", farm.location.trim())
-                    set("district", farm.district.trim())
-                    set("contact_number", farm.contactNumber.trim())
-                    set("description", farm.description.trim())
-                    set("updated_at", currentIsoTimestamp())
+            if (SupabaseConfig.isConfigured) {
+                val cleanFarmId = ensureValidUuid(farm.id)
+                val resolvedDist = farm.district.ifBlank {
+                    farm.location.substringBefore(",").trim().ifBlank { "Madurai" }
                 }
-            ) {
-                filter { eq("id", farm.id) }
+                val resolvedState = farm.state.ifBlank { "Tamil Nadu" }
+                val resolvedAddress = farm.location.ifBlank { "$resolvedDist, $resolvedState" }
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
+                    buildJsonObject {
+                        put("name", farm.name.trim())
+                        put("description", farm.description.trim())
+                        put("location_district", resolvedDist)
+                        put("location_state", resolvedState)
+                        put("address", resolvedAddress)
+                        put("contact_phone", farm.contactNumber.trim())
+                        if (farm.email.isNotBlank()) {
+                            put("contact_email", farm.email.trim())
+                        }
+                        if (farm.logoUrl.isNotBlank()) {
+                            put("logo_url", farm.logoUrl)
+                        }
+                        if (!farm.bannerUrl.isNullOrBlank()) {
+                            put("banner_url", farm.bannerUrl)
+                        }
+                        put("updated_at", currentIsoTimestamp())
+                    }
+                ) {
+                    filter { eq("id", cleanFarmId) }
+                }
             }
             FarmLocalCache.saveFarmProfile(farm)
-            refreshFarms()
+            _farms.update { list ->
+                val exists = list.any { it.id == farm.id }
+                if (exists) list.map { if (it.id == farm.id) farm else it } else list + farm
+            }
             Result.success(farm)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
     override suspend fun increaseFarmListingLimit(farmId: String, additionalSlots: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        val target = _farms.value.find { it.id == farmId }
+            ?: return@withContext Result.failure(IllegalArgumentException("Farm not found."))
+        val newLimit = (target.goatListingLimit + additionalSlots).coerceAtLeast(2)
         try {
-            val currentFarm = _farms.value.find { it.id == farmId }
-            val newLimit = (currentFarm?.goatListingLimit ?: 2) + additionalSlots
-            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                {
-                    set("goat_listing_limit", newLimit)
-                    set("updated_at", currentIsoTimestamp())
+            if (SupabaseConfig.isConfigured) {
+                val cleanFarmId = ensureValidUuid(farmId)
+                try {
+                    SupabaseModule.client.postgrest.rpc(
+                        "increase_farm_goat_quota_with_manual_payment",
+                        buildJsonObject {
+                            put("p_farm_id", cleanFarmId)
+                            put("p_slots_to_add", additionalSlots)
+                            put("p_amount", PlatformPricingManager.goatListingPackFeeInr)
+                            put("p_payment_reference", "QUOTA-${System.currentTimeMillis()}")
+                            put("p_receipt_number", "RCPT-${(10000..99999).random()}")
+                            put("p_notes", "Added $additionalSlots listing slots")
+                        }
+                    )
+                } catch (_: Exception) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
+                        buildJsonObject {
+                            put("goat_listing_limit", newLimit)
+                            put("updated_at", currentIsoTimestamp())
+                        }
+                    ) {
+                        filter { eq("id", cleanFarmId) }
+                    }
                 }
-            ) {
-                filter { eq("id", farmId) }
             }
-            refreshFarms()
+            _farms.update { list ->
+                list.map {
+                    if (it.id == farmId) {
+                        val updated = it.copy(goatListingLimit = newLimit)
+                        FarmLocalCache.saveFarmProfile(updated)
+                        updated
+                    } else it
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
-        }
-    }
-
-    override suspend fun refreshNotifications(userId: String): Result<List<AppNotification>> = withContext(Dispatchers.IO) {
-        if (!SupabaseConfig.isConfigured || userId.isBlank()) {
-            return@withContext Result.success(emptyList())
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest["notifications"]
-                .select { filter { eq("user_id", userId) } }
-                .decodeList<NotificationDto>()
-            val list = dtos.map { it.toDomain() }
-            _notifications.value = list
-            Result.success(list)
-        } catch (e: Exception) {
-            Result.failure(e)
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
     override suspend fun markNotificationRead(notificationId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        _notifications.update { list ->
+            list.map { if (it.id == notificationId) it.copy(isRead = true) else it }
+        }
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(Unit)
         try {
-            SupabaseModule.client.postgrest["notifications"].update(
-                { set("is_read", true) }
-            ) { filter { eq("id", notificationId) } }
-            _notifications.update { list ->
-                list.map { if (it.id == notificationId) it.copy(isRead = true) else it }
+            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].update(
+                buildJsonObject { put("is_read", true) }
+            ) {
+                filter { eq("id", ensureValidUuid(notificationId)) }
             }
             Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun refreshAllUsers(): Result<List<UserProfile>> = withContext(Dispatchers.IO) {
-        if (!SupabaseConfig.isConfigured) {
-            return@withContext Result.success(emptyList())
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
-                .select()
-                .decodeList<ProfileDto>()
-            val users = dtos.map { it.toDomain() }
-            _allUsers.value = users
-            Result.success(users)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun refreshReports(): Result<List<ListingReport>> = withContext(Dispatchers.IO) {
-        if (!SupabaseConfig.isConfigured) {
-            return@withContext Result.success(emptyList())
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest["listing_reports"]
-                .select()
-                .decodeList<ListingReportDto>()
-            val list = dtos.map { it.toDomain() }
-            _reports.value = list
-            Result.success(list)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun loadFarmReviews(farmId: String): Result<List<FarmReview>> = withContext(Dispatchers.IO) {
-        if (!SupabaseConfig.isConfigured || farmId.isBlank()) {
-            return@withContext Result.success(emptyList())
-        }
-        try {
-            val dtos = SupabaseModule.client.postgrest["farm_reviews"]
-                .select { filter { eq("farm_id", farmId) } }
-                .decodeList<ReviewDto>()
-            val list = dtos.map { it.toDomain() }
-            _farmReviews.update { it + (farmId to list) }
-            Result.success(list)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (_: Exception) {
+            Result.success(Unit)
         }
     }
 
@@ -769,30 +1144,40 @@ open class SupabaseMarketplaceRepositoryImpl(
         rating: Int,
         comment: String
     ): Result<FarmReview> = withContext(Dispatchers.IO) {
+        if (comment.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter your review comment."))
+        }
+        val coercedRating = rating.coerceIn(1, 5)
+        val review = FarmReview(
+            id = UUID.randomUUID().toString(),
+            farmId = ensureValidUuid(farmId),
+            customerId = ensureValidUuid(customer.id),
+            customerName = customer.name.ifBlank { "Verified Customer" },
+            rating = coercedRating,
+            comment = comment.trim(),
+            createdAt = currentIsoTimestamp()
+        )
         try {
-            val reviewId = UUID.randomUUID().toString()
-            SupabaseModule.client.postgrest["farm_reviews"].insert(
-                buildJsonObject {
-                    put("id", reviewId)
-                    put("farm_id", farmId)
-                    put("customer_id", customer.id)
-                    put("customer_name", customer.name)
-                    put("rating", rating.coerceIn(1, 5))
-                    put("comment", comment.trim())
-                }
-            )
-            loadFarmReviews(farmId)
-            val created = FarmReview(
-                id = reviewId,
-                farmId = farmId,
-                customerId = customer.id,
-                customerName = customer.name,
-                rating = rating,
-                comment = comment.trim()
-            )
-            Result.success(created)
+            if (SupabaseConfig.isConfigured) {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REVIEWS].insert(
+                    buildJsonObject {
+                        put("farm_id", review.farmId)
+                        put("customer_id", review.customerId)
+                        put("rating", review.rating)
+                        put("comment", review.comment)
+                        put("is_verified_purchase", true)
+                        put("is_approved", true)
+                    }
+                )
+            }
+            _farmReviews.update { current ->
+                val existing = current[farmId] ?: emptyList()
+                current + (farmId to (listOf(review) + existing))
+            }
+            Result.success(review)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
@@ -801,46 +1186,95 @@ open class SupabaseMarketplaceRepositoryImpl(
         reporterId: String,
         reason: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (reason.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Please describe the reason for reporting this listing."))
+        }
+        val cleanGoatId = ensureValidUuid(goatId)
+        val cleanReporterId = ensureValidUuid(reporterId)
+        val report = ListingReport(
+            id = UUID.randomUUID().toString(),
+            goatId = cleanGoatId,
+            reporterId = cleanReporterId,
+            reason = reason.trim(),
+            status = "OPEN",
+            createdAt = currentIsoTimestamp()
+        )
         try {
-            SupabaseModule.client.postgrest["listing_reports"].insert(
-                buildJsonObject {
-                    put("id", UUID.randomUUID().toString())
-                    put("goat_id", goatId)
-                    put("reporter_id", reporterId)
-                    put("reason", reason.trim())
-                    put("status", "OPEN")
-                }
-            )
+            if (SupabaseConfig.isConfigured) {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REPORTS].insert(
+                    buildJsonObject {
+                        put("reporter_id", cleanReporterId)
+                        put("target_type", "GOAT")
+                        put("target_id", cleanGoatId)
+                        put("reason", reason.trim())
+                        put("status", "PENDING")
+                    }
+                )
+            }
+            _reports.update { listOf(report) + it }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
     override suspend fun resolveReport(reportId: String, status: String): Result<Unit> = withContext(Dispatchers.IO) {
+        _reports.update { list ->
+            list.map { if (it.id == reportId) it.copy(status = status) else it }
+        }
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(Unit)
         try {
-            SupabaseModule.client.postgrest["listing_reports"].update(
-                { set("status", status) }
-            ) { filter { eq("id", reportId) } }
-            refreshReports()
+            val dbStatus = when (status.uppercase()) {
+                "RESOLVED", "REVIEWED", "DISMISSED", "PENDING" -> status.uppercase()
+                "OPEN" -> "PENDING"
+                else -> "RESOLVED"
+            }
+            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_REPORTS].update(
+                buildJsonObject {
+                    put("status", dbStatus)
+                    put("updated_at", currentIsoTimestamp())
+                }
+            ) {
+                filter { eq("id", ensureValidUuid(reportId)) }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
     override suspend fun toggleUserSuspension(userId: String, suspend: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].update(
-                {
-                    set("is_suspended", suspend)
-                    set("updated_at", currentIsoTimestamp())
+            if (SupabaseConfig.isConfigured) {
+                val cleanUserId = ensureValidUuid(userId)
+                try {
+                    SupabaseModule.client.postgrest.rpc(
+                        "admin_set_user_suspension",
+                        buildJsonObject {
+                            put("p_target_user_id", cleanUserId)
+                            put("p_suspend", suspend)
+                        }
+                    )
+                } catch (_: Exception) {
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].update(
+                        buildJsonObject {
+                            put("is_suspended", suspend)
+                            put("updated_at", currentIsoTimestamp())
+                        }
+                    ) {
+                        filter { eq("id", cleanUserId) }
+                    }
                 }
-            ) { filter { eq("id", userId) } }
-            refreshAllUsers()
+            }
+            _allUsers.update { list ->
+                list.map { if (it.id == userId) it.copy(isSuspended = suspend) else it }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
         }
     }
 
@@ -849,21 +1283,21 @@ open class SupabaseMarketplaceRepositoryImpl(
         packFeeInr: Double,
         packSize: Int
     ): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            PlatformPricingManager.farmApprovalFeeInr = approvalFeeInr
-            PlatformPricingManager.goatListingPackFeeInr = packFeeInr
-            PlatformPricingManager.goatListingPackSize = packSize
-            SupabaseModule.client.postgrest["platform_pricing_settings"].upsert(
-                buildJsonObject {
-                    put("id", 1)
-                    put("farm_approval_fee_inr", approvalFeeInr)
-                    put("goat_listing_pack_fee_inr", packFeeInr)
-                    put("goat_listing_pack_size", packSize)
-                }
-            )
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
+        PlatformPricingManager.farmApprovalFeeInr = approvalFeeInr.coerceAtLeast(0.0)
+        PlatformPricingManager.goatListingPackFeeInr = packFeeInr.coerceAtLeast(0.0)
+        PlatformPricingManager.goatListingPackSize = packSize.coerceAtLeast(1)
+        if (SupabaseConfig.isConfigured) {
+            try {
+                SupabaseModule.client.postgrest.rpc(
+                    "update_platform_pricing_settings",
+                    buildJsonObject {
+                        put("p_farm_approval_price", PlatformPricingManager.farmApprovalFeeInr)
+                        put("p_goat_slot_price", PlatformPricingManager.goatListingPackFeeInr)
+                        put("p_default_initial_slots", PlatformPricingManager.goatListingPackSize)
+                    }
+                )
+            } catch (_: Exception) {}
         }
+        Result.success(Unit)
     }
 }

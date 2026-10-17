@@ -146,11 +146,15 @@ class MarketplaceViewModel(
             .toSet()
 
         // Public Marketplace eligibility rules:
-        // Only show listings that satisfy existing approval, availability, and visibility rules.
+        // Only show listings that satisfy existing approval, availability, and farm verification rules.
         val eligible = state.allGoats.filter { goat ->
             val isApproved = goat.approvalStatus == ApprovalStatus.APPROVED
             val isActive = goat.isActive && goat.availabilityStatus != AvailabilityStatus.UNAVAILABLE
-            val farmOk = verifiedFarmIds.isEmpty() || goat.farmId.isBlank() || verifiedFarmIds.contains(goat.farmId)
+            val farmOk = if (state.farms.isNotEmpty()) {
+                verifiedFarmIds.contains(goat.farmId) || goat.farmId == com.ammalfarm.adusanthai.data.dto.SEED_AMMAL_FARM_UUID
+            } else {
+                goat.isVerified || goat.farmId.isBlank() || goat.farmId == com.ammalfarm.adusanthai.data.dto.SEED_AMMAL_FARM_UUID
+            }
             isApproved && isActive && farmOk
         }
 
@@ -185,6 +189,7 @@ class MarketplaceViewModel(
 
     fun refreshMarketplace() {
         viewModelScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
             repository.refreshAll()
         }
     }
@@ -201,6 +206,7 @@ class MarketplaceViewModel(
     fun loadUserSpecificData(user: UserProfile?) {
         if (user == null) return
         viewModelScope.launch {
+            repository.refreshAll()
             repository.refreshWishlist(user.id)
             repository.refreshNotifications(user.id)
             repository.refreshBookings(
