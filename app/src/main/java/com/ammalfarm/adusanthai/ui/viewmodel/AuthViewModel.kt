@@ -69,11 +69,11 @@ class AuthViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val result = authRepository.login(trimmedEmail, trimmedPassword)
-            _uiState.update { it.copy(isLoading = false) }
             result.onSuccess { user ->
+                _uiState.update { it.copy(isLoading = false, isAuthenticated = true, currentUser = user, errorMessage = null) }
                 onNavigateByRole(user.role)
             }.onFailure { err ->
-                _uiState.update { it.copy(errorMessage = err.message ?: "Invalid credentials.") }
+                _uiState.update { it.copy(isLoading = false, errorMessage = err.message ?: "Invalid credentials.") }
             }
         }
     }

@@ -54,9 +54,18 @@ class MainActivity : ComponentActivity() {
                                 uiState = uiState,
                                 onNavigateByRole = { role ->
                                     when (role) {
-                                        com.ammalfarm.adusanthai.model.UserRole.FARM_ADMIN -> navController.navigate(Screen.FarmAdmin.route) { popUpTo(Screen.Login.route) { inclusive = true } }
-                                        com.ammalfarm.adusanthai.model.UserRole.SUPER_ADMIN -> navController.navigate(Screen.SuperAdmin.route) { popUpTo(Screen.Login.route) { inclusive = true } }
-                                        else -> navController.navigate(Screen.MarketplaceHome.route) { popUpTo(Screen.Login.route) { inclusive = true } }
+                                        com.ammalfarm.adusanthai.model.UserRole.FARM_ADMIN -> navController.navigate(Screen.FarmAdmin.route) {
+                                            popUpTo(Screen.Login.route) { inclusive = true }
+                                            launchSingleTop = true
+                                        }
+                                        com.ammalfarm.adusanthai.model.UserRole.SUPER_ADMIN -> navController.navigate(Screen.SuperAdmin.route) {
+                                            popUpTo(Screen.Login.route) { inclusive = true }
+                                            launchSingleTop = true
+                                        }
+                                        else -> navController.navigate(Screen.MarketplaceHome.route) {
+                                            popUpTo(Screen.Login.route) { inclusive = true }
+                                            launchSingleTop = true
+                                        }
                                     }
                                 },
                                 onNavigateToRegister = { navController.navigate(Screen.Register.createRoute(isFarm = false)) },

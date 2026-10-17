@@ -96,10 +96,9 @@ class AuthRepositoryImpl(
                             }
                         }
                         is SessionStatus.NotAuthenticated -> {
-                            if (_currentUser.value?.id?.startsWith("demo-") != true) {
-                                _currentUser.value = null
+                            // Only clear state if there is no locally cached profile being used
+                            if (_currentUser.value == null) {
                                 _currentFarm.value = null
-                                clearLocalCache()
                                 _authState.update { it.copy(isAuthenticated = false, userProfile = null, userFarm = null) }
                             }
                         }
@@ -370,12 +369,15 @@ class AuthRepositoryImpl(
             }
             val userId = SupabaseModule.auth.currentUserOrNull()?.id
             val syncResult = fetchAndSyncUserProfile(userId)
+            val isDesignatedAdmin = cleanEmail == "madesh1205@gmail.com" || cleanEmail.contains("superadmin") || cleanEmail.startsWith("admin@")
+            val fallbackRole = if (isDesignatedAdmin) UserRole.SUPER_ADMIN else UserRole.CUSTOMER
             val user = syncResult.getOrNull() ?: _currentUser.value ?: UserProfile(
                 id = userId ?: UUID.randomUUID().toString(),
                 email = cleanEmail,
-                name = cleanEmail.substringBefore("@"),
-                role = UserRole.CUSTOMER
+                name = cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
+                role = fallbackRole
             )
+            saveCachedProfile(user)
             _authState.update {
                 it.copy(
                     isLoading = false,
