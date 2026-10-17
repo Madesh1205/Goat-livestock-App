@@ -57,12 +57,23 @@ fun LoginScreen(
     var showValidationErrors by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
 
-    val isEmailBlank = email.trim().isBlank()
-    val isEmailValid = !isEmailBlank && android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+    val cleanEmail = email.trim()
+    val isEmailBlank = cleanEmail.isBlank()
+    val isEmailValid = !isEmailBlank && (
+        (cleanEmail.contains("@") && cleanEmail.substringAfter("@").contains(".")) ||
+        android.util.Patterns.EMAIL_ADDRESS?.matcher(cleanEmail)?.matches() == true
+    )
     val isPasswordBlank = password.isBlank()
 
     val emailHasError = showValidationErrors && (isEmailBlank || !isEmailValid)
     val passwordHasError = showValidationErrors && isPasswordBlank
+
+    // Auto-navigate if already authenticated
+    LaunchedEffect(uiState.isAuthenticated, uiState.currentUser) {
+        if (uiState.isAuthenticated && uiState.currentUser != null) {
+            onNavigateByRole(uiState.currentUser.role)
+        }
+    }
 
     LaunchedEffect(uiState.prefilledEmail) {
         if (!uiState.prefilledEmail.isNullOrBlank()) {
@@ -82,7 +93,7 @@ fun LoginScreen(
             if (!isSubmitting && !uiState.isLoading) {
                 isSubmitting = true
                 focusManager.clearFocus()
-                authViewModel.login(email.trim(), password) { role ->
+                authViewModel.login(cleanEmail, password) { role ->
                     isSubmitting = false
                     onNavigateByRole(role)
                 }

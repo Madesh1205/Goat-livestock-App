@@ -1,19 +1,52 @@
 package com.ammalfarm.adusanthai.core.supabase
 
+import com.ammalfarm.adusanthai.BuildConfig
 import okhttp3.OkHttpClient
 
 object SupabaseConfig {
-    const val SUPABASE_URL = "https://placeholder.supabase.co"
-    const val SUPABASE_KEY = "placeholder-key"
-    const val supabaseUrl = SUPABASE_URL
-    const val supabaseAnonKey = SUPABASE_KEY
+    // Official Mumbai Production Supabase Endpoint & Public Anon Key
+    private const val DEFAULT_PROD_URL = "https://wphgctwmjcvrblpybktd.supabase.co"
+    private const val DEFAULT_PROD_KEY = "sb_publishable_n2K7Pxz4L-DAJWcL7MAgQQ_IrOwGKoG"
+
+    val SUPABASE_URL: String = try {
+        BuildConfig.SUPABASE_URL
+            .trim()
+            .removeSurrounding("\"")
+            .removeSurrounding("'")
+            .trim()
+            .takeIf { it.isNotBlank() && !it.contains("placeholder") }
+            ?: DEFAULT_PROD_URL
+    } catch (_: Throwable) {
+        DEFAULT_PROD_URL
+    }
+
+    val SUPABASE_KEY: String = try {
+        BuildConfig.SUPABASE_ANON_KEY
+            .trim()
+            .removeSurrounding("\"")
+            .removeSurrounding("'")
+            .trim()
+            .takeIf { it.isNotBlank() && !it.contains("placeholder") }
+            ?: DEFAULT_PROD_KEY
+    } catch (_: Throwable) {
+        DEFAULT_PROD_KEY
+    }
+
+    val supabaseUrl: String get() = SUPABASE_URL
+    val supabaseAnonKey: String get() = SUPABASE_KEY
+
     const val BUCKET_GOAT_IMAGES = "goat-images"
     const val TABLE_PROFILES = "profiles"
     const val TABLE_FARMS = "farms"
-    const val isConfigured = true
-    val isRemoteDatabaseEnabled: Boolean = true
 
-    fun isConfigured(): Boolean = true
+    val isConfigured: Boolean
+        get() = SUPABASE_URL.isNotBlank() &&
+                !SUPABASE_URL.contains("placeholder") &&
+                SUPABASE_KEY.isNotBlank() &&
+                !SUPABASE_KEY.contains("placeholder")
+
+    val isRemoteDatabaseEnabled: Boolean
+        get() = isConfigured
 
     fun createCustomOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder().build()

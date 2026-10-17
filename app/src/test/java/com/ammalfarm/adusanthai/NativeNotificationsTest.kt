@@ -1,5 +1,6 @@
-import com.ammalfarm.adusanthai.model.BookingStatus
 package com.ammalfarm.adusanthai
+
+import com.ammalfarm.adusanthai.model.BookingStatus
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
