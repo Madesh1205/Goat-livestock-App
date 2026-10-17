@@ -3,102 +3,60 @@ package com.ammalfarm.adusanthai.data.dto
 import com.ammalfarm.adusanthai.model.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.Transient
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
+import java.time.Instant
+import java.util.UUID
 
 const val SEED_AMMAL_FARM_UUID = "00000000-0000-0000-0000-000000000001"
+const val SEED_AMMAL_OWNER_UUID = "00000000-0000-0000-0000-000000000010"
 
-fun ensureValidUuid(id: String?): String {
-    if (id.isNullOrBlank()) return SEED_AMMAL_FARM_UUID
+fun currentIsoTimestamp(): String = Instant.now().toString()
+
+fun ensureValidUuid(input: String): String {
     return try {
-        java.util.UUID.fromString(id)
-        id
-    } catch (e: Exception) {
-        SEED_AMMAL_FARM_UUID
+        UUID.fromString(input).toString()
+    } catch (_: Exception) {
+        UUID.nameUUIDFromBytes(input.toByteArray()).toString()
     }
 }
-
-fun currentIsoTimestamp(): String {
-    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-    sdf.timeZone = TimeZone.getTimeZone("UTC")
-    return sdf.format(Date())
-}
-
-@Serializable
-data class WishlistItemDto(
-    val id: String = "",
-    @SerialName("user_id") val userId: String = "",
-    @SerialName("goat_id") val goatId: String = "",
-    @SerialName("created_at") val createdAt: String? = null
-)
-
-@Serializable
-data class GoatImageDto(
-    val id: String = "",
-    @SerialName("goat_id") val goatId: String = "",
-    @SerialName("image_url") val imageUrl: String = "",
-    @SerialName("is_primary") val isPrimary: Boolean = false
-)
-
-@Serializable
-data class GoatDto(
-    val id: String = "",
-    @SerialName("goat_code") val goatCode: String? = null,
-    @SerialName("farm_id") val farmId: String = "",
-    @SerialName("farm_code") val farmCode: String? = null,
-    val name: String = "",
-    @SerialName("breed_name") val breedName: String = "Boer",
-    val gender: String = "MALE",
-    @SerialName("age_months") val ageMonths: Int = 0,
-    @SerialName("weight_kg") val weightKg: Double = 0.0,
-    val purpose: String = "BREEDING",
-    val price: Double = 0.0,
-    val description: String? = null
-)
 
 @Serializable
 data class ProfileDto(
     val id: String = "",
     val email: String? = null,
-    @SerialName("full_name") val fullName: String? = null,
-    val phone: String? = null,
-    @Transient val isPhoneVerified: Boolean? = null,
-    val role: String? = "CUSTOMER",
+    @SerialName("full_name") val fullName: String = "",
+    val phone: String = "",
+    @SerialName("is_phone_verified") val isPhoneVerified: Boolean = false,
+    val role: String = "CUSTOMER",
     @SerialName("farm_id") val farmId: String? = null,
-    @SerialName("avatar_url") val avatarUrl: String? = null,
-    @SerialName("is_suspended") val isSuspended: Boolean? = false,
-    @SerialName("created_at") val createdAt: String? = null
+    @SerialName("is_suspended") val isSuspended: Boolean = false,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
 ) {
     fun toDomain(): UserProfile {
-        val effectiveName = fullName?.takeIf { it.isNotBlank() } ?: "User"
-        val effectivePhone = phone?.takeIf { it.isNotBlank() } ?: ""
-        val effectiveRole = UserRole.fromString(role)
+        val parsedRole = UserRole.fromString(role)
         return UserProfile(
             id = id,
             email = email ?: "",
-            name = effectiveName,
-            phone = effectivePhone,
-            isPhoneVerified = isPhoneVerified == true,
-            role = effectiveRole,
-            farmId = farmId,
-            isSuspended = isSuspended ?: false
+            name = fullName,
+            phone = phone,
+            isPhoneVerified = isPhoneVerified,
+            role = parsedRole,
+            farmId = if (parsedRole == UserRole.CUSTOMER) null else farmId,
+            isSuspended = isSuspended
         )
     }
 
     companion object {
-        fun fromDomain(domain: UserProfile): ProfileDto {
+        fun fromDomain(profile: UserProfile): ProfileDto {
             return ProfileDto(
-                id = ensureValidUuid(domain.id),
-                email = domain.email.ifBlank { null },
-                fullName = domain.name,
-                phone = domain.phone.ifBlank { null },
-                role = domain.role.name,
-                farmId = domain.farmId?.takeIf { it.isNotBlank() }?.let { ensureValidUuid(it) },
-                isSuspended = domain.isSuspended,
-                createdAt = currentIsoTimestamp()
+                id = profile.id,
+                email = profile.email,
+                fullName = profile.name,
+                phone = profile.phone,
+                isPhoneVerified = profile.isPhoneVerified,
+                role = profile.role.name,
+                farmId = if (profile.role == UserRole.CUSTOMER) null else profile.farmId,
+                isSuspended = profile.isSuspended
             )
         }
     }
@@ -107,132 +65,357 @@ data class ProfileDto(
 @Serializable
 data class FarmDto(
     val id: String = "",
-    @SerialName("farm_code") val farmCode: String? = null,
+    @SerialName("farm_code") val farmCode: String = "",
     val name: String = "",
     @SerialName("owner_id") val ownerId: String = "",
-    val description: String? = null,
-    @SerialName("location_district") val locationDistrict: String? = null,
-    @SerialName("location_state") val locationState: String? = null,
-    @SerialName("address") val address: String? = null,
-    @SerialName("contact_phone") val contactPhone: String? = null,
-    @SerialName("contact_email") val contactEmail: String? = null,
-    val status: String? = null,
+    @SerialName("owner_name") val ownerName: String = "",
+    val location: String = "",
+    val district: String = "",
+    val state: String = "Tamil Nadu",
+    @SerialName("contact_number") val contactNumber: String = "",
+    val email: String = "",
+    val description: String = "",
+    @SerialName("verification_status") val verificationStatus: String = "PENDING",
     @SerialName("is_ammal_own_farm") val isAmmalOwnFarm: Boolean = false,
-    @SerialName("verified_at") val verifiedAt: String? = null,
-    @SerialName("logo_url") val logoUrl: String? = null,
-    @SerialName("banner_url") val bannerUrl: String? = null,
+    @SerialName("goat_listing_limit") val goatListingLimit: Int = 2,
+    @SerialName("approval_fee_paid") val approvalFeePaid: Boolean = false,
+    @SerialName("approval_fee_amount") val approvalFeeAmount: Double = 500.0,
+    @SerialName("rating") val rating: Double = 4.5,
+    @SerialName("total_reviews") val totalReviews: Int = 0,
     @SerialName("created_at") val createdAt: String? = null,
-    @SerialName("updated_at") val updatedAt: String? = null,
-    @Transient val tagline: String? = null,
-    @SerialName("goat_listing_limit") val goatListingLimit: Int? = 0,
-    @SerialName("consumed_listing_slots") val consumedListingSlots: Int? = null,
-    val rating: Double = 0.0,
-    @SerialName("review_count") val reviewCount: Int = 0
+    @SerialName("updated_at") val updatedAt: String? = null
 ) {
-    fun toDomain(totalGoats: Int = 0, customLimit: Int? = null): Farm {
-        val effectiveDistrict = locationDistrict?.trim() ?: ""
-        val effectiveState = locationState?.trim()?.ifBlank { "Tamil Nadu" } ?: "Tamil Nadu"
-        val effectivePhone = contactPhone?.trim() ?: ""
-        val effectiveEmail = contactEmail?.trim() ?: ""
-        val isAmmal = isAmmalOwnFarm || id == SEED_AMMAL_FARM_UUID
-        val effectiveStatus = try {
-            VerificationStatus.valueOf(status?.uppercase() ?: "PENDING")
-        } catch (_: Exception) {
-            VerificationStatus.PENDING
+    fun toDomain(): Farm {
+        val resolvedDistrict = district.ifBlank {
+            location.substringBefore(",").trim().ifBlank { "Madurai" }
         }
-
+        val resolvedLocation = location.ifBlank { "$resolvedDistrict, $state" }
         return Farm(
             id = id,
-            farmCode = farmCode ?: "",
+            farmCode = farmCode,
             name = name,
             ownerId = ownerId,
-            location = if (effectiveDistrict.isNotBlank()) "$effectiveDistrict, $effectiveState" else effectiveState,
-            description = description ?: "",
-            contactNumber = effectivePhone,
-            email = effectiveEmail,
-            verificationStatus = effectiveStatus,
-            approvalStatus = if (effectiveStatus == VerificationStatus.APPROVED) ApprovalStatus.APPROVED else ApprovalStatus.PENDING,
-            goatListingLimit = customLimit ?: (goatListingLimit ?: 5),
-            consumedListingSlots = consumedListingSlots ?: totalGoats,
-            isAmmalOwnFarm = isAmmal,
-            logoUrl = logoUrl ?: "",
-            bannerUrl = bannerUrl
+            ownerName = ownerName,
+            location = resolvedLocation,
+            district = resolvedDistrict,
+            state = state,
+            contactNumber = contactNumber,
+            email = email,
+            description = description,
+            verificationStatus = VerificationStatus.fromString(verificationStatus),
+            isAmmalOwnFarm = isAmmalOwnFarm,
+            goatListingLimit = goatListingLimit,
+            approvalFeePaid = approvalFeePaid,
+            approvalFeeAmount = approvalFeeAmount,
+            rating = rating,
+            totalReviews = totalReviews
         )
     }
 
     companion object {
         fun fromDomain(farm: Farm): FarmDto {
             return FarmDto(
-                id = ensureValidUuid(farm.id),
-                farmCode = farm.farmCode.ifBlank { null },
+                id = farm.id,
+                farmCode = farm.farmCode,
                 name = farm.name,
-                ownerId = ensureValidUuid(farm.ownerId),
-                description = farm.description.ifBlank { null },
-                contactPhone = farm.contactNumber.ifBlank { null },
-                contactEmail = farm.email.ifBlank { null },
-                status = farm.verificationStatus.name,
+                ownerId = farm.ownerId,
+                ownerName = farm.ownerName,
+                location = farm.location,
+                district = farm.district.ifBlank { farm.location.substringBefore(",").trim() },
+                state = farm.state,
+                contactNumber = farm.contactNumber,
+                email = farm.email,
+                description = farm.description,
+                verificationStatus = farm.verificationStatus.name,
                 isAmmalOwnFarm = farm.isAmmalOwnFarm,
-                logoUrl = farm.logoUrl.ifBlank { null },
-                bannerUrl = farm.bannerUrl?.ifBlank { null },
                 goatListingLimit = farm.goatListingLimit,
-                consumedListingSlots = farm.consumedListingSlots,
+                approvalFeePaid = farm.approvalFeePaid,
+                approvalFeeAmount = farm.approvalFeeAmount,
                 rating = farm.rating,
-                reviewCount = farm.reviewCount
+                totalReviews = farm.totalReviews
             )
         }
     }
 }
 
 @Serializable
-data class ReportDto(
+data class GoatDto(
     val id: String = "",
-    @SerialName("reporter_id") val reporterId: String = "",
-    @SerialName("reporter_name") val reporterName: String = "",
-    @SerialName("reporter_email") val reporterEmail: String = "",
-    @SerialName("target_type") val targetType: String = "",
-    @SerialName("target_id") val targetId: String = "",
-    @SerialName("target_title") val targetTitle: String = "",
-    val reason: String = "",
+    @SerialName("goat_code") val goatCode: String = "",
+    @SerialName("tag_id") val tagId: String = "",
+    val name: String = "",
+    val breed: String = "",
+    val gender: String = "Male",
+    @SerialName("age_months") val ageMonths: Int = 12,
+    @SerialName("weight_kg") val weightKg: Double = 25.0,
+    val price: Double = 0.0,
+    @SerialName("discount_percentage") val discountPercentage: Double = 0.0,
+    @SerialName("final_price") val finalPrice: Double = 0.0,
+    val color: String = "",
+    val purpose: String = "Breeding",
     val description: String = "",
-    @SerialName("evidence_photo_url") val evidencePhotoUrl: String? = null,
-    val status: String = "PENDING",
-    @SerialName("resolution_notes") val resolutionNotes: String? = null,
-    @SerialName("created_at") val createdAt: String? = null
+    @SerialName("health_notes") val healthNotes: String = "",
+    @SerialName("is_vaccinated") val isVaccinated: Boolean = true,
+    @SerialName("is_verified") val isVerified: Boolean = false,
+    @SerialName("image_url") val imageUrl: String = "",
+    @SerialName("image_urls") val imageUrls: List<String> = emptyList(),
+    @SerialName("farm_id") val farmId: String = "",
+    @SerialName("farm_name") val farmName: String = "",
+    @SerialName("farm_location") val farmLocation: String = "",
+    @SerialName("farm_contact") val farmContact: String = "",
+    @SerialName("approval_status") val approvalStatus: String = "PENDING",
+    @SerialName("availability_status") val availabilityStatus: String = "AVAILABLE",
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("rejection_reason") val rejectionReason: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
 ) {
-    fun toDomain(): PlatformReport {
-        return PlatformReport(
+    fun toDomain(): Goat {
+        val computedFinalPrice = if (finalPrice > 0.0) {
+            finalPrice
+        } else if (discountPercentage > 0.0) {
+            price * (1.0 - (discountPercentage / 100.0))
+        } else {
+            price
+        }
+        val resolvedImages = if (imageUrls.isNotEmpty()) {
+            imageUrls
+        } else if (imageUrl.isNotBlank()) {
+            listOf(imageUrl)
+        } else {
+            emptyList()
+        }
+        val primaryImg = imageUrl.ifBlank { resolvedImages.firstOrNull() ?: "" }
+        return Goat(
             id = id,
-            reporterId = reporterId,
-            reporterName = reporterName,
-            reporterEmail = reporterEmail,
-            targetType = targetType,
-            targetId = targetId,
-            targetTitle = targetTitle,
-            reason = reason,
+            goatCode = goatCode,
+            tagId = tagId.ifBlank { goatCode },
+            name = name,
+            breed = breed,
+            gender = gender,
+            ageMonths = ageMonths,
+            weightKg = weightKg,
+            price = price,
+            discountPercentage = discountPercentage,
+            finalPrice = computedFinalPrice,
+            color = color,
+            purpose = purpose,
             description = description,
-            evidencePhotoUrl = evidencePhotoUrl,
-            status = status,
-            resolutionNotes = resolutionNotes ?: ""
+            healthNotes = healthNotes,
+            isVaccinated = isVaccinated,
+            isVerified = isVerified,
+            imageUrl = primaryImg,
+            imageUrls = resolvedImages,
+            farmId = farmId,
+            farmName = farmName,
+            farmLocation = farmLocation,
+            farmContact = farmContact,
+            approvalStatus = ApprovalStatus.fromString(approvalStatus),
+            availabilityStatus = AvailabilityStatus.fromString(availabilityStatus),
+            isActive = isActive,
+            rejectionReason = rejectionReason
         )
     }
 
     companion object {
-        fun fromDomain(report: PlatformReport): ReportDto {
-            return ReportDto(
-                id = ensureValidUuid(report.id),
-                reporterId = ensureValidUuid(report.reporterId),
-                reporterName = report.reporterName,
-                reporterEmail = report.reporterEmail,
-                targetType = report.targetType.ifBlank { "GOAT" },
-                targetId = ensureValidUuid(report.targetId),
-                targetTitle = report.targetTitle,
-                reason = report.reason,
-                description = report.description,
-                evidencePhotoUrl = report.evidencePhotoUrl,
-                status = report.status.ifBlank { "PENDING" },
-                resolutionNotes = report.resolutionNotes.ifBlank { null },
-                createdAt = currentIsoTimestamp()
+        fun fromDomain(goat: Goat): GoatDto {
+            val computedFinal = if (goat.discountPercentage > 0.0) {
+                goat.price * (1.0 - (goat.discountPercentage / 100.0))
+            } else {
+                goat.price
+            }
+            val allImages = if (goat.imageUrls.isNotEmpty()) goat.imageUrls else listOfNotNull(goat.imageUrl.takeIf { it.isNotBlank() })
+            return GoatDto(
+                id = goat.id,
+                goatCode = goat.goatCode,
+                tagId = goat.tagId,
+                name = goat.name,
+                breed = goat.breed,
+                gender = goat.gender,
+                ageMonths = goat.ageMonths,
+                weightKg = goat.weightKg,
+                price = goat.price,
+                discountPercentage = goat.discountPercentage,
+                finalPrice = computedFinal,
+                color = goat.color,
+                purpose = goat.purpose,
+                description = goat.description,
+                healthNotes = goat.healthNotes,
+                isVaccinated = goat.isVaccinated,
+                isVerified = goat.isVerified,
+                imageUrl = goat.imageUrl.ifBlank { allImages.firstOrNull() ?: "" },
+                imageUrls = allImages,
+                farmId = goat.farmId,
+                farmName = goat.farmName,
+                farmLocation = goat.farmLocation,
+                farmContact = goat.farmContact,
+                approvalStatus = goat.approvalStatus.name,
+                availabilityStatus = goat.availabilityStatus.name,
+                isActive = goat.isActive,
+                rejectionReason = goat.rejectionReason
             )
         }
     }
 }
+
+@Serializable
+data class BookingDto(
+    val id: String = "",
+    @SerialName("booking_code") val bookingCode: String = "",
+    @SerialName("goat_id") val goatId: String = "",
+    @SerialName("goat_name") val goatName: String = "",
+    @SerialName("goat_breed") val goatBreed: String = "",
+    @SerialName("goat_image_url") val goatImageUrl: String = "",
+    @SerialName("goat_price") val goatPrice: Double = 0.0,
+    @SerialName("advance_amount") val advanceAmount: Double = 0.0,
+    @SerialName("customer_id") val customerId: String = "",
+    @SerialName("customer_name") val customerName: String = "",
+    @SerialName("customer_phone") val customerPhone: String = "",
+    @SerialName("customer_email") val customerEmail: String = "",
+    @SerialName("farm_id") val farmId: String = "",
+    @SerialName("farm_name") val farmName: String = "",
+    @SerialName("farm_phone") val farmPhone: String = "",
+    @SerialName("preferred_visit_date") val preferredVisitDate: String = "",
+    val notes: String = "",
+    val status: String = "PENDING",
+    @SerialName("payment_status") val paymentStatus: String = "UNPAID",
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
+) {
+    fun toDomain(): Booking {
+        return Booking(
+            id = id,
+            bookingCode = bookingCode,
+            goatId = goatId,
+            goatName = goatName,
+            goatBreed = goatBreed,
+            goatImageUrl = goatImageUrl,
+            goatPrice = goatPrice,
+            advanceAmount = advanceAmount,
+            customerId = customerId,
+            customerName = customerName,
+            customerPhone = customerPhone,
+            customerEmail = customerEmail,
+            farmId = farmId,
+            farmName = farmName,
+            farmPhone = farmPhone,
+            preferredVisitDate = preferredVisitDate,
+            notes = notes,
+            status = BookingStatus.fromString(status),
+            paymentStatus = paymentStatus,
+            createdAt = createdAt ?: ""
+        )
+    }
+
+    companion object {
+        fun fromDomain(booking: Booking): BookingDto {
+            return BookingDto(
+                id = booking.id,
+                bookingCode = booking.bookingCode,
+                goatId = booking.goatId,
+                goatName = booking.goatName,
+                goatBreed = booking.goatBreed,
+                goatImageUrl = booking.goatImageUrl,
+                goatPrice = booking.goatPrice,
+                advanceAmount = booking.advanceAmount,
+                customerId = booking.customerId,
+                customerName = booking.customerName,
+                customerPhone = booking.customerPhone,
+                customerEmail = booking.customerEmail,
+                farmId = booking.farmId,
+                farmName = booking.farmName,
+                farmPhone = booking.farmPhone,
+                preferredVisitDate = booking.preferredVisitDate,
+                notes = booking.notes,
+                status = booking.status.name,
+                paymentStatus = booking.paymentStatus,
+                createdAt = booking.createdAt.ifBlank { null }
+            )
+        }
+    }
+}
+
+@Serializable
+data class WishlistDto(
+    val id: String = "",
+    @SerialName("user_id") val userId: String = "",
+    @SerialName("goat_id") val goatId: String = "",
+    @SerialName("created_at") val createdAt: String? = null
+)
+
+@Serializable
+data class NotificationDto(
+    val id: String = "",
+    @SerialName("user_id") val userId: String = "",
+    val title: String = "",
+    val message: String = "",
+    val type: String = "GENERAL",
+    @SerialName("is_read") val isRead: Boolean = false,
+    @SerialName("reference_id") val referenceId: String? = null,
+    @SerialName("created_at") val createdAt: String? = null
+) {
+    fun toDomain(): AppNotification {
+        return AppNotification(
+            id = id,
+            userId = userId,
+            title = title,
+            message = message,
+            type = type,
+            isRead = isRead,
+            referenceId = referenceId,
+            createdAt = createdAt ?: ""
+        )
+    }
+}
+
+@Serializable
+data class ReviewDto(
+    val id: String = "",
+    @SerialName("farm_id") val farmId: String = "",
+    @SerialName("customer_id") val customerId: String = "",
+    @SerialName("customer_name") val customerName: String = "",
+    val rating: Int = 5,
+    val comment: String = "",
+    @SerialName("created_at") val createdAt: String? = null
+) {
+    fun toDomain(): FarmReview {
+        return FarmReview(
+            id = id,
+            farmId = farmId,
+            customerId = customerId,
+            customerName = customerName,
+            rating = rating,
+            comment = comment,
+            createdAt = createdAt ?: ""
+        )
+    }
+}
+
+@Serializable
+data class ListingReportDto(
+    val id: String = "",
+    @SerialName("goat_id") val goatId: String = "",
+    @SerialName("reporter_id") val reporterId: String = "",
+    val reason: String = "",
+    val status: String = "OPEN",
+    @SerialName("created_at") val createdAt: String? = null
+) {
+    fun toDomain(): ListingReport {
+        return ListingReport(
+            id = id,
+            goatId = goatId,
+            reporterId = reporterId,
+            reason = reason,
+            status = status,
+            createdAt = createdAt ?: ""
+        )
+    }
+}
+
+@Serializable
+data class PlatformPricingSettingsDto(
+    val id: Int = 1,
+    @SerialName("farm_approval_fee_inr") val farmApprovalFeeInr: Double = 500.0,
+    @SerialName("goat_listing_pack_fee_inr") val goatListingPackFeeInr: Double = 200.0,
+    @SerialName("goat_listing_pack_size") val goatListingPackSize: Int = 5
+)

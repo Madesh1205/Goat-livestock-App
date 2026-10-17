@@ -10,14 +10,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ammalfarm.adusanthai.ui.viewmodel.AuthUiState
+import com.ammalfarm.adusanthai.ui.viewmodel.AuthViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ForgotPasswordScreen(
+    authViewModel: AuthViewModel? = null,
+    uiState: AuthUiState? = null,
     onNavigateBack: () -> Unit,
+    onPasswordResetSuccess: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var email by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf(uiState?.prefilledEmail ?: "") }
     var submitted by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -42,8 +47,12 @@ fun ForgotPasswordScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(20.dp))
-            Text("Enter your account email to receive a password reset link.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            
+            Text(
+                "Enter your account email to receive a password reset link.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -54,14 +63,24 @@ fun ForgotPasswordScreen(
             )
 
             Button(
-                onClick = { submitted = true },
+                onClick = {
+                    if (email.isNotBlank()) {
+                        authViewModel?.sendPasswordReset(email.trim())
+                        submitted = true
+                    }
+                },
+                enabled = email.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Send Reset Instructions")
             }
 
             if (submitted) {
-                Text("If an account exists with this email, reset instructions have been sent.", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "If an account exists with this email, reset instructions have been sent.",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }

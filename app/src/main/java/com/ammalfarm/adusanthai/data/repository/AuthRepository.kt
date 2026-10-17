@@ -96,11 +96,10 @@ class AuthRepositoryImpl(
                             }
                         }
                         is SessionStatus.NotAuthenticated -> {
-                            // Only clear state if there is no locally cached profile being used
-                            if (_currentUser.value == null) {
-                                _currentFarm.value = null
-                                _authState.update { it.copy(isAuthenticated = false, userProfile = null, userFarm = null) }
-                            }
+                            clearLocalCache()
+                            _currentUser.value = null
+                            _currentFarm.value = null
+                            _authState.update { it.copy(isAuthenticated = false, userProfile = null, userFarm = null) }
                         }
                         else -> {}
                     }
@@ -160,20 +159,28 @@ class AuthRepositoryImpl(
 
     override suspend fun checkExistingSession(): Result<UserProfile?> {
         if (!SupabaseConfig.isConfigured) {
-            return Result.success(_currentUser.value)
+            return Result.success(null)
         }
         return try {
             val session = SupabaseModule.auth.currentSessionOrNull()
             if (session != null && session.user != null) {
                 val profileResult = fetchAndSyncUserProfile(session.user!!.id)
-                Result.success(profileResult.getOrNull() ?: _currentUser.value)
-            } else if (_currentUser.value != null) {
-                Result.success(_currentUser.value)
+                val profile = profileResult.getOrNull() ?: _currentUser.value
+                if (profile != null && profile.isSuspended) {
+                    logout()
+                    Result.success(null)
+                } else {
+                    Result.success(profile)
+                }
             } else {
+                clearLocalCache()
+                _currentUser.value = null
+                _currentFarm.value = null
+                _authState.update { it.copy(isAuthenticated = false, userProfile = null, userFarm = null) }
                 Result.success(null)
             }
         } catch (e: Exception) {
-            Result.success(_currentUser.value)
+            Result.success(null)
         }
     }
 
@@ -255,18 +262,6 @@ class AuthRepositoryImpl(
             val metadataPhone = authUser?.userMetadata?.get("phone")?.toString()?.replace("\"", "")
             val metadataRoleStr = authUser?.userMetadata?.get("role")?.toString()?.replace("\"", "")
 
-            val normalizedEmail = targetEmail.trim().lowercase()
-            val isDesignatedSuperAdminEmail = normalizedEmail.isNotBlank() && (
-                normalizedEmail == "madesh1205@gmail.com" ||
-                normalizedEmail == "admin@ammalfarm.com" ||
-                normalizedEmail == "superadmin@ammalfarm.com" ||
-                normalizedEmail.startsWith("superadmin@") ||
-                normalizedEmail.startsWith("superadmin.") ||
-                normalizedEmail.contains("superadmin") ||
-                normalizedEmail.startsWith("admin@") ||
-                normalizedEmail.startsWith("admin.")
-            )
-
             val profileRoleParsed = profileDto?.role?.let { UserRole.fromString(it) }
 
             // Find associated farm in Supabase if exists
@@ -278,14 +273,25 @@ class AuthRepositoryImpl(
                         .decodeList<FarmDto>()
                     resolvedFarm = farmDtos.firstOrNull()?.toDomain()
                 }
+                if (resolvedFarm == null && !networkErrorEncountered && !profileDto?.farmId.isNullOrBlank()) {
+                    val farmDtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+                        .select { filter { eq("id", profileDto!!.farmId!!) } }
+                        .decodeList<FarmDto>()
+                    resolvedFarm = farmDtos.firstOrNull()?.toDomain()
+                }
             } catch (_: Exception) {}
 
+            // Never grant SUPER_ADMIN from client metadata or hardcoded emails; derive from trusted database profile.
+            val sanitizedMetadataRole = metadataRoleStr?.let {
+                val parsed = UserRole.fromString(it)
+                if (parsed == UserRole.SUPER_ADMIN) UserRole.CUSTOMER else parsed
+            }
+
             val resolvedRole = when {
-                isDesignatedSuperAdminEmail -> UserRole.SUPER_ADMIN
-                profileRoleParsed != null && profileRoleParsed != UserRole.CUSTOMER -> profileRoleParsed
+                profileRoleParsed != null -> profileRoleParsed
                 resolvedFarm != null -> UserRole.FARM_ADMIN
-                metadataRoleStr != null -> UserRole.fromString(metadataRoleStr)
-                else -> profileRoleParsed ?: UserRole.CUSTOMER
+                sanitizedMetadataRole != null -> sanitizedMetadataRole
+                else -> UserRole.CUSTOMER
             }
 
             val resolvedName = profileDto?.fullName?.takeIf { it.isNotBlank() }
@@ -296,7 +302,7 @@ class AuthRepositoryImpl(
                 ?: metadataPhone?.takeIf { it.isNotBlank() }
                 ?: ""
 
-            val resolvedFarmId = resolvedFarm?.id ?: profileDto?.farmId
+            val resolvedFarmId = if (resolvedRole == UserRole.CUSTOMER) null else (resolvedFarm?.id ?: profileDto?.farmId)
 
             val finalProfile = UserProfile(
                 id = targetId,
@@ -326,94 +332,61 @@ class AuthRepositoryImpl(
             Result.success(finalProfile)
         } catch (e: Exception) {
             Log.e(TAG, "Error syncing user profile: ${e.message}", e)
-            val isAdmin = isDesignatedSuperAdminEmail(targetEmail)
-            val fallback = _currentUser.value ?: UserProfile(
-                id = targetId,
-                email = targetEmail,
-                name = if (targetEmail.isNotBlank()) targetEmail.substringBefore("@").replaceFirstChar { it.uppercase() } else "User",
-                role = if (isAdmin) UserRole.SUPER_ADMIN else UserRole.CUSTOMER,
-                farmId = if (isAdmin) SEED_AMMAL_FARM_UUID else null
-            )
-            Result.success(fallback)
+            val existing = _currentUser.value
+            if (existing != null && existing.id == targetId) {
+                Result.success(existing)
+            } else {
+                Result.failure(e)
+            }
         }
-    }
-
-    private fun isDesignatedSuperAdminEmail(email: String): Boolean {
-        val normalizedEmail = email.trim().lowercase()
-        return normalizedEmail.isNotBlank() && (
-            normalizedEmail == "madesh1205@gmail.com" ||
-            normalizedEmail == "admin@ammalfarm.com" ||
-            normalizedEmail == "superadmin@ammalfarm.com" ||
-            normalizedEmail.startsWith("superadmin@") ||
-            normalizedEmail.startsWith("superadmin.") ||
-            normalizedEmail.contains("superadmin") ||
-            normalizedEmail.startsWith("admin@") ||
-            normalizedEmail.startsWith("admin.")
-        )
     }
 
     override suspend fun login(email: String, password: String): Result<UserProfile> {
         _authState.update { it.copy(isLoading = true, errorMessage = null) }
         val cleanEmail = email.trim().lowercase()
-        val isDesignatedAdmin = isDesignatedSuperAdminEmail(cleanEmail)
+
+        if (!isValidEmail(cleanEmail)) {
+            val err = "Please enter a valid email address."
+            _authState.update { it.copy(isLoading = false, errorMessage = err) }
+            return Result.failure(IllegalArgumentException(err))
+        }
+
+        if (password.isBlank()) {
+            val err = "Please enter your password."
+            _authState.update { it.copy(isLoading = false, errorMessage = err) }
+            return Result.failure(IllegalArgumentException(err))
+        }
 
         if (!SupabaseConfig.isConfigured) {
-            val role = if (isDesignatedAdmin) UserRole.SUPER_ADMIN else UserRole.CUSTOMER
-            val mockUser = UserProfile(
-                id = UUID.randomUUID().toString(),
-                email = cleanEmail,
-                name = cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
-                role = role,
-                farmId = if (isDesignatedAdmin) SEED_AMMAL_FARM_UUID else null
-            )
-            _currentUser.value = mockUser
-            saveCachedProfile(mockUser)
-            _authState.update {
-                it.copy(
-                    isLoading = false,
-                    isAuthenticated = true,
-                    userProfile = mockUser,
-                    userFarm = _currentFarm.value
-                )
-            }
-            return Result.success(mockUser)
+            val err = "Backend authentication service is not configured."
+            _authState.update { it.copy(isLoading = false, isAuthenticated = false, errorMessage = err) }
+            return Result.failure(IllegalStateException(err))
         }
 
         return try {
-            try {
-                SupabaseModule.auth.signInWith(Email) {
-                    this.email = cleanEmail
-                    this.password = password
-                }
-            } catch (firstErr: Exception) {
-                val trimmedPass = password.trim()
-                if (trimmedPass != password && trimmedPass.isNotEmpty()) {
-                    SupabaseModule.auth.signInWith(Email) {
-                        this.email = cleanEmail
-                        this.password = trimmedPass
-                    }
-                } else {
-                    throw firstErr
-                }
+            SupabaseModule.auth.signInWith(Email) {
+                this.email = cleanEmail
+                this.password = password
             }
 
-            val userId = SupabaseModule.auth.currentUserOrNull()?.id
-            val syncResult = fetchAndSyncUserProfile(userId)
-            val fallbackRole = if (isDesignatedAdmin) UserRole.SUPER_ADMIN else UserRole.CUSTOMER
-            val rawUser = syncResult.getOrNull() ?: _currentUser.value ?: UserProfile(
-                id = userId ?: UUID.randomUUID().toString(),
-                email = cleanEmail,
-                name = cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() },
-                role = fallbackRole
-            )
-            val user = if (isDesignatedAdmin && rawUser.role != UserRole.SUPER_ADMIN) {
-                rawUser.copy(
-                    role = UserRole.SUPER_ADMIN,
-                    farmId = rawUser.farmId ?: SEED_AMMAL_FARM_UUID
-                )
-            } else {
-                rawUser
+            val session = SupabaseModule.auth.currentSessionOrNull()
+            val userId = session?.user?.id ?: SupabaseModule.auth.currentUserOrNull()?.id
+            if (userId.isNullOrBlank()) {
+                throw IllegalStateException("Authentication succeeded but no valid user session was returned.")
             }
+
+            val syncResult = fetchAndSyncUserProfile(userId)
+            val user = syncResult.getOrElse { syncErr ->
+                throw IllegalStateException("Failed to load user profile: ${syncErr.message}", syncErr)
+            }
+
+            if (user.isSuspended) {
+                logout()
+                val suspendedMsg = "Your account has been suspended. Please contact platform support."
+                _authState.update { it.copy(isLoading = false, isAuthenticated = false, errorMessage = suspendedMsg) }
+                return Result.failure(IllegalStateException(suspendedMsg))
+            }
+
             _currentUser.value = user
             saveCachedProfile(user)
             _authState.update {
@@ -428,75 +401,14 @@ class AuthRepositoryImpl(
             Result.success(user)
         } catch (e: Exception) {
             Log.e(TAG, "Login failed: ${e.message}", e)
-            if (isDesignatedAdmin) {
-                // Attempt auto-provisioning or fallback session for designated Super Admin
-                try {
-                    SupabaseModule.auth.signUpWith(Email) {
-                        this.email = cleanEmail
-                        this.password = password.trim().ifEmpty { password }
-                        this.data = buildJsonObject {
-                            put("full_name", "Madesh")
-                            put("phone", "+91 63808 98358")
-                            put("role", "SUPER_ADMIN")
-                        }
-                    }
-                } catch (_: Exception) {}
-
-                var resolvedProfileDto: ProfileDto? = null
-                var resolvedFarm: Farm? = null
-                try {
-                    resolvedProfileDto = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
-                        .select { filter { eq("email", cleanEmail) } }
-                        .decodeSingleOrNull<ProfileDto>()
-                } catch (_: Exception) {}
-
-                try {
-                    val farmDtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
-                        .select { filter { eq("id", SEED_AMMAL_FARM_UUID) } }
-                        .decodeList<FarmDto>()
-                    resolvedFarm = farmDtos.firstOrNull()?.toDomain()
-                } catch (_: Exception) {}
-
-                val adminId = SupabaseModule.auth.currentUserOrNull()?.id
-                    ?: resolvedProfileDto?.id?.takeIf { it.isNotBlank() }
-                    ?: _currentUser.value?.id?.takeIf { it.isNotBlank() }
-                    ?: UUID.randomUUID().toString()
-
-                val adminName = resolvedProfileDto?.fullName?.takeIf { it.isNotBlank() }
-                    ?: if (cleanEmail == "madesh1205@gmail.com") "Madesh" else cleanEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
-
-                val adminPhone = resolvedProfileDto?.phone?.takeIf { it.isNotBlank() } ?: "+91 63808 98358"
-
-                val adminUser = UserProfile(
-                    id = adminId,
-                    email = cleanEmail,
-                    name = adminName,
-                    phone = adminPhone,
-                    isPhoneVerified = true,
-                    role = UserRole.SUPER_ADMIN,
-                    farmId = resolvedFarm?.id ?: SEED_AMMAL_FARM_UUID
-                )
-
-                _currentUser.value = adminUser
-                if (resolvedFarm != null) {
-                    _currentFarm.value = resolvedFarm
-                    FarmLocalCache.saveFarmProfile(resolvedFarm)
-                }
-                saveCachedProfile(adminUser)
-                _authState.update {
-                    it.copy(
-                        isLoading = false,
-                        isAuthenticated = true,
-                        userProfile = adminUser,
-                        userFarm = _currentFarm.value,
-                        errorMessage = null
-                    )
-                }
-                return Result.success(adminUser)
-            }
-
             val friendlyMsg = parseAuthErrorMessage(e)
-            _authState.update { it.copy(isLoading = false, errorMessage = friendlyMsg) }
+            _authState.update {
+                it.copy(
+                    isLoading = false,
+                    isAuthenticated = false,
+                    errorMessage = friendlyMsg
+                )
+            }
             Result.failure(Exception(friendlyMsg, e))
         }
     }
@@ -878,26 +790,32 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun updateProfile(name: String, phone: String): Result<UserProfile> {
-        val current = _currentUser.value ?: UserProfile(
-            id = UUID.randomUUID().toString(),
-            email = "",
-            name = name,
-            phone = phone
-        )
-        val updated = current.copy(name = name, phone = phone)
-        _currentUser.value = updated
-        saveCachedProfile(updated)
-        _authState.update { it.copy(userProfile = updated) }
+        val current = _currentUser.value
+            ?: return Result.failure(IllegalStateException("No authenticated user session."))
+        val cleanName = name.trim()
+        val cleanPhone = phone.trim()
+        val updated = current.copy(name = cleanName, phone = cleanPhone)
 
         if (SupabaseConfig.isConfigured && current.id.isNotBlank()) {
             try {
-                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].upsert(
-                    ProfileDto.fromDomain(updated)
-                )
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES].update(
+                    {
+                        set("full_name", cleanName)
+                        set("phone", cleanPhone)
+                        set("updated_at", currentIsoTimestamp())
+                    }
+                ) {
+                    filter { eq("id", current.id) }
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "Notice updating remote profile: ${e.message}")
+                Log.w(TAG, "Error updating remote profile: ${e.message}", e)
+                return Result.failure(Exception(UserFriendlyErrorMapper.toUserMessage(e), e))
             }
         }
+
+        _currentUser.value = updated
+        saveCachedProfile(updated)
+        _authState.update { it.copy(userProfile = updated) }
         return Result.success(updated)
     }
 
@@ -916,8 +834,17 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun deleteAccount(): Result<Unit> {
-        logout()
-        return Result.success(Unit)
+        return try {
+            if (SupabaseConfig.isConfigured) {
+                SupabaseModule.client.postgrest.rpc("delete_user_account")
+            }
+            logout()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete account: ${e.message}", e)
+            val msg = UserFriendlyErrorMapper.toUserMessage(e, "Unable to delete account right now.")
+            Result.failure(Exception(msg, e))
+        }
     }
 
     private fun isValidEmail(email: String): Boolean {

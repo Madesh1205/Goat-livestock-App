@@ -1,7 +1,5 @@
 package com.ammalfarm.adusanthai.model
 
-import com.ammalfarm.adusanthai.model.ApprovalStatus
-
 enum class UserRole {
     CUSTOMER,
     FARM_ADMIN,
@@ -24,7 +22,17 @@ enum class VerificationStatus {
     VERIFIED,
     APPROVED,
     REJECTED,
-    SUSPENDED
+    SUSPENDED;
+
+    val isApprovedOrVerified: Boolean
+        get() = this == VERIFIED || this == APPROVED
+
+    companion object {
+        fun fromString(value: String?): VerificationStatus {
+            if (value.isNullOrBlank()) return PENDING
+            return entries.find { it.name.equals(value.trim(), ignoreCase = true) } ?: PENDING
+        }
+    }
 }
 
 enum class AuthScreenMode {
@@ -54,6 +62,7 @@ data class Farm(
     val ownerId: String = "",
     val ownerName: String = "",
     val location: String = "",
+    val district: String = "",
     val state: String = "Tamil Nadu",
     val contactNumber: String = "",
     val email: String = "",
@@ -66,11 +75,13 @@ data class Farm(
     val goatListingLimit: Int = 5,
     val consumedListingSlots: Int = 0,
     val isAmmalOwnFarm: Boolean = false,
+    val approvalFeePaid: Boolean = false,
+    val approvalFeeAmount: Double = 500.0,
     val rating: Double = 5.0,
     val reviewCount: Int = 0,
+    val totalReviews: Int = reviewCount,
     val createdAt: Long = System.currentTimeMillis()
 ) {
-    val totalReviews: Int get() = reviewCount
     val totalGoatsListed: Int get() = consumedListingSlots
 }
 

@@ -1,83 +1,58 @@
 package com.ammalfarm.adusanthai.model
 
-import com.ammalfarm.adusanthai.core.util.PriceUtils
-
 enum class ApprovalStatus {
     PENDING,
-    PENDING_APPROVAL,
     APPROVED,
-    REJECTED,
-    SUSPENDED,
-    DRAFT
+    REJECTED;
+
+    companion object {
+        fun fromString(value: String?): ApprovalStatus {
+            if (value == null) return PENDING
+            return entries.find { it.name.equals(value.trim(), ignoreCase = true) } ?: PENDING
+        }
+    }
 }
 
 enum class AvailabilityStatus {
     AVAILABLE,
     RESERVED,
-    BOOKED,
     SOLD,
-    SUSPENDED,
-    BOOKING_PENDING
+    UNAVAILABLE;
+
+    companion object {
+        fun fromString(value: String?): AvailabilityStatus {
+            if (value == null) return AVAILABLE
+            return entries.find { it.name.equals(value.trim(), ignoreCase = true) } ?: AVAILABLE
+        }
+    }
 }
 
 enum class BookingStatus {
     PENDING,
-    BOOKING_PENDING,
-    RESERVED,
     CONFIRMED,
+    APPROVED,
+    COMPLETED,
     REJECTED,
     CANCELLED,
-    COMPLETED,
-    EXPIRED
-}
+    EXPIRED;
 
-enum class SortOption {
-    PRICE_LOW_TO_HIGH,
-    PRICE_HIGH_TO_LOW,
-    NEWEST,
-    POPULAR
-}
-
-enum class GoatGender {
-    MALE,
-    FEMALE,
-    OTHER
-}
-
-enum class GoatPurpose {
-    BREEDING,
-    MEAT,
-    DAIRY,
-    OTHER
-}
-
-enum class ReportStatus {
-    PENDING,
-    RESOLVED,
-    DISMISSED
-}
-
-enum class ReportReason {
-    INAPPROPRIATE,
-    FRAUD,
-    SPAM,
-    OTHER
+    companion object {
+        fun fromString(value: String?): BookingStatus {
+            if (value == null) return PENDING
+            return entries.find { it.name.equals(value.trim(), ignoreCase = true) } ?: PENDING
+        }
+    }
 }
 
 enum class NotificationType {
-    GENERAL,
-    BOOKING,
-    FARM,
-    ADMIN,
-    PAYMENT,
     BOOKING_CREATED,
     BOOKING_CONFIRMED,
     BOOKING_REJECTED,
     BOOKING_CANCELLED,
+    BOOKING_CANCELLATION,
     RESERVATION_EXPIRY,
     LISTING_UPDATE,
     NEW_BOOKING,
-    BOOKING_CANCELLATION,
     LISTING_PAYMENT_SUCCESS,
     LISTING_PAYMENT_FAILED,
     LISTING_APPROVED,
@@ -90,175 +65,131 @@ enum class NotificationType {
     NEW_LISTING_PENDING,
     NEW_PAYMENT_RECEIVED,
     NEW_REPORT_SUBMITTED,
-    SYSTEM_ALERT
+    SYSTEM_ALERT,
+    GENERAL
 }
 
-data class Goat(
-    val id: String = "",
-    val goatCode: String = "",
-    val farmId: String = "",
-    val farmCode: String = "",
-    val farmName: String = "",
-    val farmLocation: String = "",
-    val name: String = "",
-    val breed: String = "",
-    val goatBreed: String = "",
-    val ageMonths: Int = 0,
-    val weightKg: Double = 0.0,
-    val price: Double = 0.0,
-    val discountPercentage: Double = 0.0,
-    val purpose: GoatPurpose = GoatPurpose.BREEDING,
-    val description: String = "",
-    val imageUrls: List<String> = emptyList(),
-    val photos: List<String> = emptyList(),
-    val goatPhoto: String? = null,
-    val gender: GoatGender = GoatGender.MALE,
-    val healthStatus: String = "Healthy",
-    val isAvailable: Boolean = true,
-    val isFeatured: Boolean = false,
-    val availabilityStatus: AvailabilityStatus = AvailabilityStatus.AVAILABLE,
-    val approvalStatus: ApprovalStatus = ApprovalStatus.PENDING,
-    val listingFeePaid: Boolean = false,
-    val listingFeeAmount: Double = 0.0,
-    val rating: Double = 5.0,
-    val reviewCount: Int = 0,
-    val createdAt: Long = System.currentTimeMillis()
-) {
-    val finalPrice: Double
-        get() = if (discountPercentage > 0.0) price * (1.0 - discountPercentage / 100.0) else price
-
-    fun calculateFinalPrice(): Double = finalPrice
-
-    val hasDiscount: Boolean
-        get() = discountPercentage > 0.0
-
-    val formattedPrice: String
-        get() = PriceUtils.formatCurrency(price)
-
-    val formattedFinalPrice: String
-        get() = PriceUtils.formatCurrency(finalPrice)
-
-    val formattedDiscountBadge: String
-        get() = if (hasDiscount) "${discountPercentage.toInt()}% OFF" else ""
-}
-
-data class Booking(
-    val id: String = "",
-    val bookingCode: String = "",
-    val goatId: String = "",
-    val goatCode: String = "",
-    val customerId: String = "",
-    val customerPhone: String = "",
-    val farmId: String = "",
-    val customerName: String = "",
-    val goatName: String = "",
-    val goatBreed: String = "",
-    val goatPhoto: String? = null,
-    val farmName: String = "",
-    val amount: Double = 0.0,
-    val finalPrice: Double = 0.0,
-    val status: Any = "PENDING",
-    val paymentStatus: String = "PENDING",
-    val availabilityStatus: AvailabilityStatus = AvailabilityStatus.AVAILABLE,
-    val bookingDate: Long = System.currentTimeMillis(),
-    val reservationExpiryDate: Long = System.currentTimeMillis(),
-    val notes: String = "",
-    val createdAt: Long = System.currentTimeMillis()
-) {
-    fun calculateFinalPrice(): Double = if (finalPrice > 0.0) finalPrice else amount
-}
+data class GoatFilterCriteria(
+    val searchQuery: String = "",
+    val breed: String? = null,
+    val gender: String? = null,
+    val purpose: String? = null,
+    val district: String? = null,
+    val minPrice: Double? = null,
+    val maxPrice: Double? = null,
+    val onlyAvailable: Boolean = false
+)
 
 data class WishlistItem(
     val id: String = "",
     val userId: String = "",
     val goatId: String = "",
     val goat: Goat? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: String? = null
+)
+
+data class Goat(
+    val id: String = "",
+    val goatCode: String = "",
+    val tagId: String = "",
+    val name: String = "",
+    val breed: String = "",
+    val gender: String = "Male",
+    val ageMonths: Int = 12,
+    val weightKg: Double = 25.0,
+    val price: Double = 0.0,
+    val discountPercentage: Double = 0.0,
+    val finalPrice: Double = price,
+    val color: String = "",
+    val purpose: String = "Breeding",
+    val description: String = "",
+    val healthNotes: String = "",
+    val isVaccinated: Boolean = true,
+    val isVerified: Boolean = false,
+    val imageUrl: String = "",
+    val imageUrls: List<String> = emptyList(),
+    val farmId: String = "",
+    val farmName: String = "",
+    val farmLocation: String = "",
+    val farmContact: String = "",
+    val approvalStatus: ApprovalStatus = ApprovalStatus.APPROVED,
+    val availabilityStatus: AvailabilityStatus = AvailabilityStatus.AVAILABLE,
+    val isActive: Boolean = true,
+    val rejectionReason: String? = null
+) {
+    val effectivePrice: Double
+        get() = if (finalPrice > 0.0 && finalPrice < price) finalPrice
+        else if (discountPercentage > 0.0) price * (1.0 - discountPercentage / 100.0)
+        else price
+}
+
+data class Booking(
+    val id: String = "",
+    val bookingCode: String = "",
+    val goatId: String = "",
+    val goatName: String = "",
+    val goatBreed: String = "",
+    val goatImageUrl: String = "",
+    val goatPrice: Double = 0.0,
+    val advanceAmount: Double = 0.0,
+    val customerId: String = "",
+    val customerName: String = "",
+    val customerPhone: String = "",
+    val customerEmail: String = "",
+    val farmId: String = "",
+    val farmName: String = "",
+    val farmPhone: String = "",
+    val preferredVisitDate: String = "",
+    val notes: String = "",
+    val status: BookingStatus = BookingStatus.PENDING,
+    val paymentStatus: String = "UNPAID",
+    val createdAt: String = ""
 )
 
 data class AppNotification(
     val id: String = "",
     val userId: String = "",
-    val recipientUserId: String = "",
-    val targetRole: UserRole? = null,
     val title: String = "",
     val message: String = "",
+    val type: String = "GENERAL",
     val isRead: Boolean = false,
-    val type: Any = "GENERAL",
-    val notificationType: NotificationType = NotificationType.GENERAL,
     val referenceId: String? = null,
-    val deepLinkRoute: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: String = ""
 )
 
-data class PlatformReport(
-    val id: String = "",
-    val reporterId: String = "",
-    val reporterName: String = "",
-    val reporterEmail: String = "",
-    val targetType: String = "",
-    val targetId: String = "",
-    val targetTitle: String = "",
-    val reason: String = "",
-    val description: String = "",
-    val evidencePhotoUrl: String? = null,
-    val evidencePhotos: List<String> = emptyList(),
-    val status: String = "PENDING",
-    val reportStatus: ReportStatus = ReportStatus.PENDING,
-    val resolutionNotes: String = "",
-    val createdAt: Long = System.currentTimeMillis()
-)
-
-data class ListingPayment(
+data class FarmReview(
     val id: String = "",
     val farmId: String = "",
+    val customerId: String = "",
+    val customerName: String = "",
+    val rating: Int = 5,
+    val comment: String = "",
+    val createdAt: String = ""
+)
+
+data class ListingReport(
+    val id: String = "",
     val goatId: String = "",
-    val amount: Double = 0.0,
-    val status: String = "PENDING",
-    val transactionId: String = "",
-    val receiptNumber: String = "",
-    val slotsAdded: Int = 1,
-    val createdAt: Long = System.currentTimeMillis()
-)
-
-data class ListingPaymentInitiation(
-    val orderId: String = "",
-    val amount: Double = 0.0
-)
-
-data class PlatformPricing(
-    val commissionPercent: Double = 5.0,
-    val featuredListingFee: Double = 100.0,
-    val approvalPrice: Double = 50.0,
-    val slotPrice: Double = 50.0,
-    val additionalSlotPrice: Double = 50.0,
-    val defaultInitialSlots: Int = 5,
-    val currency: String = "INR"
+    val reporterId: String = "",
+    val reason: String = "",
+    val status: String = "OPEN",
+    val createdAt: String = ""
 )
 
 data class PlatformStats(
-    val totalUsers: Int = 0,
     val totalFarms: Int = 0,
+    val verifiedFarms: Int = 0,
+    val pendingFarms: Int = 0,
     val totalGoats: Int = 0,
+    val approvedGoats: Int = 0,
+    val pendingGoats: Int = 0,
+    val availableGoats: Int = 0,
+    val reservedGoats: Int = 0,
+    val soldGoats: Int = 0,
     val totalBookings: Int = 0,
-    val totalRevenue: Double = 0.0
-)
-
-data class GoatFilterCriteria(
-    val searchQuery: String = "",
-    val breed: String? = null,
-    val goatBreed: String? = null,
-    val farmId: String? = null,
-    val minPrice: Double? = null,
-    val maxPrice: Double? = null,
-    val minAgeMonths: Int? = null,
-    val maxAgeMonths: Int? = null,
-    val minWeightKg: Double? = null,
-    val maxWeightKg: Double? = null,
-    val location: String? = null,
-    val gender: String? = null,
-    val availability: AvailabilityStatus? = null,
-    val sortOption: SortOption = SortOption.NEWEST,
-    val sortBy: SortOption = SortOption.NEWEST,
-    val verificationStatus: VerificationStatus? = null
+    val pendingBookings: Int = 0,
+    val confirmedBookings: Int = 0,
+    val completedBookings: Int = 0,
+    val totalUsers: Int = 0,
+    val openReports: Int = 0
 )
