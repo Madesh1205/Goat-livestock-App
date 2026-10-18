@@ -39,7 +39,7 @@ fun ProfileScreen(
     authViewModel: AuthViewModel,
     uiState: AuthUiState,
     wishlistCount: Int = 0,
-    currentThemeMode: ThemeMode = ThemeMode.DARK,
+    currentThemeMode: ThemeMode = ThemeMode.SYSTEM,
     onThemeModeChanged: (ThemeMode) -> Unit = {},
     onLogoutSuccess: () -> Unit,
     onNavigateBack: () -> Unit,
