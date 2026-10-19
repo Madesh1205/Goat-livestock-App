@@ -35,8 +35,19 @@ class MainActivity : ComponentActivity() {
         val appContainer = (application as AmmalFarmApplication).container
 
         setContent {
-            AmmalFarmTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            val currentThemeMode by appContainer.themeManager.themeMode.collectAsStateWithLifecycle()
+            val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+            val isDarkTheme = when (currentThemeMode) {
+                com.ammalfarm.adusanthai.ui.theme.ThemeMode.LIGHT -> false
+                com.ammalfarm.adusanthai.ui.theme.ThemeMode.DARK -> true
+                com.ammalfarm.adusanthai.ui.theme.ThemeMode.SYSTEM -> systemDark
+            }
+
+            AmmalFarmTheme(darkTheme = isDarkTheme) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
+                ) {
                     val navController = rememberNavController()
                     val authViewModel: AuthViewModel = viewModel(
                         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
@@ -56,6 +67,7 @@ class MainActivity : ComponentActivity() {
                     )
 
                     val authUiState by authViewModel.uiState.collectAsStateWithLifecycle()
+                    val marketplaceUiState by marketplaceViewModel.uiState.collectAsStateWithLifecycle()
 
                     fun destinationForRole(role: UserRole): String {
                         return when (role) {
@@ -267,6 +279,11 @@ class MainActivity : ComponentActivity() {
                             ProfileScreen(
                                 authViewModel = authViewModel,
                                 uiState = authUiState,
+                                wishlistCount = marketplaceUiState.wishlistedIds.size,
+                                currentThemeMode = currentThemeMode,
+                                onThemeModeChanged = { mode ->
+                                    appContainer.themeManager.setThemeMode(mode)
+                                },
                                 onNavigateBack = { navController.popBackStack() },
                                 onNavigateToLogin = {
                                     navController.navigate(Screen.Login.route) {

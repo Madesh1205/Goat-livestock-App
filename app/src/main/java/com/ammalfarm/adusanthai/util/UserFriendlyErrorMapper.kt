@@ -191,8 +191,38 @@ object UserFriendlyErrorMapper {
 
     private fun extractEmbeddedMessage(raw: String): String {
         if (raw.isBlank()) return raw
-        val match = Regex(""""message"\s*:\s*"([^"]+)"""").find(raw)
-        return match?.groupValues?.get(1) ?: raw
+        val jsonMatch = Regex(""""message"\s*:\s*"([^"]+)"""").find(raw)
+        val candidate = jsonMatch?.groupValues?.get(1) ?: raw
+        return candidate
+            .lineSequence()
+            .filterNot { line ->
+                val trimmed = line.trim().lowercase()
+                trimmed.startsWith("url:") ||
+                    trimmed.startsWith("headers:") ||
+                    trimmed.startsWith("status code:") ||
+                    trimmed.startsWith("http status:")
+            }
+            .joinToString("\n")
+            .replace(Regex("""\s*\(URL:\s*https?://[^)]+\)""", RegexOption.IGNORE_CASE), "")
+            .trim()
+    }
+
+    private fun isQuotaExhaustedError(lowerMsg: String): Boolean {
+        if (lowerMsg.contains("only super admin") ||
+            lowerMsg.contains("permission denied") ||
+            lowerMsg.contains("violates row-level security") ||
+            lowerMsg.contains("column ") ||
+            lowerMsg.contains("does not exist")
+        ) {
+            return false
+        }
+        return lowerMsg.contains("quota has been fully consumed") ||
+            lowerMsg.contains("listing quota") ||
+            lowerMsg.contains("listing limit") ||
+            lowerMsg.contains("limit reached") ||
+            lowerMsg.contains("limit of") ||
+            lowerMsg.contains("no remaining listing") ||
+            (lowerMsg.contains("goat_listing_limit") && (lowerMsg.contains("reached") || lowerMsg.contains("exceeded") || lowerMsg.contains("full")))
     }
 
     /**
@@ -220,25 +250,49 @@ object UserFriendlyErrorMapper {
      */
     fun forGoatListing(throwable: Throwable?): String {
         if (throwable == null) return "Unable to save goat listing. Please try again."
-        val msg = (throwable.message ?: "").lowercase()
+        Log.e(TAG, "Goat listing error [${throwable::class.java.simpleName}]: ${throwable.message}", throwable)
+
+        val extracted = extractEmbeddedMessage(throwable.message ?: "")
+        val msg = extracted.lowercase()
 
         if (isNetworkFailure(throwable, msg)) {
             return "Unable to connect. Please check your internet connection and try again."
         }
-        if (msg.contains("must be approved") || msg.contains("approval fee") || msg.contains("farm registration is pending")) {
+        if (isSessionOrAuthFailure(msg) || msg.contains("authentication required") || msg.contains("not authenticated")) {
+            return "Your session has expired. Please sign in again."
+        }
+        if (msg.contains("image upload") || msg.contains("failed to upload") || msg.contains("storage") || msg.contains("bucket")) {
+            return "Failed to upload goat image(s). Please check your connection and try again."
+        }
+        if (msg.contains("own farm") ||
+            msg.contains("another farm") ||
+            msg.contains("farm ownership") ||
+            msg.contains("unauthorized farm") ||
+            msg.contains("do not own") ||
+            msg.contains("does not belong to")
+        ) {
+            return "You can only create or manage goat listings for your own farm."
+        }
+        if (msg.contains("only super admin can manage ammal")) {
+            return "Only Super Admin can manage Ammal Farm listings."
+        }
+        if (msg.contains("farm profile is not linked") || msg.contains("farm profile could not be loaded")) {
+            return "Your farm profile could not be loaded. Please refresh or save your Farm Info first."
+        }
+        if (msg.contains("must be approved") || msg.contains("must be verified") || msg.contains("approval fee") || msg.contains("farm registration is pending") || msg.contains("not verified")) {
             return "Your partner farm must be approved by Super Admin before you can add goats.\nPlease complete the initial approval fee payment."
         }
-        if (msg.contains("quota") || msg.contains("listing limit") || msg.contains("limit reached") || msg.contains("consumed") || msg.contains("goat_listing_limit")) {
+        if (isQuotaExhaustedError(msg)) {
             return "Your goat listing quota has been fully consumed. Contact Super Admin (+91 63808 98358) to purchase additional listing slots."
         }
-        if (isPermissionFailure(msg)) {
+        if (isPermissionFailure(msg) || msg.contains("only super admin")) {
             return "You do not have permission to add or modify this goat listing."
         }
-        if (isServerOrDatabaseFailure(msg) || containsLeakage(throwable.message)) {
+        if (isServerOrDatabaseFailure(msg) || containsLeakage(extracted)) {
             return "Unable to save goat listing right now. Please try again."
         }
 
-        return sanitize(throwable.message, "Failed to save goat listing. Please try again.")
+        return sanitize(extracted, "Failed to save goat listing. Please try again.")
     }
 
     /**
@@ -246,11 +300,36 @@ object UserFriendlyErrorMapper {
      */
     fun forAuth(throwable: Throwable?): String {
         if (throwable == null) return "Authentication failed. Please try again."
-        val msg = (throwable.message ?: "").lowercase()
+        val extracted = extractEmbeddedMessage(throwable.message ?: "")
+        val msg = extracted.lowercase()
 
         // Network check
         if (isNetworkFailure(throwable, msg)) {
             return "Unable to connect. Please check your internet connection and try again."
+        }
+
+        // Suspended account
+        if (msg.contains("suspended") || msg.contains("account_suspended")) {
+            return "Your account has been suspended. Please contact platform support."
+        }
+
+        // Missing profile
+        if (msg.contains("missing_profile") ||
+            msg.contains("profile not found") ||
+            msg.contains("user profile not found") ||
+            msg.contains("no profile record")
+        ) {
+            return "User profile not found in the database. Please complete registration or contact support."
+        }
+
+        // Rate limit
+        if (msg.contains("rate limit") ||
+            msg.contains("too many requests") ||
+            msg.contains("too many login attempts") ||
+            msg.contains("over_email_send_rate_limit") ||
+            msg.contains("429")
+        ) {
+            return "Too many attempts. Please wait a moment and try again."
         }
 
         // Account already exists / unique trigger collision
@@ -270,12 +349,18 @@ object UserFriendlyErrorMapper {
             return "Account created. Please verify your email before signing in."
         }
 
-        // Invalid credentials
+        // Invalid credentials (check before general session expiry because Supabase uses invalid_grant for wrong password)
         if (msg.contains("invalid login credentials") ||
             msg.contains("invalid_grant") ||
-            msg.contains("invalid_credentials")
+            msg.contains("invalid_credentials") ||
+            msg.contains("invalid email or password")
         ) {
             return "Invalid email or password. Please check your credentials."
+        }
+
+        // Session expired
+        if (isSessionOrAuthFailure(msg)) {
+            return "Your session has expired. Please sign in again."
         }
 
         // Password policy
@@ -299,7 +384,7 @@ object UserFriendlyErrorMapper {
             return "Authentication request could not be completed. Please try again later."
         }
 
-        return sanitize(throwable.message, "Authentication request could not be completed.")
+        return sanitize(extracted, "Authentication request could not be completed.")
     }
 
     /**

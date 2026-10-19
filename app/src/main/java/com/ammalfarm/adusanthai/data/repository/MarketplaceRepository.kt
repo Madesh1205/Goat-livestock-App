@@ -18,7 +18,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.util.UUID
 
@@ -66,6 +75,14 @@ interface MarketplaceRepository {
         isSuperAdmin: Boolean = false
     ): Result<Goat>
 
+    suspend fun addOrUpdateGoat(
+        goat: Goat,
+        imageBytesList: List<ByteArray> = emptyList(),
+        isSuperAdmin: Boolean = false,
+        actorUserId: String? = null,
+        actorFarmId: String? = null
+    ): Result<Goat> = addOrUpdateGoat(goat, imageBytesList, isSuperAdmin)
+
     suspend fun deleteGoat(goatId: String): Result<Unit>
 
     suspend fun updateGoatApproval(
@@ -85,7 +102,11 @@ interface MarketplaceRepository {
         rejectionReason: String = ""
     ): Result<Unit>
 
-    suspend fun updateFarmProfile(farm: Farm): Result<Farm>
+    suspend fun updateFarmProfile(
+        farm: Farm,
+        logoBytes: ByteArray? = null,
+        bannerBytes: ByteArray? = null
+    ): Result<Farm>
 
     suspend fun increaseFarmListingLimit(farmId: String, additionalSlots: Int): Result<Unit>
 
@@ -116,16 +137,23 @@ interface MarketplaceRepository {
 }
 
 open class SupabaseMarketplaceRepositoryImpl(
-    private val context: Context? = null
+    private val context: Context? = null,
+    initialFarms: List<Farm> = emptyList(),
+    initialGoats: List<Goat> = emptyList()
 ) : MarketplaceRepository {
 
     private val TAG = "MarketplaceRepo"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val rpcJson = Json {
+        ignoreUnknownKeys = true
+        coerceInputValues = true
+        isLenient = true
+    }
 
-    private val _goats = MutableStateFlow<List<Goat>>(emptyList())
+    private val _goats = MutableStateFlow<List<Goat>>(initialGoats)
     override val goats: StateFlow<List<Goat>> = _goats.asStateFlow()
 
-    private val _farms = MutableStateFlow<List<Farm>>(emptyList())
+    private val _farms = MutableStateFlow<List<Farm>>(initialFarms)
     override val farms: StateFlow<List<Farm>> = _farms.asStateFlow()
 
     private val _bookings = MutableStateFlow<List<Booking>>(emptyList())
@@ -317,11 +345,15 @@ open class SupabaseMarketplaceRepositoryImpl(
             val farmsById = _farms.value.associateBy { it.id }
             val usersById = _allUsers.value.associateBy { it.id }
 
+            val cleanUserId = userId?.takeIf { it.isNotBlank() }?.let { ensureValidUuid(it) }
+            val cleanFarmId = farmId?.takeIf { it.isNotBlank() }?.let { ensureValidUuid(it) }
+
             val domainList = dtos.map { dto ->
                 val goat = dto.goatId?.let { goatsById[it] }
-                val farmIdKey = dto.farmId ?: ""
+                val farmIdKey = dto.farmId?.takeIf { it.isNotBlank() } ?: goat?.farmId ?: ""
                 val farm = farmsById[farmIdKey] ?: FarmLocalCache.getCachedFarm(farmIdKey)
-                val customer = dto.customerId?.let { usersById[it] }
+                val resolvedCustId = dto.customerId?.takeIf { it.isNotBlank() } ?: ""
+                val customer = resolvedCustId.let { usersById[it] }
                 val resolvedPhoto = GoatImageResolver.resolveBookingGoatPhoto(
                     goatId = dto.goatId,
                     explicitImageUrl = dto.goatImageUrl.takeIf { it.isNotBlank() },
@@ -337,16 +369,29 @@ open class SupabaseMarketplaceRepositoryImpl(
                     resolvedCustomerName = customer?.name ?: dto.customerName,
                     resolvedCustomerPhone = customer?.phone ?: dto.customerPhone,
                     resolvedCustomerEmail = customer?.email ?: dto.customerEmail
-                )
+                ).let { b ->
+                    if (b.goatPrice <= 0.0 && goat != null) b.copy(goatPrice = goat.effectivePrice) else b
+                }
             }
             val filtered = when {
                 isSuperAdmin -> domainList
                 !farmId.isNullOrBlank() && !userId.isNullOrBlank() ->
-                    domainList.filter { it.farmId == farmId || it.customerId == userId }
+                    domainList.filter {
+                        it.farmId.equals(farmId, ignoreCase = true) ||
+                        (cleanFarmId != null && it.farmId.equals(cleanFarmId, ignoreCase = true)) ||
+                        it.customerId.equals(userId, ignoreCase = true) ||
+                        (cleanUserId != null && it.customerId.equals(cleanUserId, ignoreCase = true))
+                    }
                 !farmId.isNullOrBlank() ->
-                    domainList.filter { it.farmId == farmId }
+                    domainList.filter {
+                        it.farmId.equals(farmId, ignoreCase = true) ||
+                        (cleanFarmId != null && it.farmId.equals(cleanFarmId, ignoreCase = true))
+                    }
                 !userId.isNullOrBlank() ->
-                    domainList.filter { it.customerId == userId }
+                    domainList.filter {
+                        it.customerId.equals(userId, ignoreCase = true) ||
+                        (cleanUserId != null && it.customerId.equals(cleanUserId, ignoreCase = true))
+                    }
                 else -> domainList
             }
             _bookings.value = filtered
@@ -497,11 +542,14 @@ open class SupabaseMarketplaceRepositoryImpl(
         advanceAmount: Double,
         notes: String
     ): Result<Booking> = withContext(Dispatchers.IO) {
+        if (customer.id.isBlank()) {
+            return@withContext Result.failure(IllegalStateException("Your session has expired. Please sign in again."))
+        }
         if (goat.approvalStatus != ApprovalStatus.APPROVED) {
             return@withContext Result.failure(IllegalStateException("Only approved goat listings can be booked."))
         }
         if (goat.availabilityStatus != AvailabilityStatus.AVAILABLE || !goat.isActive) {
-            return@withContext Result.failure(IllegalStateException("This goat is currently not available for booking."))
+            return@withContext Result.failure(IllegalStateException("This goat is no longer available. Please choose another goat."))
         }
         if (preferredVisitDate.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Please select or enter a preferred farm visit date."))
@@ -517,20 +565,82 @@ open class SupabaseMarketplaceRepositoryImpl(
             }
         }
 
+        val cleanGoatId = ensureValidUuid(goat.id)
+        val cleanCustomerId = ensureValidUuid(customer.id)
+        val cleanFarmId = ensureValidUuid(goat.farmId.ifBlank { SEED_AMMAL_FARM_UUID })
+
         try {
             var createdBookingDto: BookingDto? = null
             if (SupabaseConfig.isConfigured) {
-                createdBookingDto = SupabaseModule.client.postgrest.rpc(
-                    "create_booking_hold",
-                    buildJsonObject {
-                        put("p_goat_id", ensureValidUuid(goat.id))
-                        put("p_customer_notes", combinedNotes)
+                try {
+                    createdBookingDto = SupabaseModule.client.postgrest.rpc(
+                        "create_booking_hold",
+                        buildJsonObject {
+                            put("p_goat_id", cleanGoatId)
+                            put("p_customer_notes", combinedNotes)
+                        }
+                    ).decodeAs<BookingDto>()
+                } catch (rpcErr: Exception) {
+                    val msg = (rpcErr.message ?: "").lowercase()
+                    val isMissingRpc = msg.contains("pgrst202") ||
+                        (msg.contains("function") && msg.contains("create_booking_hold") && msg.contains("does not exist"))
+                    if (!isMissingRpc) {
+                        throw rpcErr
                     }
-                ).decodeAs<BookingDto>()
+                    // Server-side verification before fallback insert if RPC is not deployed
+                    val remoteGoat = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                        .select { filter { eq("id", cleanGoatId) } }
+                        .decodeSingleOrNull<GoatDto>()
+                        ?: throw IllegalStateException("Goat listing not found.")
+                    val remoteStatus = (remoteGoat.status ?: "AVAILABLE").uppercase()
+                    if (remoteStatus != "AVAILABLE" || !remoteGoat.isApprovedByAdmin) {
+                        throw IllegalStateException("This goat has already been reserved by another customer.")
+                    }
+                    val existingActiveBookings = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
+                        .select {
+                            filter {
+                                eq("goat_id", cleanGoatId)
+                            }
+                        }
+                        .decodeList<BookingDto>()
+                        .any {
+                            val st = (it.status ?: "").uppercase()
+                            st == "RESERVED" || st == "PENDING" || st == "CONFIRMED" || st == "APPROVED"
+                        }
+                    if (existingActiveBookings) {
+                        throw IllegalStateException("This goat has already been reserved by another customer.")
+                    }
+                    createdBookingDto = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS]
+                        .insert(
+                            buildJsonObject {
+                                put("goat_id", cleanGoatId)
+                                put("farm_id", cleanFarmId)
+                                put("customer_id", cleanCustomerId)
+                                put("status", "RESERVED")
+                                put("total_price", goat.effectivePrice)
+                                put("deposit_paid", advanceAmount)
+                                put("customer_notes", combinedNotes)
+                            }
+                        ) {
+                            select()
+                        }
+                        .decodeSingleOrNull<BookingDto>()
+
+                    try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].update(
+                            buildJsonObject {
+                                put("status", "RESERVED")
+                                put("updated_at", currentIsoTimestamp())
+                            }
+                        ) {
+                            filter { eq("id", cleanGoatId) }
+                        }
+                    } catch (_: Exception) {}
+                }
             }
 
             val newBooking = if (createdBookingDto != null) {
-                createdBookingDto.toDomain(
+                val domainBooking = createdBookingDto.toDomain(
                     resolvedGoatName = goat.name,
                     resolvedGoatBreed = goat.breed,
                     resolvedGoatPhoto = goat.primaryPhoto,
@@ -539,8 +649,16 @@ open class SupabaseMarketplaceRepositoryImpl(
                     resolvedCustomerName = customer.name,
                     resolvedCustomerPhone = customer.phone,
                     resolvedCustomerEmail = customer.email
-                ).copy(
-                    preferredVisitDate = preferredVisitDate.trim()
+                )
+                domainBooking.copy(
+                    goatId = domainBooking.goatId.ifBlank { cleanGoatId },
+                    farmId = domainBooking.farmId.ifBlank { cleanFarmId },
+                    customerId = domainBooking.customerId.ifBlank { customer.id },
+                    goatPrice = if (domainBooking.goatPrice > 0.0) domainBooking.goatPrice else goat.effectivePrice,
+                    advanceAmount = if (domainBooking.advanceAmount > 0.0) domainBooking.advanceAmount else advanceAmount,
+                    preferredVisitDate = preferredVisitDate.trim(),
+                    notes = domainBooking.notes.ifBlank { combinedNotes },
+                    createdAt = domainBooking.createdAt.ifBlank { currentIsoTimestamp() }
                 )
             } else {
                 val bookingId = UUID.randomUUID().toString()
@@ -554,11 +672,11 @@ open class SupabaseMarketplaceRepositoryImpl(
                     goatImageUrl = goat.primaryPhoto,
                     goatPrice = goat.effectivePrice,
                     advanceAmount = advanceAmount,
-                    customerId = ensureValidUuid(customer.id),
+                    customerId = customer.id,
                     customerName = customer.name,
                     customerPhone = customer.phone,
                     customerEmail = customer.email,
-                    farmId = ensureValidUuid(goat.farmId),
+                    farmId = goat.farmId.ifBlank { cleanFarmId },
                     farmName = goat.farmName,
                     farmPhone = goat.farmContact,
                     preferredVisitDate = preferredVisitDate.trim(),
@@ -569,16 +687,37 @@ open class SupabaseMarketplaceRepositoryImpl(
                 )
             }
 
-            _bookings.update { listOf(newBooking) + it }
+            _bookings.update { current ->
+                listOf(newBooking) + current.filterNot { it.id == newBooking.id }
+            }
             _goats.update { list ->
                 list.map {
-                    if (it.id == goat.id) it.copy(availabilityStatus = AvailabilityStatus.RESERVED) else it
+                    if (it.id == goat.id || it.id == cleanGoatId) {
+                        it.copy(availabilityStatus = AvailabilityStatus.RESERVED)
+                    } else it
                 }
             }
+
+            if (SupabaseConfig.isConfigured) {
+                try {
+                    refreshGoats()
+                    val refreshed = refreshBookings(
+                        userId = customer.id,
+                        farmId = customer.farmId,
+                        isSuperAdmin = customer.role == UserRole.SUPER_ADMIN
+                    ).getOrNull()
+                    if (refreshed != null && refreshed.none { it.id == newBooking.id }) {
+                        _bookings.update { current ->
+                            listOf(newBooking) + current.filterNot { it.id == newBooking.id }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
             Result.success(newBooking)
         } catch (e: Exception) {
             Log.w(TAG, "Error creating booking: ${e.message}")
-            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            val friendly = UserFriendlyErrorMapper.forBooking(e)
             Result.failure(Exception(friendly, e))
         }
     }
@@ -643,10 +782,176 @@ open class SupabaseMarketplaceRepositoryImpl(
                     }
                 }
             }
+            if (SupabaseConfig.isConfigured) {
+                try {
+                    refreshGoats()
+                } catch (_: Exception) {}
+            }
             Result.success(Unit)
         } catch (e: Exception) {
-            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            val friendly = UserFriendlyErrorMapper.forBooking(e)
             Result.failure(Exception(friendly, e))
+        }
+    }
+
+    protected open val isRemoteBackendEnabled: Boolean
+        get() = SupabaseConfig.isConfigured
+
+    protected open suspend fun resolveCurrentAuthUserId(): String? {
+        if (!isRemoteBackendEnabled) return null
+        return try {
+            SupabaseModule.auth.currentUserOrNull()?.id
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    protected open suspend fun fetchRemoteFarmById(farmId: String): FarmDto? {
+        if (!isRemoteBackendEnabled || farmId.isBlank()) return null
+        return SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+            .select { filter { eq("id", ensureValidUuid(farmId)) } }
+            .decodeList<FarmDto>()
+            .firstOrNull()
+    }
+
+    protected open suspend fun fetchRemoteFarmByOwnerId(ownerId: String): FarmDto? {
+        if (!isRemoteBackendEnabled || ownerId.isBlank()) return null
+        return SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS]
+            .select { filter { eq("owner_id", ensureValidUuid(ownerId)) } }
+            .decodeList<FarmDto>()
+            .firstOrNull()
+    }
+
+    protected open suspend fun executeCreateGoatListingSecureRpc(
+        goatPayload: JsonObject,
+        fallbackGoatId: String,
+        fallbackFarmId: String
+    ): GoatDto? {
+        val rpcResult = SupabaseModule.client.postgrest.rpc(
+            "create_goat_listing_secure",
+            buildJsonObject {
+                put("p_goat", goatPayload)
+            }
+        )
+        return parseGoatDtoFromRpcResponse(rpcResult.data, fallbackGoatId, fallbackFarmId)
+    }
+
+    protected open suspend fun executeUpdateGoatListingRemote(
+        goatId: String,
+        farmId: String,
+        payloadWithoutTag: JsonObject,
+        payloadWithTag: JsonObject
+    ): GoatDto? {
+        return try {
+            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                .update(payloadWithoutTag) {
+                    filter {
+                        eq("id", goatId)
+                        if (farmId.isNotBlank()) {
+                            eq("farm_id", farmId)
+                        }
+                    }
+                    select()
+                }
+                .decodeSingleOrNull<GoatDto>()
+        } catch (firstDbErr: Exception) {
+            val errText = (firstDbErr.message ?: "").lowercase()
+            if (errText.contains("tag_number") && (errText.contains("null value") || errText.contains("not-null"))) {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
+                    .update(payloadWithTag) {
+                        filter {
+                            eq("id", goatId)
+                            if (farmId.isNotBlank()) {
+                                eq("farm_id", farmId)
+                            }
+                        }
+                        select()
+                    }
+                    .decodeSingleOrNull<GoatDto>()
+            } else {
+                throw firstDbErr
+            }
+        }
+    }
+
+    protected open suspend fun syncGoatImagesRemote(
+        goatId: String,
+        mergedImages: List<String>,
+        isExisting: Boolean
+    ) {
+        if (!isRemoteBackendEnabled) return
+        if (mergedImages.isNotEmpty()) {
+            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].delete {
+                filter { eq("goat_id", goatId) }
+            }
+            mergedImages.forEachIndexed { idx, imgUrl ->
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].insert(
+                    buildJsonObject {
+                        put("goat_id", goatId)
+                        put("image_url", imgUrl)
+                        put("display_order", idx)
+                        put("is_primary", idx == 0)
+                    }
+                )
+            }
+        } else if (isExisting) {
+            try {
+                SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].delete {
+                    filter { eq("goat_id", goatId) }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    internal fun parseGoatDtoFromRpcResponse(
+        rawData: String?,
+        fallbackGoatId: String,
+        fallbackFarmId: String
+    ): GoatDto? {
+        val trimmed = rawData?.trim().orEmpty()
+        if (trimmed.isBlank() || trimmed.equals("null", ignoreCase = true)) {
+            return null
+        }
+        return try {
+            val element = rpcJson.parseToJsonElement(trimmed)
+            when (element) {
+                is JsonArray -> {
+                    val firstObj = element.firstOrNull()?.jsonObject ?: return null
+                    rpcJson.decodeFromJsonElement<GoatDto>(firstObj)
+                }
+                is JsonObject -> {
+                    val candidateObj = when {
+                        element["goat"] is JsonObject -> element["goat"]!!.jsonObject
+                        element["data"] is JsonObject -> element["data"]!!.jsonObject
+                        else -> element
+                    }
+                    if (candidateObj.containsKey("name") || candidateObj.containsKey("breed_name")) {
+                        rpcJson.decodeFromJsonElement<GoatDto>(candidateObj)
+                    } else {
+                        val returnedId = candidateObj["id"]?.jsonPrimitive?.contentOrNull
+                            ?: candidateObj["goat_id"]?.jsonPrimitive?.contentOrNull
+                            ?: fallbackGoatId
+                        val returnedCode = candidateObj["goat_code"]?.jsonPrimitive?.contentOrNull ?: ""
+                        val returnedFarmId = candidateObj["farm_id"]?.jsonPrimitive?.contentOrNull ?: fallbackFarmId
+                        GoatDto(
+                            id = returnedId,
+                            goatCode = returnedCode,
+                            farmId = returnedFarmId
+                        )
+                    }
+                }
+                is JsonPrimitive -> {
+                    val idStr = element.contentOrNull?.trim().orEmpty()
+                    if (idStr.isNotBlank() && !idStr.equals("true", ignoreCase = true) && !idStr.equals("false", ignoreCase = true)) {
+                        GoatDto(id = idStr, farmId = fallbackFarmId)
+                    } else {
+                        null
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice decoding create_goat_listing_secure response: ${e.message}")
+            null
         }
     }
 
@@ -654,6 +959,20 @@ open class SupabaseMarketplaceRepositoryImpl(
         goat: Goat,
         imageBytesList: List<ByteArray>,
         isSuperAdmin: Boolean
+    ): Result<Goat> = addOrUpdateGoat(
+        goat = goat,
+        imageBytesList = imageBytesList,
+        isSuperAdmin = isSuperAdmin,
+        actorUserId = null,
+        actorFarmId = null
+    )
+
+    override suspend fun addOrUpdateGoat(
+        goat: Goat,
+        imageBytesList: List<ByteArray>,
+        isSuperAdmin: Boolean,
+        actorUserId: String?,
+        actorFarmId: String?
     ): Result<Goat> = withContext(Dispatchers.IO) {
         if (goat.name.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Please enter the goat's name or title."))
@@ -667,65 +986,225 @@ open class SupabaseMarketplaceRepositoryImpl(
         if (goat.weightKg <= 0) {
             return@withContext Result.failure(IllegalArgumentException("Please enter a valid weight in kg."))
         }
+        if (goat.ageMonths <= 0) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid age in months greater than 0."))
+        }
 
-        val isExisting = _goats.value.any { it.id == goat.id }
-        val farm = _farms.value.find { it.id == goat.farmId }
+        val existingGoat = goat.id.takeIf { it.isNotBlank() }?.let { id ->
+            _goats.value.find { it.id.equals(id, ignoreCase = true) }
+        }
+        val isExisting = existingGoat != null
 
+        val authUserId = actorUserId?.takeIf { it.isNotBlank() } ?: resolveCurrentAuthUserId()
+
+        // If editing an existing goat, a Farm Admin cannot reassign it to a different farm
+        if (isExisting && !isSuperAdmin) {
+            val existingFarmId = existingGoat!!.farmId
+            if (goat.farmId.isNotBlank() && existingFarmId.isNotBlank() && !goat.farmId.equals(existingFarmId, ignoreCase = true)) {
+                return@withContext Result.failure(
+                    IllegalAccessException("You can only create or manage goat listings for your own farm.")
+                )
+            }
+            if (!actorFarmId.isNullOrBlank() && existingFarmId.isNotBlank() && !existingFarmId.equals(actorFarmId, ignoreCase = true)) {
+                return@withContext Result.failure(
+                    IllegalAccessException("You can only create or manage goat listings for your own farm.")
+                )
+            }
+        }
+
+        // Prevent Farm Admin from submitting a listing for another farm ID
+        val explicitRequestedFarmId = if (isExisting) {
+            existingGoat!!.farmId.ifBlank { goat.farmId }
+        } else {
+            goat.farmId
+        }
+
+        if (!isSuperAdmin && !actorFarmId.isNullOrBlank() && explicitRequestedFarmId.isNotBlank() &&
+            !explicitRequestedFarmId.equals(actorFarmId, ignoreCase = true)
+        ) {
+            return@withContext Result.failure(
+                IllegalAccessException("You can only create or manage goat listings for your own farm.")
+            )
+        }
+
+        // Resolve the farm accurately from state, cache, and remote database without substituting a different farm ID
+        var farm: Farm? = if (explicitRequestedFarmId.isNotBlank()) {
+            _farms.value.find { it.id.equals(explicitRequestedFarmId, ignoreCase = true) }
+                ?: FarmLocalCache.getCachedFarm(explicitRequestedFarmId)
+        } else if (!actorFarmId.isNullOrBlank()) {
+            _farms.value.find { it.id.equals(actorFarmId, ignoreCase = true) }
+                ?: FarmLocalCache.getCachedFarm(actorFarmId)
+        } else if (!authUserId.isNullOrBlank() && !isSuperAdmin) {
+            _farms.value.find { it.ownerId.equals(authUserId, ignoreCase = true) }
+        } else null
+
+        if (isRemoteBackendEnabled) {
+            try {
+                // Always fetch fresh farm record from Supabase so approval status, goat_listing_limit, and consumed_listing_slots are up-to-date
+                val fetchedFarmDto = if (explicitRequestedFarmId.isNotBlank()) {
+                    fetchRemoteFarmById(explicitRequestedFarmId)
+                } else if (!actorFarmId.isNullOrBlank()) {
+                    fetchRemoteFarmById(actorFarmId)
+                } else if (!authUserId.isNullOrBlank() && !isSuperAdmin) {
+                    fetchRemoteFarmByOwnerId(authUserId)
+                } else null
+
+                if (fetchedFarmDto != null) {
+                    val domainFarm = fetchedFarmDto.toDomain()
+                    FarmLocalCache.saveFarmProfile(domainFarm)
+                    _farms.update { list ->
+                        val exists = list.any { it.id.equals(domainFarm.id, ignoreCase = true) }
+                        if (exists) {
+                            list.map { if (it.id.equals(domainFarm.id, ignoreCase = true)) domainFarm else it }
+                        } else {
+                            list + domainFarm
+                        }
+                    }
+                    farm = domainFarm
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Farm lookup before addOrUpdateGoat notice: ${e.message}", e)
+            }
+        }
+
+        val effectiveFarmId = when {
+            explicitRequestedFarmId.isNotBlank() -> explicitRequestedFarmId
+            farm != null && farm.id.isNotBlank() -> farm.id
+            !actorFarmId.isNullOrBlank() -> actorFarmId
+            isSuperAdmin -> SEED_AMMAL_FARM_UUID
+            else -> ""
+        }
+
+        if (effectiveFarmId.isBlank()) {
+            return@withContext Result.failure(
+                IllegalStateException("Your farm profile could not be loaded. Please refresh or save your Farm Info first.")
+            )
+        }
+
+        // Strict ownership enforcement for non-Super-Admin (FARM_ADMIN)
+        if (!isSuperAdmin) {
+            if (farm == null) {
+                val ownedFarmInState = if (!authUserId.isNullOrBlank()) {
+                    _farms.value.find { it.ownerId.equals(authUserId, ignoreCase = true) }
+                } else null
+                return@withContext if (ownedFarmInState != null && !ownedFarmInState.id.equals(effectiveFarmId, ignoreCase = true)) {
+                    Result.failure(IllegalAccessException("You can only create or manage goat listings for your own farm."))
+                } else {
+                    Result.failure(IllegalStateException("Your farm profile could not be loaded. Please refresh or save your Farm Info first."))
+                }
+            }
+
+            if (farm.isAmmalOwnFarm || farm.id.equals(SEED_AMMAL_FARM_UUID, ignoreCase = true)) {
+                val isAmmalOwner = !authUserId.isNullOrBlank() && farm.ownerId.equals(authUserId, ignoreCase = true)
+                if (!isAmmalOwner) {
+                    return@withContext Result.failure(
+                        IllegalAccessException("Only Super Admin can manage Ammal Farm listings.")
+                    )
+                }
+            }
+
+            if (!authUserId.isNullOrBlank() && farm.ownerId.isNotBlank() && !farm.ownerId.equals(authUserId, ignoreCase = true)) {
+                return@withContext Result.failure(
+                    IllegalAccessException("You can only create or manage goat listings for your own farm.")
+                )
+            }
+
+            if (!authUserId.isNullOrBlank()) {
+                val ownedFarm = _farms.value.find { it.ownerId.equals(authUserId, ignoreCase = true) }
+                if (ownedFarm != null && !ownedFarm.id.equals(farm.id, ignoreCase = true)) {
+                    return@withContext Result.failure(
+                        IllegalAccessException("You can only create or manage goat listings for your own farm.")
+                    )
+                }
+            }
+        }
+
+        // Approval & quota check for new listings on non-Ammal partner farms
         if (!isExisting && !isSuperAdmin && farm != null && !farm.isAmmalOwnFarm) {
             if (!farm.verificationStatus.isApprovedOrVerified) {
                 return@withContext Result.failure(
-                    IllegalStateException("Your farm must be verified by Super Admin before publishing goat listings.")
+                    IllegalStateException("Your partner farm must be approved by Super Admin before you can add goats.")
                 )
             }
-            val currentFarmGoatCount = _goats.value.count { it.farmId == farm.id && it.isActive }
-            if (currentFarmGoatCount >= farm.goatListingLimit && !farm.hasRemainingListingQuota) {
+            val currentFarmGoatCount = _goats.value.count {
+                it.farmId.equals(farm.id, ignoreCase = true) &&
+                    it.isActive &&
+                    it.availabilityStatus != AvailabilityStatus.UNAVAILABLE
+            }
+            val effectiveConsumedSlots = maxOf(farm.consumedListingSlots, currentFarmGoatCount)
+            if (!farm.hasRemainingListingQuota || effectiveConsumedSlots >= farm.goatListingLimit) {
                 return@withContext Result.failure(
-                    IllegalStateException("You have reached your goat listing limit (${farm.goatListingLimit}). Request additional slots from your Farm Dashboard.")
+                    IllegalStateException("Your goat listing quota has been fully consumed. Contact Super Admin (+91 63808 98358) to purchase additional listing slots.")
                 )
             }
         }
 
         try {
+            val cleanGoatId = ensureValidUuid(goat.id.ifBlank { UUID.randomUUID().toString() })
+            val cleanFarmId = ensureValidUuid(effectiveFarmId)
+
             val uploadedUrls = mutableListOf<String>()
-            if (SupabaseConfig.isConfigured && imageBytesList.isNotEmpty()) {
+            if (isRemoteBackendEnabled && imageBytesList.isNotEmpty()) {
                 val bucket = SupabaseModule.storage.from(SupabaseConfig.BUCKET_GOAT_IMAGES)
                 imageBytesList.forEachIndexed { index, bytes ->
+                    if (bytes.isEmpty()) {
+                        throw IllegalArgumentException("Selected image #${index + 1} is empty or unreadable.")
+                    }
+                    // Use <farm_id>/goats/... as primary path so (storage.foldername(name))[1] = <farm_id> satisfies Storage RLS
+                    val primaryPath = "$cleanFarmId/goats/${cleanGoatId}_${System.currentTimeMillis()}_$index.jpg"
                     try {
-                        val path = "goats/${goat.farmId.ifBlank { "default" }}/${goat.id}_${System.currentTimeMillis()}_$index.jpg"
-                        bucket.upload(path, bytes) { upsert = true }
-                        uploadedUrls.add(SupabaseConfig.resolveStorageUrl(path, SupabaseConfig.BUCKET_GOAT_IMAGES))
-                    } catch (uploadErr: Exception) {
-                        Log.w(TAG, "Image upload warning: ${uploadErr.message}")
+                        bucket.upload(primaryPath, bytes) { upsert = true }
+                        val resolvedUrl = SupabaseConfig.resolveStorageUrl(primaryPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                        if (resolvedUrl.isBlank()) {
+                            throw IllegalStateException("Image upload returned an invalid image URL.")
+                        }
+                        uploadedUrls.add(resolvedUrl)
+                    } catch (primaryErr: Exception) {
+                        val fallbackPath = "goats/$cleanFarmId/${cleanGoatId}_${System.currentTimeMillis()}_$index.jpg"
+                        try {
+                            bucket.upload(fallbackPath, bytes) { upsert = true }
+                            val resolvedUrl = SupabaseConfig.resolveStorageUrl(fallbackPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                            if (resolvedUrl.isBlank()) {
+                                throw IllegalStateException("Image upload returned an invalid image URL.")
+                            }
+                            uploadedUrls.add(resolvedUrl)
+                        } catch (uploadErr: Exception) {
+                            Log.e(TAG, "Goat image upload failed: ${primaryErr.message}", primaryErr)
+                            throw IllegalStateException("Failed to upload goat image: ${primaryErr.message ?: uploadErr.message}", primaryErr)
+                        }
                     }
                 }
             }
 
             val mergedImages = (uploadedUrls + goat.imageUrls + listOfNotNull(goat.imageUrl.takeIf { it.isNotBlank() }))
+                .map { if (isRemoteBackendEnabled) SupabaseConfig.resolveStorageUrl(it, SupabaseConfig.BUCKET_GOAT_IMAGES) else it }
                 .distinct()
                 .filter { it.isNotBlank() }
 
             val primaryImage = mergedImages.firstOrNull() ?: ""
             val autoApprove = isSuperAdmin || (farm?.isAmmalOwnFarm == true)
             val resolvedApproval = if (isExisting) {
-                goat.approvalStatus
+                if (isSuperAdmin) goat.approvalStatus else existingGoat!!.approvalStatus
             } else if (autoApprove) {
                 ApprovalStatus.APPROVED
             } else {
                 ApprovalStatus.PENDING
             }
 
-            val cleanGoatId = ensureValidUuid(goat.id.ifBlank { UUID.randomUUID().toString() })
-            val cleanFarmId = ensureValidUuid(goat.farmId.ifBlank { SEED_AMMAL_FARM_UUID })
             val finalPrice = if (goat.discountPercentage > 0) {
                 goat.price * (1.0 - (goat.discountPercentage / 100.0))
             } else {
                 goat.price
             }
 
+            val autoTagId = goat.tagId.ifBlank {
+                goat.goatCode.ifBlank { "TAG-${cleanGoatId.take(6).uppercase()}" }
+            }
+
             val updatedGoat = goat.copy(
                 id = cleanGoatId,
                 goatCode = goat.goatCode,
-                tagId = goat.tagId.ifBlank { "TAG-${(1000..9999).random()}" },
+                tagId = autoTagId,
                 farmId = cleanFarmId,
                 farmName = goat.farmName.ifBlank { farm?.name ?: "Verified Farm" },
                 farmLocation = goat.farmLocation.ifBlank { farm?.location ?: "Tamil Nadu" },
@@ -737,7 +1216,7 @@ open class SupabaseMarketplaceRepositoryImpl(
                 isVerified = resolvedApproval == ApprovalStatus.APPROVED
             )
 
-            if (SupabaseConfig.isConfigured) {
+            if (isRemoteBackendEnabled) {
                 val dbGender = when (updatedGoat.gender.trim().uppercase()) {
                     "FEMALE" -> "FEMALE"
                     "CASTRATED" -> "CASTRATED"
@@ -758,9 +1237,10 @@ open class SupabaseMarketplaceRepositoryImpl(
                     else -> "AVAILABLE"
                 }
 
-                val payload = buildJsonObject {
-                    put("id", cleanGoatId)
-                    put("farm_id", cleanFarmId)
+                fun buildUpdateGoatPayload(includeTagNumber: Boolean) = buildJsonObject {
+                    if (includeTagNumber) {
+                        put("tag_number", autoTagId)
+                    }
                     put("name", updatedGoat.name.trim())
                     put("breed_name", updatedGoat.breed.trim())
                     put("gender", dbGender)
@@ -771,75 +1251,131 @@ open class SupabaseMarketplaceRepositoryImpl(
                     put("discount_percentage", updatedGoat.discountPercentage.coerceIn(0.0, 99.0))
                     put("status", dbStatus)
                     put("description", updatedGoat.description.trim())
-                    put("vaccination_status", updatedGoat.healthNotes.ifBlank { if (updatedGoat.isVaccinated) "Fully Vaccinated" else "Pending Vaccination" })
-                    put("is_approved_by_admin", updatedGoat.approvalStatus == ApprovalStatus.APPROVED)
+                    put("vaccination_status", updatedGoat.healthNotes.ifBlank { "Healthy" })
+                    if (isSuperAdmin) {
+                        put("is_approved_by_admin", updatedGoat.approvalStatus == ApprovalStatus.APPROVED)
+                    }
+                }
+
+                val createRpcPayload = buildJsonObject {
+                    put("id", cleanGoatId)
+                    put("farm_id", cleanFarmId)
+                    put("tag_number", autoTagId)
+                    put("name", updatedGoat.name.trim())
+                    put("breed_name", updatedGoat.breed.trim())
+                    put("gender", dbGender)
+                    put("age_months", updatedGoat.ageMonths.coerceAtLeast(1))
+                    put("weight_kg", updatedGoat.weightKg)
+                    put("purpose", dbPurpose)
+                    put("price", updatedGoat.price)
+                    put("discount_percentage", updatedGoat.discountPercentage.coerceIn(0.0, 99.0))
+                    put("status", if (!isSuperAdmin) "AVAILABLE" else dbStatus)
+                    put("description", updatedGoat.description.trim())
+                    put("vaccination_status", updatedGoat.healthNotes.ifBlank { "Healthy" })
+                    put("is_approved_by_admin", autoApprove && updatedGoat.approvalStatus == ApprovalStatus.APPROVED)
+                    if (primaryImage.isNotBlank()) {
+                        put("image_url", primaryImage)
+                    }
+                    if (mergedImages.isNotEmpty()) {
+                        put("image_urls", JsonArray(mergedImages.map { JsonPrimitive(it) }))
+                    }
                 }
 
                 val savedGoatDto = if (isExisting) {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                        .update(payload) {
-                            filter { eq("id", cleanGoatId) }
-                            select()
-                        }
-                        .decodeSingleOrNull<GoatDto>()
+                    executeUpdateGoatListingRemote(
+                        goatId = cleanGoatId,
+                        farmId = cleanFarmId,
+                        payloadWithoutTag = buildUpdateGoatPayload(includeTagNumber = false),
+                        payloadWithTag = buildUpdateGoatPayload(includeTagNumber = true)
+                    )
                 } else {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS]
-                        .insert(payload) {
-                            select()
-                        }
-                        .decodeSingleOrNull<GoatDto>()
+                    executeCreateGoatListingSecureRpc(
+                        goatPayload = createRpcPayload,
+                        fallbackGoatId = cleanGoatId,
+                        fallbackFarmId = cleanFarmId
+                    )
                 }
 
-                if (mergedImages.isNotEmpty()) {
-                    try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].delete {
-                            filter { eq("goat_id", cleanGoatId) }
-                        }
-                        mergedImages.forEachIndexed { idx, imgUrl ->
-                            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOAT_IMAGES].insert(
-                                buildJsonObject {
-                                    put("goat_id", cleanGoatId)
-                                    put("image_url", imgUrl)
-                                    put("display_order", idx)
-                                    put("is_primary", idx == 0)
-                                }
-                            )
-                        }
-                    } catch (imgDbErr: Exception) {
-                        Log.w(TAG, "goat_images insert notice: ${imgDbErr.message}")
-                    }
-                }
+                val persistedGoatId = savedGoatDto?.id?.takeIf { it.isNotBlank() } ?: cleanGoatId
 
-                val finalGoat = savedGoatDto?.toDomain(
-                    resolvedPhotos = mergedImages,
-                    resolvedFarmName = updatedGoat.farmName,
-                    resolvedFarmLocation = updatedGoat.farmLocation,
-                    resolvedFarmContact = updatedGoat.farmContact
-                ) ?: updatedGoat.copy(
-                    goatCode = updatedGoat.goatCode.ifBlank { "GOAT-${cleanGoatId.take(4).uppercase()}" }
+                syncGoatImagesRemote(
+                    goatId = persistedGoatId,
+                    mergedImages = mergedImages,
+                    isExisting = isExisting
                 )
+
+                val finalGoat = if (savedGoatDto != null && savedGoatDto.name.isNotBlank()) {
+                    savedGoatDto.toDomain(
+                        resolvedPhotos = mergedImages,
+                        resolvedFarmName = updatedGoat.farmName,
+                        resolvedFarmLocation = updatedGoat.farmLocation,
+                        resolvedFarmContact = updatedGoat.farmContact
+                    )
+                } else {
+                    updatedGoat.copy(
+                        id = persistedGoatId,
+                        goatCode = savedGoatDto?.goatCode?.takeIf { it.isNotBlank() }
+                            ?: updatedGoat.goatCode.ifBlank { "GOAT-${persistedGoatId.take(4).uppercase()}" }
+                    )
+                }
 
                 _goats.update { list ->
                     if (isExisting) {
-                        list.map { if (it.id == finalGoat.id) finalGoat else it }
+                        list.map { if (it.id.equals(cleanGoatId, ignoreCase = true) || it.id.equals(finalGoat.id, ignoreCase = true)) finalGoat else it }
                     } else {
-                        listOf(finalGoat) + list
+                        listOf(finalGoat) + list.filterNot { it.id.equals(finalGoat.id, ignoreCase = true) }
                     }
                 }
-                return@withContext Result.success(finalGoat)
+
+                if (!isExisting) {
+                    _farms.update { farmsList ->
+                        farmsList.map { f ->
+                            if (f.id.equals(cleanFarmId, ignoreCase = true) && !f.isAmmalOwnFarm) {
+                                val nextFarm = f.copy(consumedListingSlots = f.consumedListingSlots + 1)
+                                FarmLocalCache.saveFarmProfile(nextFarm)
+                                nextFarm
+                            } else f
+                        }
+                    }
+                }
+
+                try {
+                    refreshFarms()
+                    refreshGoats()
+                } catch (refreshErr: Exception) {
+                    Log.w(TAG, "Post-save refresh notice: ${refreshErr.message}", refreshErr)
+                }
+
+                val refreshedGoat = _goats.value.find { it.id.equals(finalGoat.id, ignoreCase = true) } ?: finalGoat
+                return@withContext Result.success(refreshedGoat)
             }
 
             _goats.update { list ->
                 if (isExisting) {
-                    list.map { if (it.id == updatedGoat.id) updatedGoat else it }
+                    list.map { if (it.id.equals(updatedGoat.id, ignoreCase = true)) updatedGoat else it }
                 } else {
-                    listOf(updatedGoat) + list
+                    listOf(updatedGoat) + list.filterNot { it.id.equals(updatedGoat.id, ignoreCase = true) }
+                }
+            }
+            if (!isExisting) {
+                _farms.update { farmsList ->
+                    farmsList.map { f ->
+                        if (f.id.equals(cleanFarmId, ignoreCase = true) && !f.isAmmalOwnFarm) {
+                            val nextFarm = f.copy(consumedListingSlots = f.consumedListingSlots + 1)
+                            FarmLocalCache.saveFarmProfile(nextFarm)
+                            nextFarm
+                        } else f
+                    }
                 }
             }
             Result.success(updatedGoat)
         } catch (e: Exception) {
-            Log.w(TAG, "Error saving goat: ${e.message}")
-            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Log.e(
+                TAG,
+                "Failed to save goat listing (isExisting=$isExisting, farmId=$effectiveFarmId, goatId=${goat.id}): ${e.message}",
+                e
+            )
+            val friendly = UserFriendlyErrorMapper.forGoatListing(e)
             Result.failure(Exception(friendly, e))
         }
     }
@@ -1023,18 +1559,58 @@ open class SupabaseMarketplaceRepositoryImpl(
             }
             Result.success(Unit)
         } catch (e: Exception) {
-            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            val friendly = UserFriendlyErrorMapper.forFarmModeration(e)
             Result.failure(Exception(friendly, e))
         }
     }
 
-    override suspend fun updateFarmProfile(farm: Farm): Result<Farm> = withContext(Dispatchers.IO) {
+    override suspend fun updateFarmProfile(
+        farm: Farm,
+        logoBytes: ByteArray?,
+        bannerBytes: ByteArray?
+    ): Result<Farm> = withContext(Dispatchers.IO) {
         if (farm.name.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Farm name cannot be empty."))
         }
         try {
+            val cleanFarmId = ensureValidUuid(farm.id.ifBlank { UUID.randomUUID().toString() })
+            var finalLogoUrl = farm.logoUrl.ifBlank { farm.imageUrl }
+            var finalBannerUrl = farm.bannerUrl
+
             if (SupabaseConfig.isConfigured) {
-                val cleanFarmId = ensureValidUuid(farm.id)
+                val bucket = SupabaseModule.storage.from(SupabaseConfig.BUCKET_GOAT_IMAGES)
+                if (logoBytes != null && logoBytes.isNotEmpty()) {
+                    val primaryLogoPath = "$cleanFarmId/branding/logo_${System.currentTimeMillis()}.jpg"
+                    try {
+                        bucket.upload(primaryLogoPath, logoBytes) { upsert = true }
+                        finalLogoUrl = SupabaseConfig.resolveStorageUrl(primaryLogoPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                    } catch (primaryErr: Exception) {
+                        val fallbackLogoPath = "goats/$cleanFarmId/logo_${System.currentTimeMillis()}.jpg"
+                        try {
+                            bucket.upload(fallbackLogoPath, logoBytes) { upsert = true }
+                            finalLogoUrl = SupabaseConfig.resolveStorageUrl(fallbackLogoPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                        } catch (fallbackErr: Exception) {
+                            throw IllegalStateException("Failed to upload farm logo: ${primaryErr.message ?: fallbackErr.message}", primaryErr)
+                        }
+                    }
+                }
+
+                if (bannerBytes != null && bannerBytes.isNotEmpty()) {
+                    val primaryBannerPath = "$cleanFarmId/branding/banner_${System.currentTimeMillis()}.jpg"
+                    try {
+                        bucket.upload(primaryBannerPath, bannerBytes) { upsert = true }
+                        finalBannerUrl = SupabaseConfig.resolveStorageUrl(primaryBannerPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                    } catch (primaryErr: Exception) {
+                        val fallbackBannerPath = "goats/$cleanFarmId/banner_${System.currentTimeMillis()}.jpg"
+                        try {
+                            bucket.upload(fallbackBannerPath, bannerBytes) { upsert = true }
+                            finalBannerUrl = SupabaseConfig.resolveStorageUrl(fallbackBannerPath, SupabaseConfig.BUCKET_GOAT_IMAGES)
+                        } catch (fallbackErr: Exception) {
+                            throw IllegalStateException("Failed to upload farm banner: ${primaryErr.message ?: fallbackErr.message}", primaryErr)
+                        }
+                    }
+                }
+
                 val resolvedDist = farm.district.ifBlank {
                     farm.location.substringBefore(",").trim().ifBlank { "Madurai" }
                 }
@@ -1051,11 +1627,11 @@ open class SupabaseMarketplaceRepositoryImpl(
                         if (farm.email.isNotBlank()) {
                             put("contact_email", farm.email.trim())
                         }
-                        if (farm.logoUrl.isNotBlank()) {
-                            put("logo_url", farm.logoUrl)
+                        if (finalLogoUrl.isNotBlank()) {
+                            put("logo_url", finalLogoUrl)
                         }
-                        if (!farm.bannerUrl.isNullOrBlank()) {
-                            put("banner_url", farm.bannerUrl)
+                        if (!finalBannerUrl.isNullOrBlank()) {
+                            put("banner_url", finalBannerUrl)
                         }
                         put("updated_at", currentIsoTimestamp())
                     }
@@ -1063,12 +1639,37 @@ open class SupabaseMarketplaceRepositoryImpl(
                     filter { eq("id", cleanFarmId) }
                 }
             }
-            FarmLocalCache.saveFarmProfile(farm)
+
+            val updatedFarm = farm.copy(
+                id = cleanFarmId,
+                imageUrl = finalLogoUrl,
+                logoUrl = finalLogoUrl,
+                bannerUrl = finalBannerUrl
+            )
+            FarmLocalCache.saveFarmProfile(updatedFarm)
             _farms.update { list ->
-                val exists = list.any { it.id == farm.id }
-                if (exists) list.map { if (it.id == farm.id) farm else it } else list + farm
+                val exists = list.any { it.id == updatedFarm.id || it.id == farm.id }
+                if (exists) {
+                    list.map { if (it.id == updatedFarm.id || it.id == farm.id) updatedFarm else it }
+                } else {
+                    list + updatedFarm
+                }
             }
-            Result.success(farm)
+            _goats.update { currentGoats ->
+                currentGoats.map { g ->
+                    if (g.farmId == updatedFarm.id || g.farmId == farm.id) {
+                        g.copy(
+                            farmName = updatedFarm.name,
+                            farmLocation = updatedFarm.location,
+                            farmContact = updatedFarm.contactNumber
+                        )
+                    } else g
+                }
+            }
+            if (SupabaseConfig.isConfigured) {
+                try { refreshFarms() } catch (_: Exception) {}
+            }
+            Result.success(updatedFarm)
         } catch (e: Exception) {
             val friendly = UserFriendlyErrorMapper.toUserMessage(e)
             Result.failure(Exception(friendly, e))
@@ -1076,32 +1677,52 @@ open class SupabaseMarketplaceRepositoryImpl(
     }
 
     override suspend fun increaseFarmListingLimit(farmId: String, additionalSlots: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        if (additionalSlots <= 0 || additionalSlots > 500) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid number of additional slots (1 to 500)."))
+        }
         val target = _farms.value.find { it.id == farmId }
+            ?: FarmLocalCache.getCachedFarm(farmId)
             ?: return@withContext Result.failure(IllegalArgumentException("Farm not found."))
         val newLimit = (target.goatListingLimit + additionalSlots).coerceAtLeast(2)
         try {
             if (SupabaseConfig.isConfigured) {
                 val cleanFarmId = ensureValidUuid(farmId)
                 try {
+                    // Use the dedicated Super Admin quota update RPC which checks Super Admin authorization
+                    // server-side without resetting consumed_listing_slots or confusing custom slots with slot-pack purchases
                     SupabaseModule.client.postgrest.rpc(
-                        "increase_farm_goat_quota_with_manual_payment",
+                        "admin_update_farm_listing_limit",
                         buildJsonObject {
                             put("p_farm_id", cleanFarmId)
-                            put("p_slots_to_add", additionalSlots)
-                            put("p_amount", PlatformPricingManager.goatListingPackFeeInr)
-                            put("p_payment_reference", "QUOTA-${System.currentTimeMillis()}")
-                            put("p_receipt_number", "RCPT-${(10000..99999).random()}")
-                            put("p_notes", "Added $additionalSlots listing slots")
+                            put("p_new_limit", newLimit)
                         }
                     )
-                } catch (_: Exception) {
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                        buildJsonObject {
-                            put("goat_listing_limit", newLimit)
-                            put("updated_at", currentIsoTimestamp())
+                } catch (rpcErr: Exception) {
+                    val msg = (rpcErr.message ?: "").lowercase()
+                    if (msg.contains("only super admin") || msg.contains("permission denied") || msg.contains("not authorized")) {
+                        throw rpcErr
+                    }
+                    try {
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
+                            buildJsonObject {
+                                put("goat_listing_limit", newLimit)
+                                put("updated_at", currentIsoTimestamp())
+                            }
+                        ) {
+                            filter { eq("id", cleanFarmId) }
                         }
-                    ) {
-                        filter { eq("id", cleanFarmId) }
+                    } catch (_: Exception) {
+                        SupabaseModule.client.postgrest.rpc(
+                            "increase_farm_goat_quota_with_manual_payment",
+                            buildJsonObject {
+                                put("p_farm_id", cleanFarmId)
+                                put("p_slots_to_add", additionalSlots)
+                                put("p_amount", PlatformPricingManager.goatListingPackFeeInr)
+                                put("p_payment_reference", "ADMIN-QUOTA-${System.currentTimeMillis()}")
+                                put("p_receipt_number", "RCPT-${(10000..99999).random()}")
+                                put("p_notes", "Super Admin increased quota by $additionalSlots slots (New total: $newLimit)")
+                            }
+                        )
                     }
                 }
             }
@@ -1113,6 +1734,9 @@ open class SupabaseMarketplaceRepositoryImpl(
                         updated
                     } else it
                 }
+            }
+            if (SupabaseConfig.isConfigured) {
+                try { refreshFarms() } catch (_: Exception) {}
             }
             Result.success(Unit)
         } catch (e: Exception) {

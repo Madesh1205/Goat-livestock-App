@@ -350,7 +350,7 @@ fun ProfileScreen(
                                             modifier = Modifier
                                                 .size(42.dp)
                                                 .clip(CircleShape)
-                                                .background(Color(0xFFFFEBEE)),
+                                                .background(Color(0xFFE91E63).copy(alpha = 0.16f)),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
@@ -578,7 +578,7 @@ fun ProfileScreen(
                                 Text(
                                     text = "✓ Verified Partner: Full access enabled to create listings and manage reservations.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF2E7D32)
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }

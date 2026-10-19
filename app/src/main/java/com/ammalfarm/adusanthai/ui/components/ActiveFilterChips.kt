@@ -16,23 +16,41 @@ import com.ammalfarm.adusanthai.ui.viewmodel.SortOption
 fun ActiveFilterChips(
     selectedBreed: String = "All",
     selectedGender: String = "All",
-    selectedPurpose: String = "All",
     selectedDistrict: String = "All",
+    selectedFarm: String = "All",
+    selectedAvailability: String = "All",
+    minPriceInput: String = "",
+    maxPriceInput: String = "",
+    minAgeInput: String = "",
+    maxAgeInput: String = "",
+    minWeightInput: String = "",
+    maxWeightInput: String = "",
     onlyAvailable: Boolean = false,
     sortOption: SortOption = SortOption.NEWEST,
     onRemoveBreed: () -> Unit = {},
     onRemoveGender: () -> Unit = {},
-    onRemovePurpose: () -> Unit = {},
     onRemoveDistrict: () -> Unit = {},
+    onRemoveFarm: () -> Unit = {},
+    onRemovePrice: () -> Unit = {},
+    onRemoveAge: () -> Unit = {},
+    onRemoveWeight: () -> Unit = {},
     onRemoveAvailable: () -> Unit = {},
     onClearAll: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val hasPrice = minPriceInput.isNotBlank() || maxPriceInput.isNotBlank()
+    val hasAge = minAgeInput.isNotBlank() || maxAgeInput.isNotBlank()
+    val hasWeight = minWeightInput.isNotBlank() || maxWeightInput.isNotBlank()
+    val hasAvailability = onlyAvailable || selectedAvailability != "All"
+
     val hasActiveFilters = selectedBreed != "All" ||
             selectedGender != "All" ||
-            selectedPurpose != "All" ||
             selectedDistrict != "All" ||
-            onlyAvailable ||
+            selectedFarm != "All" ||
+            hasPrice ||
+            hasAge ||
+            hasWeight ||
+            hasAvailability ||
             sortOption != SortOption.NEWEST
 
     if (!hasActiveFilters) return
@@ -61,27 +79,67 @@ fun ActiveFilterChips(
                 trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
             )
         }
-        if (selectedPurpose != "All") {
-            InputChip(
-                selected = true,
-                onClick = onRemovePurpose,
-                label = { Text("Purpose: $selectedPurpose") },
-                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
-            )
-        }
         if (selectedDistrict != "All") {
             InputChip(
                 selected = true,
                 onClick = onRemoveDistrict,
-                label = { Text("District: $selectedDistrict") },
+                label = { Text("Location: $selectedDistrict") },
                 trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
             )
         }
-        if (onlyAvailable) {
+        if (selectedFarm != "All") {
+            InputChip(
+                selected = true,
+                onClick = onRemoveFarm,
+                label = { Text("Farm: $selectedFarm") },
+                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
+            )
+        }
+        if (hasPrice) {
+            val label = when {
+                minPriceInput.isNotBlank() && maxPriceInput.isNotBlank() -> "₹$minPriceInput–₹$maxPriceInput"
+                minPriceInput.isNotBlank() -> "Min ₹$minPriceInput"
+                else -> "Max ₹$maxPriceInput"
+            }
+            InputChip(
+                selected = true,
+                onClick = onRemovePrice,
+                label = { Text(label) },
+                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
+            )
+        }
+        if (hasAge) {
+            val label = when {
+                minAgeInput.isNotBlank() && maxAgeInput.isNotBlank() -> "${minAgeInput}–${maxAgeInput} mos"
+                minAgeInput.isNotBlank() -> "${minAgeInput}+ mos"
+                else -> "≤${maxAgeInput} mos"
+            }
+            InputChip(
+                selected = true,
+                onClick = onRemoveAge,
+                label = { Text(label) },
+                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
+            )
+        }
+        if (hasWeight) {
+            val label = when {
+                minWeightInput.isNotBlank() && maxWeightInput.isNotBlank() -> "${minWeightInput}–${maxWeightInput} kg"
+                minWeightInput.isNotBlank() -> "${minWeightInput}+ kg"
+                else -> "≤${maxWeightInput} kg"
+            }
+            InputChip(
+                selected = true,
+                onClick = onRemoveWeight,
+                label = { Text(label) },
+                trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
+            )
+        }
+        if (hasAvailability) {
+            val statusLabel = if (selectedAvailability != "All") selectedAvailability else "Available Only"
             InputChip(
                 selected = true,
                 onClick = onRemoveAvailable,
-                label = { Text("Available Only") },
+                label = { Text("Status: $statusLabel") },
                 trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove", modifier = Modifier.size(16.dp)) }
             )
         }
@@ -90,3 +148,4 @@ fun ActiveFilterChips(
         }
     }
 }
+

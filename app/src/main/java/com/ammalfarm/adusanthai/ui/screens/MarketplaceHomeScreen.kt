@@ -164,7 +164,7 @@ fun MarketplaceHomeScreen(
                         OutlinedTextField(
                             value = uiState.searchQuery,
                             onValueChange = { marketplaceViewModel.updateSearchQuery(it) },
-                            placeholder = { Text("Search breed, farm, district, tag...") },
+                            placeholder = { Text("Search breed, farm, district, location...") },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                             trailingIcon = {
                                 if (uiState.searchQuery.isNotBlank()) {
@@ -287,15 +287,25 @@ fun MarketplaceHomeScreen(
             ActiveFilterChips(
                 selectedBreed = uiState.selectedBreed,
                 selectedGender = uiState.selectedGender,
-                selectedPurpose = uiState.selectedPurpose,
                 selectedDistrict = uiState.selectedDistrict,
+                selectedFarm = uiState.selectedFarm,
+                selectedAvailability = uiState.availabilityFilter,
+                minPriceInput = uiState.minPrice?.toInt()?.toString().orEmpty(),
+                maxPriceInput = uiState.maxPrice?.toInt()?.toString().orEmpty(),
+                minAgeInput = uiState.minAgeMonths?.toString().orEmpty(),
+                maxAgeInput = uiState.maxAgeMonths?.toString().orEmpty(),
+                minWeightInput = uiState.minWeightKg?.toString().orEmpty(),
+                maxWeightInput = uiState.maxWeightKg?.toString().orEmpty(),
                 onlyAvailable = uiState.onlyAvailable,
                 sortOption = uiState.sortOption,
                 onRemoveBreed = { marketplaceViewModel.updateFilters(breed = "All") },
                 onRemoveGender = { marketplaceViewModel.updateFilters(gender = "All") },
-                onRemovePurpose = { marketplaceViewModel.updateFilters(purpose = "All") },
                 onRemoveDistrict = { marketplaceViewModel.updateFilters(district = "All") },
-                onRemoveAvailable = { marketplaceViewModel.updateFilters(onlyAvailable = false) },
+                onRemoveFarm = { marketplaceViewModel.updateFilters(farm = "All") },
+                onRemovePrice = { marketplaceViewModel.updateFilters(minPrice = null, maxPrice = null) },
+                onRemoveAge = { marketplaceViewModel.updateFilters(minAgeMonths = null, maxAgeMonths = null) },
+                onRemoveWeight = { marketplaceViewModel.updateFilters(minWeightKg = null, maxWeightKg = null) },
+                onRemoveAvailable = { marketplaceViewModel.updateFilters(onlyAvailable = false, availabilityFilter = "All") },
                 onClearAll = { marketplaceViewModel.clearFilters() }
             )
 
@@ -432,13 +442,13 @@ fun MarketplaceHomeScreen(
                                 }
                             }
                             Text(
-                                text = "No Eligible Goat Listings Found",
+                                text = "No Matching Goat Listings",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = if (uiState.activeFilterCount > 0 || uiState.searchQuery.isNotBlank())
-                                    "Try clearing your active search or filters to view all verified listings."
+                                    "No goats matched your current search or filter criteria. Try resetting filters to view all verified listings."
                                 else
                                     "Approved goat listings from verified farms will appear here automatically.",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -446,8 +456,13 @@ fun MarketplaceHomeScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (uiState.activeFilterCount > 0 || uiState.searchQuery.isNotBlank()) {
-                                OutlinedButton(onClick = { marketplaceViewModel.clearFilters() }) {
-                                    Text("Reset Search & Filters")
+                                Button(
+                                    onClick = { marketplaceViewModel.clearFilters() },
+                                    modifier = Modifier.testTag("btn_reset_filters_empty_state")
+                                ) {
+                                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Reset Filters")
                                 }
                             } else {
                                 OutlinedButton(onClick = { marketplaceViewModel.refreshMarketplace() }) {
@@ -461,42 +476,162 @@ fun MarketplaceHomeScreen(
                 }
 
                 else -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${uiState.filteredGoats.size} Verified Listing${if (uiState.filteredGoats.size == 1) "" else "s"}",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = uiState.sortOption.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                    val farmsById = remember(uiState.farms) {
+                        uiState.farms.associateBy { it.id }
+                    }
+                    val verifiedFarms = remember(uiState.farms) {
+                        uiState.farms.filter { it.verificationStatus.isApprovedOrVerified || it.isAmmalOwnFarm }
+                    }
+
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val columns = when {
+                            maxWidth < 310.dp -> 1
+                            maxWidth < 720.dp -> 2
+                            else -> 3
+                        }
+                        val chunkedGoats = remember(uiState.filteredGoats, columns) {
+                            uiState.filteredGoats.chunked(columns)
                         }
 
-                        items(uiState.filteredGoats, key = { it.id }) { goat ->
-                            GoatCard(
-                                goat = goat,
-                                onClick = { onNavigateToGoatDetail(goat.id) },
-                                isWishlisted = uiState.wishlistedIds.contains(goat.id),
-                                onToggleWishlist = {
-                                    if (currentUser != null) {
-                                        marketplaceViewModel.toggleWishlist(currentUser.id, goat.id)
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("marketplace_grid_list"),
+                            contentPadding = PaddingValues(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Verified Partner Farms Showcase Row (with Farm Banner & Logo per Requirement 4)
+                            if (verifiedFarms.isNotEmpty()) {
+                                item(key = "verified_farms_strip") {
+                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(
+                                            text = "Verified Farms (${verifiedFarms.size})",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 4.dp)
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            verifiedFarms.forEach { farm ->
+                                                Surface(
+                                                    onClick = { onNavigateToFarmDetail(farm.id) },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                                    modifier = Modifier.width(210.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Surface(
+                                                            shape = CircleShape,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            if (farm.logoUrl.isNotBlank()) {
+                                                                coil.compose.AsyncImage(
+                                                                    model = farm.logoUrl,
+                                                                    contentDescription = farm.name,
+                                                                    modifier = Modifier.fillMaxSize(),
+                                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                                )
+                                                            } else {
+                                                                Box(contentAlignment = Alignment.Center) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Default.Agriculture,
+                                                                        contentDescription = null,
+                                                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                                                        modifier = Modifier.size(18.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = farm.name,
+                                                                style = MaterialTheme.typography.labelMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                maxLines = 1,
+                                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                            )
+                                                            Text(
+                                                                text = farm.location.ifBlank { farm.district.ifBlank { "Tamil Nadu" } },
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                maxLines = 1,
+                                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                            )
+                            }
+
+                            item(key = "results_summary_header") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${uiState.filteredGoats.size} Verified Listing${if (uiState.filteredGoats.size == 1) "" else "s"}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = uiState.sortOption.label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            items(
+                                items = chunkedGoats,
+                                key = { row -> row.joinToString("_") { it.id } }
+                            ) { rowGoats ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    rowGoats.forEach { goat ->
+                                        val linkedFarm = farmsById[goat.farmId]
+                                        GoatCard(
+                                            goat = goat.copy(
+                                                farmName = goat.farmName.ifBlank { linkedFarm?.name.orEmpty() },
+                                                farmLocation = goat.farmLocation.ifBlank { linkedFarm?.location.orEmpty() }
+                                            ),
+                                            onClick = { onNavigateToGoatDetail(goat.id) },
+                                            isWishlisted = uiState.wishlistedIds.contains(goat.id),
+                                            onToggleWishlist = {
+                                                if (currentUser != null) {
+                                                    marketplaceViewModel.toggleWishlist(currentUser.id, goat.id)
+                                                }
+                                            },
+                                            farmLogoUrl = linkedFarm?.logoUrl.orEmpty(),
+                                            isCompactGrid = columns >= 2,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (rowGoats.size < columns) {
+                                        repeat(columns - rowGoats.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -508,17 +643,33 @@ fun MarketplaceHomeScreen(
         GoatFilterBottomSheet(
             selectedBreed = uiState.selectedBreed,
             selectedGender = uiState.selectedGender,
-            selectedPurpose = uiState.selectedPurpose,
             selectedDistrict = uiState.selectedDistrict,
+            selectedFarm = uiState.selectedFarm,
+            selectedAvailability = uiState.availabilityFilter,
+            minPriceInput = uiState.minPrice?.toInt()?.toString().orEmpty(),
+            maxPriceInput = uiState.maxPrice?.toInt()?.toString().orEmpty(),
+            minAgeInput = uiState.minAgeMonths?.toString().orEmpty(),
+            maxAgeInput = uiState.maxAgeMonths?.toString().orEmpty(),
+            minWeightInput = uiState.minWeightKg?.toString().orEmpty(),
+            maxWeightInput = uiState.maxWeightKg?.toString().orEmpty(),
             onlyAvailable = uiState.onlyAvailable,
             selectedSort = uiState.sortOption,
             availableBreeds = uiState.availableBreeds,
-            onApply = { breed, gender, purpose, district, availableOnly, sort ->
+            availableDistricts = uiState.availableLocations,
+            availableFarms = uiState.availableFarms,
+            onApply = { breed, gender, district, farm, availability, minPrice, maxPrice, minAge, maxAge, minWeight, maxWeight, availableOnly, sort ->
                 marketplaceViewModel.updateFilters(
                     breed = breed,
                     gender = gender,
-                    purpose = purpose,
                     district = district,
+                    farm = farm,
+                    availabilityFilter = availability,
+                    minPrice = minPrice.trim().toDoubleOrNull(),
+                    maxPrice = maxPrice.trim().toDoubleOrNull(),
+                    minAgeMonths = minAge.trim().toIntOrNull(),
+                    maxAgeMonths = maxAge.trim().toIntOrNull(),
+                    minWeightKg = minWeight.trim().toDoubleOrNull(),
+                    maxWeightKg = maxWeight.trim().toDoubleOrNull(),
                     onlyAvailable = availableOnly,
                     sortOption = sort
                 )

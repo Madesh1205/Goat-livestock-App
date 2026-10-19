@@ -28,14 +28,26 @@ import com.ammalfarm.adusanthai.core.util.PriceUtils
 import com.ammalfarm.adusanthai.model.AvailabilityStatus
 import com.ammalfarm.adusanthai.model.Goat
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GoatCard(
     goat: Goat,
     onClick: () -> Unit,
     isWishlisted: Boolean = false,
     onToggleWishlist: (() -> Unit)? = null,
+    farmLogoUrl: String = "",
+    isCompactGrid: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val primaryImage = goat.imageUrl.ifBlank {
+        goat.imageUrls.firstOrNull { it.isNotBlank() }.orEmpty()
+    }
+    val photoCount = (listOf(goat.imageUrl) + goat.imageUrls)
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .size
+
     ElevatedCard(
         modifier = modifier
             .fillMaxWidth()
@@ -48,16 +60,19 @@ fun GoatCard(
         )
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Image & Badges Section
+            // Image & Badges Section with responsive aspect ratio
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(175.dp)
+                    .then(
+                        if (isCompactGrid) Modifier.aspectRatio(1.15f)
+                        else Modifier.height(175.dp)
+                    )
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
             ) {
-                if (goat.imageUrl.isNotBlank()) {
+                if (primaryImage.isNotBlank()) {
                     AsyncImage(
-                        model = goat.imageUrl,
+                        model = primaryImage,
                         contentDescription = "${goat.name} - ${goat.breed}",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -80,14 +95,16 @@ fun GoatCard(
                             Icon(
                                 imageVector = Icons.Default.Pets,
                                 contentDescription = "Goat Placeholder",
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(if (isCompactGrid) 36.dp else 48.dp),
                                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = goat.breed.ifBlank { "Livestock" },
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -97,9 +114,9 @@ fun GoatCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(10.dp),
+                        .padding(if (isCompactGrid) 8.dp else 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Top
                 ) {
                     val (badgeColor, badgeText) = when (goat.availabilityStatus) {
                         AvailabilityStatus.AVAILABLE -> Color(0xFF1B5E20) to "AVAILABLE"
@@ -109,34 +126,39 @@ fun GoatCard(
                     }
 
                     Surface(
-                        color = badgeColor.copy(alpha = 0.9f),
+                        color = badgeColor.copy(alpha = 0.92f),
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = badgeText,
                             color = Color.White,
-                            fontSize = 11.sp,
+                            fontSize = if (isCompactGrid) 10.sp else 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(
+                                horizontal = if (isCompactGrid) 6.dp else 8.dp,
+                                vertical = 3.dp
+                            )
                         )
                     }
 
                     if (onToggleWishlist != null) {
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
                             shadowElevation = 2.dp,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(36.dp)
                         ) {
                             IconButton(
                                 onClick = onToggleWishlist,
-                                modifier = Modifier.testTag("wishlist_toggle_${goat.id}")
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("wishlist_toggle_${goat.id}")
                             ) {
                                 Icon(
                                     imageVector = if (isWishlisted) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                                     contentDescription = if (isWishlisted) "Remove from Wishlist" else "Add to Wishlist",
                                     tint = if (isWishlisted) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -153,37 +175,68 @@ fun GoatCard(
                         Text(
                             text = "${goat.discountPercentage.toInt()}% OFF",
                             color = Color.White,
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                         )
                     }
                 }
 
-                // Verified Badge at Bottom Right of Image
-                if (goat.isVerified) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
-                        shape = RoundedCornerShape(topStart = 10.dp),
-                        modifier = Modifier.align(Alignment.BottomEnd)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                // Verified / Multi-Photo Badge at Bottom Right of Image
+                Row(
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (photoCount > 1) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(topStart = 8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Verified,
-                                contentDescription = "Verified Goat",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Verified",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoLibrary,
+                                    contentDescription = "$photoCount photos",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Text(
+                                    text = "$photoCount",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                    if (goat.isVerified) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(topStart = if (photoCount > 1) 0.dp else 10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Verified,
+                                    contentDescription = "Verified Goat",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                if (!isCompactGrid) {
+                                    Text(
+                                        text = "Verified",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -193,62 +246,101 @@ fun GoatCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(if (isCompactGrid) 10.dp else 14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = goat.name.ifBlank { "${goat.breed} Goat" },
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = goat.breed.ifBlank { "Pure Breed" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // Price Column
-                    Column(horizontalAlignment = Alignment.End) {
+                if (isCompactGrid) {
+                    // Stacked title + price for 2-column phone grid so neither clips
+                    Text(
+                        text = goat.name.ifBlank { "${goat.breed} Goat" },
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = goat.breed.ifBlank { "Pure Breed" },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
                             text = PriceUtils.formatINR(goat.effectivePrice),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1
                         )
                         if (goat.discountPercentage > 0.0 && goat.effectivePrice < goat.price) {
                             Text(
                                 text = PriceUtils.formatINR(goat.price),
                                 style = MaterialTheme.typography.labelSmall,
                                 textDecoration = TextDecoration.LineThrough,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = goat.name.ifBlank { "${goat.breed} Goat" },
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = goat.breed.ifBlank { "Pure Breed" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        // Price Column
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = PriceUtils.formatINR(goat.effectivePrice),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (goat.discountPercentage > 0.0 && goat.effectivePrice < goat.price) {
+                                Text(
+                                    text = PriceUtils.formatINR(goat.price),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    textDecoration = TextDecoration.LineThrough,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
 
-                // Specs Pills: Gender, Age, Weight
-                Row(
+                // Specs Pills: Gender, Age, Weight only (Tag ID, Vaccination, Coat Color, Purpose removed per Requirement 5)
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     SpecChip(text = goat.gender.ifBlank { "Male" })
-                    SpecChip(text = "${goat.ageMonths} mos")
+                    SpecChip(text = "${goat.ageMonths}m")
                     if (goat.weightKg > 0.0) {
-                        SpecChip(text = "${goat.weightKg} kg")
-                    }
-                    if (goat.isVaccinated) {
-                        SpecChip(text = "Vaccinated", isHighlight = true)
+                        SpecChip(text = "${goat.weightKg}kg")
                     }
                 }
 
@@ -260,12 +352,24 @@ fun GoatCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Agriculture,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (farmLogoUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = farmLogoUrl,
+                                contentDescription = goat.farmName,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Agriculture,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Text(
                             text = buildString {
                                 append(goat.farmName.ifBlank { "Verified Farm" })
@@ -274,7 +378,7 @@ fun GoatCard(
                                     append(goat.farmLocation)
                                 }
                             },
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -308,7 +412,9 @@ private fun SpecChip(
             fontWeight = FontWeight.Medium,
             color = if (isHighlight) MaterialTheme.colorScheme.onSecondaryContainer
             else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            maxLines = 1
         )
     }
 }
+

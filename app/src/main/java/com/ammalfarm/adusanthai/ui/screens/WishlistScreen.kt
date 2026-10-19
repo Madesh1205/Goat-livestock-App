@@ -102,24 +102,52 @@ fun WishlistScreen(
                 }
             }
         } else {
-            LazyColumn(
+            val farmsById = remember(uiState?.farms) {
+                uiState?.farms.orEmpty().associateBy { it.id }
+            }
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(innerPadding)
             ) {
-                items(wishlistedGoats, key = { it.id }) { goat ->
-                    GoatCard(
-                        goat = goat,
-                        onClick = { onNavigateToGoatDetail(goat.id) },
-                        isWishlisted = true,
-                        onToggleWishlist = {
-                            if (currentUser != null && marketplaceViewModel != null) {
-                                marketplaceViewModel.toggleWishlist(currentUser.id, goat.id)
+                val useTwoColumns = maxWidth >= 320.dp
+                val chunkedGoats = remember(wishlistedGoats, useTwoColumns) {
+                    if (useTwoColumns) wishlistedGoats.chunked(2) else wishlistedGoats.chunked(1)
+                }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(chunkedGoats, key = { row -> row.joinToString("_") { it.id } }) { rowGoats ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowGoats.forEach { goat ->
+                                val linkedFarm = farmsById[goat.farmId]
+                                GoatCard(
+                                    goat = goat.copy(
+                                        farmName = goat.farmName.ifBlank { linkedFarm?.name.orEmpty() },
+                                        farmLocation = goat.farmLocation.ifBlank { linkedFarm?.location.orEmpty() }
+                                    ),
+                                    onClick = { onNavigateToGoatDetail(goat.id) },
+                                    isWishlisted = true,
+                                    onToggleWishlist = {
+                                        if (currentUser != null && marketplaceViewModel != null) {
+                                            marketplaceViewModel.toggleWishlist(currentUser.id, goat.id)
+                                        }
+                                    },
+                                    farmLogoUrl = linkedFarm?.logoUrl.orEmpty(),
+                                    isCompactGrid = useTwoColumns,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (useTwoColumns && rowGoats.size == 1) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
-                    )
+                    }
                 }
             }
         }

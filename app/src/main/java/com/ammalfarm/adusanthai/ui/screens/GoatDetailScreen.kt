@@ -196,7 +196,10 @@ fun GoatDetailScreen(
             }
         } else {
             val allImages = remember(goat) {
-                (goat.imageUrls + listOfNotNull(goat.imageUrl.takeIf { it.isNotBlank() })).distinct()
+                (listOf(goat.imageUrl) + goat.imageUrls)
+                    .map { it.trim() }
+                    .filter { it.isNotBlank() }
+                    .distinct()
             }
 
             Column(
@@ -227,25 +230,14 @@ fun GoatDetailScreen(
                         }
                     }
 
-                    // Status & Tag Badge
+                    // Availability & Photo Counter Badges (Tag ID removed per Requirement 5)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = "Tag: ${goat.tagId.ifBlank { goat.goatCode.ifBlank { goat.id.take(8) } }}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                            )
-                        }
-
                         Surface(
                             color = when (goat.availabilityStatus) {
                                 AvailabilityStatus.AVAILABLE -> Color(0xFF1B5E20)
@@ -262,6 +254,21 @@ fun GoatDetailScreen(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                             )
+                        }
+
+                        if (allImages.size > 1) {
+                            Surface(
+                                color = Color.Black.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "${selectedImageIndex + 1} / ${allImages.size}",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -304,7 +311,7 @@ fun GoatDetailScreen(
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Title & Breed Header
+                    // Title & Breed Header (Goat purpose removed per Requirement 5)
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -325,14 +332,14 @@ fun GoatDetailScreen(
                             }
                         }
                         Text(
-                            text = "${goat.breed} • ${goat.purpose.ifBlank { "Breeding & Livestock" }}",
+                            text = goat.breed.ifBlank { "Pure Breed Livestock" },
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
-                    // Key Specifications Grid
+                    // Key Specifications Grid (Coat color and Vaccination status removed per Requirement 5)
                     Card(
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(
@@ -348,18 +355,16 @@ fun GoatDetailScreen(
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 SpecMetricItem(label = "Breed", value = goat.breed.ifBlank { "Native" }, modifier = Modifier.weight(1f))
                                 SpecMetricItem(label = "Gender", value = goat.gender.ifBlank { "Male" }, modifier = Modifier.weight(1f))
-                                SpecMetricItem(label = "Age", value = "${goat.ageMonths} Months", modifier = Modifier.weight(1f))
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                SpecMetricItem(label = "Age", value = "${goat.ageMonths} Months", modifier = Modifier.weight(1f))
                                 SpecMetricItem(label = "Weight", value = "${goat.weightKg} kg", modifier = Modifier.weight(1f))
-                                SpecMetricItem(label = "Color / Coat", value = goat.color.ifBlank { "Natural" }, modifier = Modifier.weight(1f))
-                                SpecMetricItem(label = "Vaccinated", value = if (goat.isVaccinated) "Yes (Verified)" else "Pending", modifier = Modifier.weight(1f))
                             }
                         }
                     }
 
-                    // Description & Health Notes
+                    // Description & General Health Notes (unrelated health info preserved)
                     if (goat.description.isNotBlank() || goat.healthNotes.isNotBlank()) {
                         Card(
                             shape = RoundedCornerShape(14.dp),
@@ -377,17 +382,19 @@ fun GoatDetailScreen(
                                 }
                                 if (goat.healthNotes.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text("Health & Vaccination Record", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text("Health & Care Notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                     Text(goat.healthNotes, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
 
-                    // Seller Farm Card
-                    val displayFarmName = farm?.name ?: goat.farmName.ifBlank { "Ammal Farm" }
-                    val displayFarmLocation = farm?.location ?: goat.farmLocation.ifBlank { "Tamil Nadu" }
-                    val displayFarmPhone = farm?.contactNumber ?: goat.farmContact
+                    // Seller Farm Card with consistent Farm Banner and Logo (Requirement 4)
+                    val displayFarmName = farm?.name?.ifBlank { null } ?: goat.farmName.ifBlank { "Ammal Farm" }
+                    val displayFarmLocation = farm?.location?.ifBlank { null } ?: goat.farmLocation.ifBlank { "Tamil Nadu" }
+                    val displayFarmPhone = farm?.contactNumber?.ifBlank { null } ?: goat.farmContact
+                    val displayFarmLogo = farm?.logoUrl.orEmpty()
+                    val displayFarmBanner = farm?.bannerUrl.orEmpty()
 
                     Card(
                         shape = RoundedCornerShape(14.dp),
@@ -403,63 +410,100 @@ fun GoatDetailScreen(
                                 }
                             }
                     ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            if (displayFarmBanner.isNotBlank()) {
+                                AsyncImage(
+                                    model = displayFarmBanner,
+                                    contentDescription = "$displayFarmName Banner",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(96.dp),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(42.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f)
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.Agriculture, contentDescription = null, tint = Color.White)
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(46.dp)
+                                        ) {
+                                            if (displayFarmLogo.isNotBlank()) {
+                                                AsyncImage(
+                                                    model = displayFarmLogo,
+                                                    contentDescription = "$displayFarmName Logo",
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clip(CircleShape),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(Icons.Default.Agriculture, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary)
+                                                }
+                                            }
+                                        }
+                                        Column {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(displayFarmName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                                if (farm?.verificationStatus?.isApprovedOrVerified == true || farm?.isAmmalOwnFarm == true) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Verified,
+                                                        contentDescription = "Verified Farm",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(displayFarmLocation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
-                                    Column {
-                                        Text(displayFarmName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        Text(displayFarmLocation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+
+                                    Icon(Icons.Default.ChevronRight, contentDescription = "View Farm")
                                 }
 
-                                Icon(Icons.Default.ChevronRight, contentDescription = "View Farm")
-                            }
-
-                            if (displayFarmPhone.isNotBlank()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    OutlinedButton(
-                                        onClick = {
-                                            val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$displayFarmPhone"))
-                                            context.startActivity(intent)
-                                        },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(10.dp)
+                                if (displayFarmPhone.isNotBlank()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Call Farm")
-                                    }
-                                    if (goat.farmId.isNotBlank()) {
-                                        FilledTonalButton(
-                                            onClick = { onNavigateToFarmDetail(goat.farmId) },
+                                        OutlinedButton(
+                                            onClick = {
+                                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$displayFarmPhone"))
+                                                context.startActivity(intent)
+                                            },
                                             modifier = Modifier.weight(1f),
                                             shape = RoundedCornerShape(10.dp)
                                         ) {
-                                            Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Farm Profile")
+                                            Text("Call Farm")
+                                        }
+                                        if (goat.farmId.isNotBlank()) {
+                                            FilledTonalButton(
+                                                onClick = { onNavigateToFarmDetail(goat.farmId) },
+                                                modifier = Modifier.weight(1f),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Icon(Icons.Default.Storefront, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Farm Profile")
+                                            }
                                         }
                                     }
                                 }
@@ -477,7 +521,12 @@ fun GoatDetailScreen(
         CreateBookingDialog(
             goat = goat,
             customer = currentUser,
-            onDismiss = { showBookingDialog = false },
+            isSubmitting = uiState?.isLoading == true,
+            errorMessage = uiState?.actionErrorMessage,
+            onDismiss = {
+                marketplaceViewModel.clearActionMessages()
+                showBookingDialog = false
+            },
             onConfirmBooking = { visitDate, advance, notes ->
                 marketplaceViewModel.createBooking(
                     goat = goat,
@@ -557,6 +606,8 @@ private fun SpecMetricItem(
 private fun CreateBookingDialog(
     goat: Goat,
     customer: UserProfile,
+    isSubmitting: Boolean = false,
+    errorMessage: String? = null,
     onDismiss: () -> Unit,
     onConfirmBooking: (visitDate: String, advanceAmount: Double, notes: String) -> Unit
 ) {
@@ -567,7 +618,7 @@ private fun CreateBookingDialog(
     var notes by remember { mutableStateOf("") }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = { Text("Reserve ${goat.name.ifBlank { goat.breed }}", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -576,6 +627,33 @@ private fun CreateBookingDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (!errorMessage.isNullOrBlank()) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ErrorOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = errorMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
 
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -598,6 +676,7 @@ private fun CreateBookingDialog(
                     label = { Text("Preferred Farm Visit Date *") },
                     placeholder = { Text("e.g. Tomorrow Morning / 25 Oct") },
                     singleLine = true,
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -607,6 +686,7 @@ private fun CreateBookingDialog(
                     label = { Text("Customer Notes (Optional)") },
                     placeholder = { Text("Any specific questions or pickup timing...") },
                     minLines = 2,
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -614,14 +694,27 @@ private fun CreateBookingDialog(
         confirmButton = {
             Button(
                 onClick = { onConfirmBooking(visitDate.trim(), defaultAdvance, notes.trim()) },
-                enabled = visitDate.isNotBlank(),
+                enabled = visitDate.isNotBlank() && !isSubmitting,
                 modifier = Modifier.testTag("btn_confirm_booking_dialog")
             ) {
-                Text("Confirm Booking")
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Reserving...")
+                } else {
+                    Text("Confirm Booking")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSubmitting
+            ) {
                 Text("Cancel")
             }
         }

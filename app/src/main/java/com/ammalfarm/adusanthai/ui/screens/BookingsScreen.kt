@@ -43,7 +43,10 @@ fun BookingsScreen(
     val uiState = marketplaceViewModel?.uiState?.collectAsStateWithLifecycle()?.value
     val myBookings = remember(uiState?.bookings, currentUser?.id) {
         if (currentUser == null) emptyList()
-        else uiState?.bookings?.filter { it.customerId == currentUser.id }.orEmpty()
+        else uiState?.bookings?.filter {
+            it.customerId.equals(currentUser.id, ignoreCase = true) ||
+                it.customerId.isBlank()
+        }.orEmpty()
     }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -153,12 +156,12 @@ fun CustomerBookingCard(
 ) {
     val context = LocalContext.current
     val (statusColor, statusLabel) = when (booking.status) {
-        BookingStatus.PENDING -> Color(0xFFE65100) to "PENDING APPROVAL"
-        BookingStatus.CONFIRMED, BookingStatus.APPROVED -> Color(0xFF1B5E20) to "CONFIRMED"
-        BookingStatus.COMPLETED -> Color(0xFF0D47A1) to "COMPLETED"
-        BookingStatus.REJECTED -> Color(0xFFB71C1C) to "REJECTED"
-        BookingStatus.CANCELLED -> Color(0xFF616161) to "CANCELLED"
-        BookingStatus.EXPIRED -> Color(0xFF616161) to "EXPIRED"
+        BookingStatus.PENDING -> MaterialTheme.colorScheme.tertiary to "PENDING APPROVAL"
+        BookingStatus.CONFIRMED, BookingStatus.APPROVED -> MaterialTheme.colorScheme.primary to "CONFIRMED"
+        BookingStatus.COMPLETED -> MaterialTheme.colorScheme.secondary to "COMPLETED"
+        BookingStatus.REJECTED -> MaterialTheme.colorScheme.error to "REJECTED"
+        BookingStatus.CANCELLED -> MaterialTheme.colorScheme.outline to "CANCELLED"
+        BookingStatus.EXPIRED -> MaterialTheme.colorScheme.outline to "EXPIRED"
     }
 
     ElevatedCard(

@@ -111,7 +111,7 @@ fun OrdersScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF1B5E20), modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                     Text(
                                         text = "Order #${order.bookingCode.ifBlank { order.id.take(8).uppercase() }}",
                                         fontWeight = FontWeight.Bold

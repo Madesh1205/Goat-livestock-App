@@ -75,8 +75,13 @@ data class GoatFilterCriteria(
     val gender: String? = null,
     val purpose: String? = null,
     val district: String? = null,
+    val farmName: String? = null,
     val minPrice: Double? = null,
     val maxPrice: Double? = null,
+    val minAgeMonths: Int? = null,
+    val maxAgeMonths: Int? = null,
+    val minWeightKg: Double? = null,
+    val maxWeightKg: Double? = null,
     val onlyAvailable: Boolean = false
 )
 

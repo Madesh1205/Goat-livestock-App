@@ -170,17 +170,47 @@ class AuthRepositoryImpl(
             return Result.success(null)
         }
         return try {
+            try {
+                SupabaseModule.auth.awaitInitialization()
+            } catch (_: Exception) {}
+
             val session = SupabaseModule.auth.currentSessionOrNull()
             if (session != null && session.user != null) {
                 val profileResult = fetchAndSyncUserProfile(session.user!!.id)
                 val profile = profileResult.getOrNull() ?: _currentUser.value
                 if (profile != null && profile.isSuspended) {
                     logout()
-                    _authState.update { it.copy(isLoading = false) }
-                    Result.success(null)
-                } else {
-                    _authState.update { it.copy(isLoading = false) }
+                    val suspendedMsg = "Your account has been suspended. Please contact platform support."
+                    _authState.update { it.copy(isLoading = false, errorMessage = suspendedMsg) }
+                    Result.failure(IllegalStateException(suspendedMsg))
+                } else if (profile != null) {
+                    _authState.update {
+                        it.copy(
+                            isLoading = false,
+                            isAuthenticated = true,
+                            userProfile = profile,
+                            userFarm = _currentFarm.value,
+                            errorMessage = null
+                        )
+                    }
                     Result.success(profile)
+                } else {
+                    val err = profileResult.exceptionOrNull()
+                    val friendly = if (err != null) parseAuthErrorMessage(err) else null
+                    clearLocalCache()
+                    _currentUser.value = null
+                    _currentFarm.value = null
+                    _authState.update {
+                        it.copy(
+                            isAuthenticated = false,
+                            userProfile = null,
+                            userFarm = null,
+                            isLoading = false,
+                            errorMessage = friendly
+                        )
+                    }
+                    if (err != null) Result.failure(Exception(friendly ?: "Session restoration failed", err))
+                    else Result.success(null)
                 }
             } else {
                 clearLocalCache()
@@ -190,9 +220,29 @@ class AuthRepositoryImpl(
                 Result.success(null)
             }
         } catch (e: Exception) {
-            _authState.update { it.copy(isLoading = false) }
-            Result.success(null)
+            val cached = _currentUser.value
+            _authState.update {
+                it.copy(
+                    isLoading = false,
+                    isAuthenticated = cached != null,
+                    userProfile = cached,
+                    userFarm = _currentFarm.value
+                )
+            }
+            Result.success(cached)
         }
+    }
+
+    private fun isNetworkError(e: Throwable): Boolean {
+        val msg = (e.message ?: "").lowercase()
+        return e is java.io.IOException ||
+            msg.contains("unable to resolve host") ||
+            msg.contains("failed to connect") ||
+            msg.contains("unknownhostexception") ||
+            msg.contains("sockettimeoutexception") ||
+            msg.contains("timed out") ||
+            msg.contains("connection refused") ||
+            msg.contains("network is unreachable")
     }
 
     override suspend fun fetchAndSyncUserProfile(userId: String?): Result<UserProfile> {
@@ -233,6 +283,7 @@ class AuthRepositoryImpl(
         return try {
             var profileDto: ProfileDto? = null
             var networkErrorEncountered = false
+            var lastNetworkException: Exception? = null
             try {
                 val cleanUuid = try { ensureValidUuid(targetId) } catch (_: Exception) { targetId }
                 profileDto = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PROFILES]
@@ -242,10 +293,9 @@ class AuthRepositoryImpl(
                         }
                     }.decodeSingleOrNull<ProfileDto>()
             } catch (idErr: Exception) {
-                if (idErr.message?.contains("Unable to resolve host", ignoreCase = true) == true ||
-                    idErr.message?.contains("failed to connect", ignoreCase = true) == true ||
-                    idErr.message?.contains("UnknownHostException", ignoreCase = true) == true) {
+                if (isNetworkError(idErr)) {
                     networkErrorEncountered = true
+                    lastNetworkException = idErr
                 }
                 Log.w(TAG, "Notice: Querying profile by id ($targetId): ${idErr.message}")
             }
@@ -259,13 +309,23 @@ class AuthRepositoryImpl(
                             }
                         }.decodeSingleOrNull<ProfileDto>()
                 } catch (emailErr: Exception) {
-                    if (emailErr.message?.contains("Unable to resolve host", ignoreCase = true) == true ||
-                        emailErr.message?.contains("failed to connect", ignoreCase = true) == true ||
-                        emailErr.message?.contains("UnknownHostException", ignoreCase = true) == true) {
+                    if (isNetworkError(emailErr)) {
                         networkErrorEncountered = true
+                        lastNetworkException = emailErr
                     }
                     Log.w(TAG, "Notice: Querying profile by email ($targetEmail): ${emailErr.message}")
                 }
+            }
+
+            if (networkErrorEncountered && profileDto == null) {
+                val existing = _currentUser.value
+                if (existing != null && existing.id == targetId) {
+                    return Result.success(existing)
+                }
+                throw java.io.IOException(
+                    "Unable to connect. Please check your internet connection and try again.",
+                    lastNetworkException
+                )
             }
 
             val metadataFullName = authUser?.userMetadata?.get("full_name")?.toString()?.replace("\"", "")
@@ -297,6 +357,10 @@ class AuthRepositoryImpl(
                     resolvedFarm = farmDtos.firstOrNull()?.toDomain()
                 }
             } catch (_: Exception) {}
+
+            if (profileDto == null && resolvedFarm == null && metadataFullName.isNullOrBlank() && metadataRoleStr.isNullOrBlank()) {
+                throw IllegalStateException("missing_profile: User profile not found in the database.")
+            }
 
             // Never grant SUPER_ADMIN from client metadata or hardcoded emails; derive from trusted database profile.
             val sanitizedMetadataRole = metadataRoleStr?.let {
@@ -351,7 +415,7 @@ class AuthRepositoryImpl(
         } catch (e: Exception) {
             Log.w(TAG, "Error syncing user profile: ${e.message}")
             val existing = _currentUser.value
-            if (existing != null && existing.id == targetId) {
+            if (isNetworkError(e) && existing != null && existing.id == targetId) {
                 Result.success(existing)
             } else {
                 Result.failure(e)
@@ -395,7 +459,9 @@ class AuthRepositoryImpl(
 
             val syncResult = fetchAndSyncUserProfile(userId)
             val user = syncResult.getOrElse { syncErr ->
-                throw IllegalStateException("Failed to load user profile: ${syncErr.message}", syncErr)
+                try { SupabaseModule.auth.signOut() } catch (_: Exception) {}
+                clearLocalCache()
+                throw syncErr
             }
 
             if (user.isSuspended) {

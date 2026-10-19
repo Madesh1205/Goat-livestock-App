@@ -1,5 +1,6 @@
 package com.ammalfarm.adusanthai.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ammalfarm.adusanthai.core.util.PlatformPricingManager
@@ -24,8 +25,15 @@ data class MarketplaceUiState(
     val searchQuery: String = "",
     val selectedBreed: String = "All",
     val selectedGender: String = "All",
-    val selectedPurpose: String = "All",
     val selectedDistrict: String = "All",
+    val selectedFarm: String = "All",
+    val minPrice: Double? = null,
+    val maxPrice: Double? = null,
+    val minAgeMonths: Int? = null,
+    val maxAgeMonths: Int? = null,
+    val minWeightKg: Double? = null,
+    val maxWeightKg: Double? = null,
+    val availabilityFilter: String = "All",
     val onlyAvailable: Boolean = false,
     val sortOption: SortOption = SortOption.NEWEST,
     val allGoats: List<Goat> = emptyList(),
@@ -37,15 +45,23 @@ data class MarketplaceUiState(
     val allUsers: List<UserProfile> = emptyList(),
     val reports: List<ListingReport> = emptyList(),
     val farmReviews: Map<String, List<FarmReview>> = emptyMap(),
-    val availableBreeds: List<String> = listOf("All", "Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black", "Jamunapari", "Sirohi", "Osmanabadi")
+    val availableBreeds: List<String> = listOf("All", "Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black", "Jamunapari", "Sirohi", "Osmanabadi"),
+    val availableFarms: List<String> = listOf("All"),
+    val availableLocations: List<String> = listOf("All")
 ) {
     val activeFilterCount: Int
         get() = listOf(
             selectedBreed != "All",
             selectedGender != "All",
-            selectedPurpose != "All",
             selectedDistrict != "All",
-            onlyAvailable
+            selectedFarm != "All",
+            minPrice != null,
+            maxPrice != null,
+            minAgeMonths != null,
+            maxAgeMonths != null,
+            minWeightKg != null,
+            maxWeightKg != null,
+            onlyAvailable || availabilityFilter != "All"
         ).count { it }
 
     val platformStats: PlatformStats
@@ -92,16 +108,36 @@ class MarketplaceViewModel(
                  Quintuple(goats, farms, bookings, wishlists, loading)
             }.collect { (goats, farms, bookings, wishlists, loading) ->
                 _uiState.update { state ->
-                    val dynamicBreeds = (listOf("All") + goats.map { it.breed }.filter { it.isNotBlank() } +
-                            listOf("Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black", "Jamunapari", "Sirohi"))
+                    val dynamicBreeds = (listOf("All") + goats.map { it.breed.trim() }.filter { it.isNotBlank() } +
+                            listOf("Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black", "Jamunapari", "Sirohi", "Osmanabadi"))
                         .distinct()
+                    val verifiedFarms = farms.filter { it.verificationStatus.isApprovedOrVerified || it.isAmmalOwnFarm }
+                    val dynamicFarms = (listOf("All") +
+                            verifiedFarms.map { it.name.trim() }.filter { it.isNotBlank() } +
+                            goats.map { it.farmName.trim() }.filter { it.isNotBlank() })
+                        .distinct()
+                    val farmDistricts = farms.flatMap { farm ->
+                        listOfNotNull(
+                            farm.district.trim().takeIf { it.isNotBlank() },
+                            farm.location.substringBefore(",").trim().takeIf { it.isNotBlank() }
+                        )
+                    }
+                    val goatDistricts = goats.mapNotNull { g ->
+                        g.farmLocation.substringBefore(",").trim().takeIf { it.isNotBlank() }
+                    }
+                    val dynamicLocations = (listOf("All") + farmDistricts + goatDistricts +
+                            com.ammalfarm.adusanthai.core.util.FarmLocations.TAMIL_NADU_DISTRICTS)
+                        .distinct()
+
                     val updated = state.copy(
                         isLoading = loading,
                         allGoats = goats,
                         farms = farms,
                         bookings = bookings,
                         wishlistedIds = wishlists,
-                        availableBreeds = dynamicBreeds
+                        availableBreeds = dynamicBreeds,
+                        availableFarms = dynamicFarms,
+                        availableLocations = dynamicLocations
                     )
                     updated.copy(filteredGoats = applyCustomerFilters(updated))
                 }
@@ -140,6 +176,7 @@ class MarketplaceViewModel(
     }
 
     private fun applyCustomerFilters(state: MarketplaceUiState): List<Goat> {
+        val farmsById = state.farms.associateBy { it.id }
         val verifiedFarmIds = state.farms
             .filter { it.verificationStatus.isApprovedOrVerified || it.isAmmalOwnFarm }
             .map { it.id }
@@ -160,22 +197,62 @@ class MarketplaceViewModel(
 
         val query = state.searchQuery.trim().lowercase()
         val filtered = eligible.filter { goat ->
+            val linkedFarm = farmsById[goat.farmId]
+            val effectiveFarmName = goat.farmName.ifBlank { linkedFarm?.name ?: "" }
+            val effectiveFarmLocation = buildString {
+                append(goat.farmLocation)
+                if (linkedFarm != null) {
+                    if (isNotEmpty()) append(" ")
+                    append(linkedFarm.district).append(" ").append(linkedFarm.location)
+                }
+            }.trim()
+
             val matchesQuery = if (query.isBlank()) true else {
                 goat.name.lowercase().contains(query) ||
                 goat.breed.lowercase().contains(query) ||
-                goat.farmName.lowercase().contains(query) ||
-                goat.farmLocation.lowercase().contains(query) ||
-                goat.goatCode.lowercase().contains(query) ||
-                goat.tagId.lowercase().contains(query) ||
-                goat.purpose.lowercase().contains(query)
+                effectiveFarmName.lowercase().contains(query) ||
+                effectiveFarmLocation.lowercase().contains(query) ||
+                goat.description.lowercase().contains(query)
             }
             val matchesBreed = state.selectedBreed == "All" || goat.breed.equals(state.selectedBreed, ignoreCase = true)
             val matchesGender = state.selectedGender == "All" || goat.gender.equals(state.selectedGender, ignoreCase = true)
-            val matchesPurpose = state.selectedPurpose == "All" || goat.purpose.equals(state.selectedPurpose, ignoreCase = true)
-            val matchesDistrict = state.selectedDistrict == "All" || goat.farmLocation.contains(state.selectedDistrict, ignoreCase = true)
-            val matchesAvailability = !state.onlyAvailable || goat.availabilityStatus == AvailabilityStatus.AVAILABLE
+            val matchesDistrict = state.selectedDistrict == "All" ||
+                effectiveFarmLocation.contains(state.selectedDistrict, ignoreCase = true) ||
+                linkedFarm?.district?.equals(state.selectedDistrict, ignoreCase = true) == true
+            val matchesFarm = state.selectedFarm == "All" ||
+                effectiveFarmName.equals(state.selectedFarm, ignoreCase = true) ||
+                goat.farmId.equals(state.selectedFarm, ignoreCase = true)
 
-            matchesQuery && matchesBreed && matchesGender && matchesPurpose && matchesDistrict && matchesAvailability
+            val price = goat.effectivePrice
+            val matchesMinPrice = state.minPrice == null || price >= state.minPrice
+            val matchesMaxPrice = state.maxPrice == null || price <= state.maxPrice
+
+            val matchesMinAge = state.minAgeMonths == null || goat.ageMonths >= state.minAgeMonths
+            val matchesMaxAge = state.maxAgeMonths == null || goat.ageMonths <= state.maxAgeMonths
+
+            val matchesMinWeight = state.minWeightKg == null || goat.weightKg >= state.minWeightKg
+            val matchesMaxWeight = state.maxWeightKg == null || goat.weightKg <= state.maxWeightKg
+
+            val matchesAvailability = when {
+                state.availabilityFilter != "All" ->
+                    goat.availabilityStatus.name.equals(state.availabilityFilter, ignoreCase = true)
+                state.onlyAvailable ->
+                    goat.availabilityStatus == AvailabilityStatus.AVAILABLE
+                else -> true
+            }
+
+            matchesQuery &&
+                matchesBreed &&
+                matchesGender &&
+                matchesDistrict &&
+                matchesFarm &&
+                matchesMinPrice &&
+                matchesMaxPrice &&
+                matchesMinAge &&
+                matchesMaxAge &&
+                matchesMinWeight &&
+                matchesMaxWeight &&
+                matchesAvailability
         }
 
         return when (state.sortOption) {
@@ -238,18 +315,40 @@ class MarketplaceViewModel(
     fun updateFilters(
         breed: String = _uiState.value.selectedBreed,
         gender: String = _uiState.value.selectedGender,
-        purpose: String = _uiState.value.selectedPurpose,
         district: String = _uiState.value.selectedDistrict,
+        farm: String = _uiState.value.selectedFarm,
+        minPrice: Double? = _uiState.value.minPrice,
+        maxPrice: Double? = _uiState.value.maxPrice,
+        minAgeMonths: Int? = _uiState.value.minAgeMonths,
+        maxAgeMonths: Int? = _uiState.value.maxAgeMonths,
+        minWeightKg: Double? = _uiState.value.minWeightKg,
+        maxWeightKg: Double? = _uiState.value.maxWeightKg,
+        availabilityFilter: String = _uiState.value.availabilityFilter,
         onlyAvailable: Boolean = _uiState.value.onlyAvailable,
         sortOption: SortOption = _uiState.value.sortOption
     ) {
         _uiState.update { state ->
+            val normalizedAvailFilter = if (onlyAvailable && availabilityFilter == "All") {
+                "AVAILABLE"
+            } else if (!onlyAvailable && availabilityFilter == "AVAILABLE") {
+                "All"
+            } else {
+                availabilityFilter
+            }
+            val normalizedOnlyAvail = normalizedAvailFilter.equals("AVAILABLE", ignoreCase = true) || onlyAvailable
             val next = state.copy(
                 selectedBreed = breed,
                 selectedGender = gender,
-                selectedPurpose = purpose,
                 selectedDistrict = district,
-                onlyAvailable = onlyAvailable,
+                selectedFarm = farm,
+                minPrice = minPrice,
+                maxPrice = maxPrice,
+                minAgeMonths = minAgeMonths,
+                maxAgeMonths = maxAgeMonths,
+                minWeightKg = minWeightKg,
+                maxWeightKg = maxWeightKg,
+                availabilityFilter = normalizedAvailFilter,
+                onlyAvailable = normalizedOnlyAvail,
                 sortOption = sortOption
             )
             next.copy(filteredGoats = applyCustomerFilters(next))
@@ -262,8 +361,15 @@ class MarketplaceViewModel(
                 searchQuery = "",
                 selectedBreed = "All",
                 selectedGender = "All",
-                selectedPurpose = "All",
                 selectedDistrict = "All",
+                selectedFarm = "All",
+                minPrice = null,
+                maxPrice = null,
+                minAgeMonths = null,
+                maxAgeMonths = null,
+                minWeightKg = null,
+                maxWeightKg = null,
+                availabilityFilter = "All",
                 onlyAvailable = false,
                 sortOption = SortOption.NEWEST
             )
@@ -325,18 +431,40 @@ class MarketplaceViewModel(
         goat: Goat,
         imageBytesList: List<ByteArray> = emptyList(),
         isSuperAdmin: Boolean = false,
+        actorUserId: String? = null,
+        actorFarmId: String? = null,
         onSuccess: () -> Unit = {}
     ) {
         viewModelScope.launch {
+            val isEditing = goat.id.isNotBlank() && _uiState.value.allGoats.any { it.id.equals(goat.id, ignoreCase = true) }
             _uiState.update { it.copy(isLoading = true, actionErrorMessage = null, actionSuccessMessage = null) }
-            val result = repository.addOrUpdateGoat(goat, imageBytesList, isSuperAdmin)
-            result.onSuccess {
-                val msg = if (isSuperAdmin) "Goat listing published to marketplace."
-                else "Goat listing saved! Pending verification by Super Admin."
+            val result = repository.addOrUpdateGoat(
+                goat = goat,
+                imageBytesList = imageBytesList,
+                isSuperAdmin = isSuperAdmin,
+                actorUserId = actorUserId,
+                actorFarmId = actorFarmId
+            )
+            result.onSuccess { savedGoat ->
+                val msg = when {
+                    isEditing -> "Goat listing updated successfully."
+                    isSuperAdmin || savedGoat.approvalStatus == ApprovalStatus.APPROVED -> "Goat listing published to marketplace."
+                    else -> "Goat listing saved! Pending verification by Super Admin."
+                }
                 _uiState.update { it.copy(isLoading = false, actionSuccessMessage = msg) }
                 onSuccess()
             }.onFailure { err ->
-                _uiState.update { it.copy(isLoading = false, actionErrorMessage = err.message) }
+                Log.e(
+                    "MarketplaceViewModel",
+                    "saveGoat failed (farmId=${goat.farmId}, goatId=${goat.id}, cause=${err.cause?.message ?: err.message})",
+                    err
+                )
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        actionErrorMessage = err.message ?: "Unable to save goat listing. Please try again."
+                    )
+                }
             }
         }
     }
@@ -385,22 +513,30 @@ class MarketplaceViewModel(
         }
     }
 
-    fun updateFarmProfile(farm: Farm) {
+    fun updateFarmProfile(
+        farm: Farm,
+        logoBytes: ByteArray? = null,
+        bannerBytes: ByteArray? = null,
+        onSuccess: () -> Unit = {}
+    ) {
         viewModelScope.launch {
-            val result = repository.updateFarmProfile(farm)
+            _uiState.update { it.copy(isLoading = true, actionErrorMessage = null, actionSuccessMessage = null) }
+            val result = repository.updateFarmProfile(farm, logoBytes, bannerBytes)
             result.onSuccess {
-                _uiState.update { it.copy(actionSuccessMessage = "Farm profile updated successfully.") }
+                _uiState.update { it.copy(isLoading = false, actionSuccessMessage = "Farm profile updated successfully.") }
+                onSuccess()
             }.onFailure { err ->
-                _uiState.update { it.copy(actionErrorMessage = err.message) }
+                _uiState.update { it.copy(isLoading = false, actionErrorMessage = err.message) }
             }
         }
     }
 
-    fun increaseFarmSlots(farmId: String, slots: Int) {
+    fun increaseFarmSlots(farmId: String, slots: Int, onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             val result = repository.increaseFarmListingLimit(farmId, slots)
             result.onSuccess {
                 _uiState.update { it.copy(actionSuccessMessage = "Added $slots listing slots to farm.") }
+                onSuccess()
             }.onFailure { err ->
                 _uiState.update { it.copy(actionErrorMessage = err.message) }
             }

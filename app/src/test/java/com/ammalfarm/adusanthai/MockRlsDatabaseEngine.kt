@@ -1,9 +1,9 @@
-import com.ammalfarm.adusanthai.model.BookingStatus
 package com.ammalfarm.adusanthai
 
 import com.ammalfarm.adusanthai.data.dto.GoatDto
 import com.ammalfarm.adusanthai.data.dto.ProfileDto
 import com.ammalfarm.adusanthai.model.ApprovalStatus
+import com.ammalfarm.adusanthai.model.BookingStatus
 import com.ammalfarm.adusanthai.model.AvailabilityStatus
 import com.ammalfarm.adusanthai.model.Farm
 import com.ammalfarm.adusanthai.model.Goat
