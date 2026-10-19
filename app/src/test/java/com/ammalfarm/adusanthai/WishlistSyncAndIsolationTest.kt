@@ -24,11 +24,9 @@ import org.junit.Test
 class WishlistSyncAndIsolationTest {
 @org.junit.Before
 fun setUp() {
-SupabaseWishlistRepositoryImpl.isRemoteDatabaseEnabled = false
 }
 @org.junit.After
 fun tearDown() {
-SupabaseWishlistRepositoryImpl.isRemoteDatabaseEnabled = com.ammalfarm.adusanthai.core.supabase.SupabaseConfig.isConfigured
 }
 private fun createTestGoat(
 id: String = UUID.randomUUID().toString(),
@@ -55,7 +53,7 @@ availabilityStatus = AvailabilityStatus.AVAILABLE,
 approvalStatus = ApprovalStatus.APPROVED
 )
 }
-private class MockGoatRepository(private val goats: List<Goat>) : GoatRepository {
+private class MockGoatRepository(private val goats: List<Goat>) : GoatRepository() {
 override fun getApprovedGoats(): Flow<List<Goat>> = flowOf(goats)
 override fun getGoatById(id: String): Flow<Goat?> = flowOf(goats.find { it.id == id })
 override fun searchAndFilterGoats(criteria: GoatFilterCriteria): Flow<List<Goat>> = flowOf(goats)
@@ -66,7 +64,7 @@ override suspend fun updateGoatListing(goat: Goat): Result<Goat> = Result.succes
 override suspend fun deleteGoatListing(goatId: String): Result<Unit> = Result.success(Unit)
 override suspend fun updateGoatApprovalStatus(goatId: String, status: ApprovalStatus): Result<Unit> = Result.success(Unit)
 override fun getAvailableBreeds(): Flow<List<String>> = flowOf(goats.map { it.breed }.distinct())
-override suspend fun getGoatsCount(): Result<Int> = Result.success(goats.size)
+override fun getGoatsCount(): Int = goats.size
 override fun invalidateCache() {}
 }
 // --- SCENARIO 1: Save Goat ---

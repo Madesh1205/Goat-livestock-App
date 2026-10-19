@@ -156,12 +156,13 @@ fun CustomerBookingCard(
 ) {
     val context = LocalContext.current
     val (statusColor, statusLabel) = when (booking.status) {
-        BookingStatus.PENDING -> MaterialTheme.colorScheme.tertiary to "PENDING APPROVAL"
+        BookingStatus.PENDING, BookingStatus.BOOKING_PENDING, BookingStatus.RESERVED -> MaterialTheme.colorScheme.tertiary to "PENDING APPROVAL"
         BookingStatus.CONFIRMED, BookingStatus.APPROVED -> MaterialTheme.colorScheme.primary to "CONFIRMED"
-        BookingStatus.COMPLETED -> MaterialTheme.colorScheme.secondary to "COMPLETED"
+        BookingStatus.COMPLETED, BookingStatus.SOLD -> MaterialTheme.colorScheme.secondary to "COMPLETED"
         BookingStatus.REJECTED -> MaterialTheme.colorScheme.error to "REJECTED"
-        BookingStatus.CANCELLED -> MaterialTheme.colorScheme.outline to "CANCELLED"
+        BookingStatus.CANCELLED, BookingStatus.UNAVAILABLE -> MaterialTheme.colorScheme.outline to "CANCELLED"
         BookingStatus.EXPIRED -> MaterialTheme.colorScheme.outline to "EXPIRED"
+        else -> MaterialTheme.colorScheme.tertiary to "PENDING APPROVAL"
     }
 
     ElevatedCard(

@@ -1,5 +1,6 @@
-import com.ammalfarm.adusanthai.model.BookingStatus
 package com.ammalfarm.adusanthai
+
+import com.ammalfarm.adusanthai.model.BookingStatus
 
 import android.net.Uri
 import com.ammalfarm.adusanthai.model.ApprovalStatus

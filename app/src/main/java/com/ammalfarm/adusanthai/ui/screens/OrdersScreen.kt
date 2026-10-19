@@ -154,3 +154,56 @@ fun OrdersScreen(
         }
     }
 }
+
+enum class FarmBookingFilterTab(val title: String) {
+    ALL("All"),
+    PENDING("Pending"),
+    CONFIRMED("Confirmed"),
+    COMPLETED("Completed"),
+    CANCELLED("Cancelled")
+}
+
+data class OrderStatusStyle(
+    val containerColor: Color = Color(0xFFF1F5F9),
+    val contentColor: Color = Color(0xFF334155),
+    val label: String,
+    val icon: Any? = null
+)
+
+fun getOrderStatusStyle(status: BookingStatus, isHoldExpired: Boolean = false): OrderStatusStyle {
+    val label = if (isHoldExpired) {
+        "Hold Expired"
+    } else {
+        when (status) {
+            BookingStatus.RESERVED -> "Reserved (Hold)"
+            BookingStatus.CONFIRMED, BookingStatus.APPROVED -> "Confirmed"
+            BookingStatus.COMPLETED, BookingStatus.SOLD -> "Completed"
+            BookingStatus.CANCELLED -> "Cancelled"
+            BookingStatus.REJECTED -> "Rejected"
+            BookingStatus.EXPIRED -> "Hold Expired"
+            else -> "Pending"
+        }
+    }
+    return OrderStatusStyle(label = label)
+}
+
+data class FarmBookingStatusStyle(
+    val containerColor: Color = Color(0xFFF1F5F9),
+    val contentColor: Color = Color(0xFF334155),
+    val label: String
+)
+
+fun getFarmAdminBookingStatusStyle(status: BookingStatus, isExpired: Boolean = false): FarmBookingStatusStyle {
+    val label = if (isExpired) {
+        "Hold Expired"
+    } else {
+        when (status) {
+            BookingStatus.CONFIRMED, BookingStatus.APPROVED -> "Confirmed"
+            BookingStatus.COMPLETED, BookingStatus.SOLD -> "Completed"
+            BookingStatus.CANCELLED -> "Cancelled"
+            BookingStatus.REJECTED -> "Rejected"
+            else -> "Pending"
+        }
+    }
+    return FarmBookingStatusStyle(label = label)
+}

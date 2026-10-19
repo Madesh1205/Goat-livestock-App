@@ -143,8 +143,19 @@ fun FarmAdminScreen(
                     IconButton(onClick = onNavigateToMarketplace) {
                         Icon(Icons.Default.Storefront, contentDescription = "View Marketplace")
                     }
+                    val unreadNotifications = remember(uiState?.notifications) {
+                        uiState?.notifications.orEmpty().count { !it.isRead }
+                    }
                     IconButton(onClick = onNavigateToNotifications) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                        BadgedBox(
+                            badge = {
+                                if (unreadNotifications > 0) {
+                                    Badge { Text(unreadNotifications.toString()) }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                        }
                     }
                     IconButton(onClick = onNavigateToProfile) {
                         Icon(Icons.Default.AccountCircle, contentDescription = "Profile")
@@ -485,8 +496,8 @@ private fun FarmGoatsManagementTab(
                                 Surface(
                                     color = when (goat.approvalStatus) {
                                         ApprovalStatus.APPROVED -> MaterialTheme.colorScheme.primaryContainer
-                                        ApprovalStatus.PENDING -> MaterialTheme.colorScheme.tertiaryContainer
-                                        ApprovalStatus.REJECTED -> MaterialTheme.colorScheme.errorContainer
+                                        ApprovalStatus.REJECTED, ApprovalStatus.SUSPENDED -> MaterialTheme.colorScheme.errorContainer
+                                        else -> MaterialTheme.colorScheme.tertiaryContainer
                                     },
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
@@ -496,8 +507,8 @@ private fun FarmGoatsManagementTab(
                                         fontWeight = FontWeight.Bold,
                                         color = when (goat.approvalStatus) {
                                             ApprovalStatus.APPROVED -> MaterialTheme.colorScheme.onPrimaryContainer
-                                            ApprovalStatus.PENDING -> MaterialTheme.colorScheme.onTertiaryContainer
-                                            ApprovalStatus.REJECTED -> MaterialTheme.colorScheme.onErrorContainer
+                                            ApprovalStatus.REJECTED, ApprovalStatus.SUSPENDED -> MaterialTheme.colorScheme.onErrorContainer
+                                            else -> MaterialTheme.colorScheme.onTertiaryContainer
                                         },
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )

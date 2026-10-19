@@ -46,16 +46,14 @@ val userA = "00000000-0000-0000-0000-00000000000a"
 val userB = "00000000-0000-0000-0000-00000000000b"
 NotificationConfig.activeUserId = userB
 val notifForUserA = AppNotification(
-id = UUID.randomUUID().toString(),
-recipientUserId = userA,
-targetRole = UserRole.CUSTOMER,
-title = "Order update",
-message = "Booking confirmed",
-type = NotificationType.BOOKING_CONFIRMED,
-timestamp = System.currentTimeMillis()
+    id = UUID.randomUUID().toString(),
+    userId = userA,
+    title = "Order update",
+    message = "Booking confirmed",
+    type = "BOOKING_CONFIRMED"
 )
 val activeUser = NotificationConfig.activeUserId
-val isMeantForActiveUser = notifForUserA.recipientUserId.isBlank() || notifForUserA.recipientUserId == activeUser
+val isMeantForActiveUser = notifForUserA.userId.isBlank() || notifForUserA.userId == activeUser
 assertFalse("Notification for User A should be suppressed when User B is logged in", isMeantForActiveUser)
 }
 @Test
@@ -63,16 +61,14 @@ fun testRecipientMatchingDeliveredSuccessfully() {
 val userA = "00000000-0000-0000-0000-00000000000a"
 NotificationConfig.activeUserId = userA
 val notifForUserA = AppNotification(
-id = UUID.randomUUID().toString(),
-recipientUserId = userA,
-targetRole = UserRole.CUSTOMER,
-title = "Booking Approval",
-message = "Your request was approved",
-type = NotificationType.BOOKING_CONFIRMED,
-timestamp = System.currentTimeMillis()
+    id = UUID.randomUUID().toString(),
+    userId = userA,
+    title = "Booking Approval",
+    message = "Your request was approved",
+    type = "BOOKING_CONFIRMED"
 )
 val activeUser = NotificationConfig.activeUserId
-val isMeantForActiveUser = notifForUserA.recipientUserId.isBlank() || notifForUserA.recipientUserId == activeUser
+val isMeantForActiveUser = notifForUserA.userId.isBlank() || notifForUserA.userId == activeUser
 assertTrue("Notification for User A should be accepted when User A is logged in", isMeantForActiveUser)
 }
 @Test

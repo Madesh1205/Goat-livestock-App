@@ -80,9 +80,9 @@ data class Farm(
     val rating: Double = 5.0,
     val reviewCount: Int = 0,
     val totalReviews: Int = reviewCount,
+    val totalGoatsListed: Int = consumedListingSlots,
     val createdAt: Long = System.currentTimeMillis()
 ) {
-    val totalGoatsListed: Int get() = consumedListingSlots
     val hasRemainingListingQuota: Boolean get() = isAmmalOwnFarm || consumedListingSlots < goatListingLimit
 }
 

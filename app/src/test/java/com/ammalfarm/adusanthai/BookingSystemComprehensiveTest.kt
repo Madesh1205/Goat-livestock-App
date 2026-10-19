@@ -1,6 +1,6 @@
-import com.ammalfarm.adusanthai.model.BookingStatus
 package com.ammalfarm.adusanthai
 
+import com.ammalfarm.adusanthai.model.BookingStatus
 import com.ammalfarm.adusanthai.core.util.PriceUtils
 import com.ammalfarm.adusanthai.model.*
 import com.ammalfarm.adusanthai.model.ApprovalStatus
@@ -412,9 +412,8 @@ val goat = createTestGoat(price = 20000.0, discountPercentage = 0.0)
 engine.addGoat(goat)
 val booking = engine.createBooking(goat.id, "cust-hold").getOrThrow()
 // Status is pending/reserved, not sold
-assertEquals(AvailabilityStatus.BOOKING_PENDING, booking.status)
+assertEquals(BookingStatus.PENDING, booking.status)
 assertEquals(AvailabilityStatus.RESERVED, engine.goats[goat.id]?.availabilityStatus)
 assertNotEquals(AvailabilityStatus.SOLD, engine.goats[goat.id]?.availabilityStatus)
-assertNotEquals(AvailabilityStatus.BookingStatus.COMPLETED, engine.goats[goat.id]?.availabilityStatus)
 }
 }

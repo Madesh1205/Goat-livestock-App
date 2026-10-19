@@ -98,8 +98,19 @@ fun SuperAdminScreen(
                     IconButton(onClick = onNavigateToMarketplace) {
                         Icon(Icons.Default.Storefront, contentDescription = "Marketplace")
                     }
+                    val unreadNotifications = remember(uiState?.notifications) {
+                        uiState?.notifications.orEmpty().count { !it.isRead }
+                    }
                     IconButton(onClick = onNavigateToNotifications) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                        BadgedBox(
+                            badge = {
+                                if (unreadNotifications > 0) {
+                                    Badge { Text(unreadNotifications.toString()) }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                        }
                     }
                     IconButton(onClick = onNavigateToProfile) {
                         Icon(Icons.Default.AccountCircle, contentDescription = "Profile")
@@ -774,8 +785,8 @@ private fun SuperAdminGoatsModerationTab(
                                 fontSize = 11.sp,
                                 color = when (goat.approvalStatus) {
                                     ApprovalStatus.APPROVED -> MaterialTheme.colorScheme.primary
-                                    ApprovalStatus.PENDING -> MaterialTheme.colorScheme.tertiary
-                                    ApprovalStatus.REJECTED -> MaterialTheme.colorScheme.error
+                                    ApprovalStatus.REJECTED, ApprovalStatus.SUSPENDED -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.tertiary
                                 }
                             )
                         }

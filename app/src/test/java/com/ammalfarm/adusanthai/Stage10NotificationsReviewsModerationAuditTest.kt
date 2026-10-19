@@ -1,6 +1,6 @@
-import com.ammalfarm.adusanthai.model.BookingStatus
 package com.ammalfarm.adusanthai
 
+import com.ammalfarm.adusanthai.model.BookingStatus
 import com.ammalfarm.adusanthai.core.util.PriceUtils
 import com.ammalfarm.adusanthai.model.*
 import com.ammalfarm.adusanthai.model.ApprovalStatus

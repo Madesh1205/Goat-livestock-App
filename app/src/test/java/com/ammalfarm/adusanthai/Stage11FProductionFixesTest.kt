@@ -35,7 +35,7 @@ val nowIso = "2026-09-13T12:00:00Z"
 val payload = buildJsonObject {
 put("verification_status", status.name)
 when (status) {
-VerificationStatus.APPROVED -> {
+VerificationStatus.APPROVED, VerificationStatus.VERIFIED -> {
 put("verified_at", nowIso)
 }
 VerificationStatus.REJECTED -> {

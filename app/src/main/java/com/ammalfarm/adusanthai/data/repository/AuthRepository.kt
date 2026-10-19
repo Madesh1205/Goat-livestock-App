@@ -93,9 +93,18 @@ class AuthRepositoryImpl(
                             val userId = session.user?.id
                             if (!userId.isNullOrBlank()) {
                                 fetchAndSyncUserProfile(userId)
+                                val targetCtx = context ?: SupabaseModule.getApplicationContext()
+                                if (targetCtx != null) {
+                                    com.ammalfarm.adusanthai.core.notification.NotificationConfig.setActiveUser(targetCtx, userId)
+                                }
                             }
                         }
                         is SessionStatus.NotAuthenticated -> {
+                            val targetCtx = context ?: SupabaseModule.getApplicationContext()
+                            val oldUserId = _currentUser.value?.id
+                            if (targetCtx != null && !oldUserId.isNullOrBlank()) {
+                                com.ammalfarm.adusanthai.core.notification.NotificationConfig.removeTokenOnLogout(targetCtx, oldUserId)
+                            }
                             clearLocalCache()
                             _currentUser.value = null
                             _currentFarm.value = null
@@ -184,6 +193,10 @@ class AuthRepositoryImpl(
                     _authState.update { it.copy(isLoading = false, errorMessage = suspendedMsg) }
                     Result.failure(IllegalStateException(suspendedMsg))
                 } else if (profile != null) {
+                    val targetCtx = context ?: SupabaseModule.getApplicationContext()
+                    if (targetCtx != null) {
+                        com.ammalfarm.adusanthai.core.notification.NotificationConfig.setActiveUser(targetCtx, profile.id)
+                    }
                     _authState.update {
                         it.copy(
                             isLoading = false,
@@ -473,6 +486,10 @@ class AuthRepositoryImpl(
 
             _currentUser.value = user
             saveCachedProfile(user)
+            val targetCtx = context ?: SupabaseModule.getApplicationContext()
+            if (targetCtx != null) {
+                com.ammalfarm.adusanthai.core.notification.NotificationConfig.setActiveUser(targetCtx, user.id)
+            }
             _authState.update {
                 it.copy(
                     isLoading = false,
@@ -904,6 +921,15 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
+        val targetCtx = context ?: SupabaseModule.getApplicationContext()
+        val uid = _currentUser.value?.id
+        if (targetCtx != null && !uid.isNullOrBlank()) {
+            try {
+                com.ammalfarm.adusanthai.core.notification.NotificationConfig.removeTokenOnLogout(targetCtx, uid)
+            } catch (e: Exception) {
+                Log.w(TAG, "Notice removing token on logout: ${e.message}")
+            }
+        }
         try {
             if (SupabaseConfig.isConfigured) {
                 SupabaseModule.auth.signOut()

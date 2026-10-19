@@ -288,8 +288,10 @@ data class GoatDto(
         val rawStatus = (availabilityStatus ?: status ?: "AVAILABLE").trim().uppercase()
         val parsedAvailability = when (rawStatus) {
             "", "AVAILABLE" -> AvailabilityStatus.AVAILABLE
-            "RESERVED", "HOLD", "HELD", "BOOKING_PENDING", "CONFIRMED", "BOOKED", "BOOKINGSTATUS.CONFIRMED" -> AvailabilityStatus.RESERVED
-            "SOLD", "COMPLETED", "BOOKINGSTATUS.COMPLETED" -> AvailabilityStatus.SOLD
+            "CONFIRMED", "BOOKED", "BOOKINGSTATUS.CONFIRMED" -> AvailabilityStatus.CONFIRMED
+            "COMPLETED", "BOOKINGSTATUS.COMPLETED" -> AvailabilityStatus.COMPLETED
+            "RESERVED", "HOLD", "HELD", "BOOKING_PENDING" -> AvailabilityStatus.RESERVED
+            "SOLD" -> AvailabilityStatus.SOLD
             "INACTIVE", "UNAVAILABLE" -> AvailabilityStatus.UNAVAILABLE
             else -> AvailabilityStatus.RESERVED
         }

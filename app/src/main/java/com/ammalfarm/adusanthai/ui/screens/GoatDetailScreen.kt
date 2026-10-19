@@ -241,9 +241,9 @@ fun GoatDetailScreen(
                         Surface(
                             color = when (goat.availabilityStatus) {
                                 AvailabilityStatus.AVAILABLE -> Color(0xFF1B5E20)
-                                AvailabilityStatus.RESERVED -> Color(0xFFE65100)
-                                AvailabilityStatus.SOLD -> Color(0xFFB71C1C)
-                                AvailabilityStatus.UNAVAILABLE -> Color(0xFF616161)
+                                AvailabilityStatus.RESERVED, AvailabilityStatus.BOOKING_PENDING, AvailabilityStatus.PENDING, AvailabilityStatus.CONFIRMED, AvailabilityStatus.APPROVED -> Color(0xFFE65100)
+                                AvailabilityStatus.SOLD, AvailabilityStatus.COMPLETED -> Color(0xFFB71C1C)
+                                else -> Color(0xFF616161)
                             },
                             shape = RoundedCornerShape(8.dp)
                         ) {

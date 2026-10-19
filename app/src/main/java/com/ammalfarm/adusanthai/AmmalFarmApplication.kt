@@ -11,6 +11,7 @@ class AmmalFarmApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         SupabaseModule.init(this)
+        com.ammalfarm.adusanthai.core.notification.NotificationConfig.initialize(this)
         container = AppContainer(this)
     }
 }

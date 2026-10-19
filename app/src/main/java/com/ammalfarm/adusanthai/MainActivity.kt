@@ -28,9 +28,18 @@ import com.ammalfarm.adusanthai.ui.viewmodel.AuthViewModel
 import com.ammalfarm.adusanthai.ui.viewmodel.MarketplaceViewModel
 
 class MainActivity : ComponentActivity() {
+    private val pendingNotificationIntent = mutableStateOf<android.content.Intent?>(null)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingNotificationIntent.value = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        pendingNotificationIntent.value = intent
 
         val appContainer = (application as AmmalFarmApplication).container
 
@@ -68,6 +77,108 @@ class MainActivity : ComponentActivity() {
 
                     val authUiState by authViewModel.uiState.collectAsStateWithLifecycle()
                     val marketplaceUiState by marketplaceViewModel.uiState.collectAsStateWithLifecycle()
+                    val context = androidx.compose.ui.platform.LocalContext.current
+
+                    // Android 13+ (API 33+) POST_NOTIFICATIONS permission launcher
+                    val notificationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                    ) { isGranted ->
+                        if (isGranted) {
+                            com.ammalfarm.adusanthai.core.notification.NotificationConfig.fetchAndSyncFcmToken(
+                                context,
+                                authUiState.currentUser?.id
+                            )
+                        }
+                    }
+
+                    LaunchedEffect(authUiState.isAuthenticated, authUiState.currentUser?.id) {
+                        if (authUiState.isAuthenticated && authUiState.currentUser != null) {
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                val currentPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                )
+                                if (currentPermission != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
+                            com.ammalfarm.adusanthai.core.notification.NotificationConfig.setActiveUser(
+                                context,
+                                authUiState.currentUser?.id
+                            )
+                        }
+                    }
+
+                    fun handleNotificationNavigation(linkType: String?, linkId: String?) {
+                        val cleanType = linkType?.trim()?.uppercase().orEmpty()
+                        val cleanId = linkId?.trim().orEmpty()
+                        val role = authUiState.currentUser?.role
+
+                        when {
+                            cleanType == "BOOKING" || cleanType == "HOLD" || cleanType == "RESERVATION" -> {
+                                navController.navigate(Screen.Bookings.route)
+                            }
+                            cleanType == "FARM_BOOKINGS" -> {
+                                if (role == UserRole.FARM_ADMIN || role == UserRole.SUPER_ADMIN) {
+                                    navController.navigate(Screen.FarmAdmin.route)
+                                } else {
+                                    navController.navigate(Screen.Bookings.route)
+                                }
+                            }
+                            cleanType == "GOAT" && cleanId.isNotBlank() -> {
+                                val goatExists = marketplaceUiState.allGoats.any { it.id == cleanId }
+                                if (goatExists) {
+                                    navController.navigate(Screen.GoatDetail.createRoute(cleanId))
+                                } else {
+                                    navController.navigate(Screen.Notifications.route)
+                                }
+                            }
+                            cleanType == "FARM" && cleanId.isNotBlank() -> {
+                                val farmExists = marketplaceUiState.farms.any { it.id == cleanId }
+                                if (farmExists) {
+                                    navController.navigate(Screen.FarmDetail.createRoute(cleanId))
+                                } else if (role == UserRole.FARM_ADMIN) {
+                                    navController.navigate(Screen.FarmAdmin.route)
+                                } else {
+                                    navController.navigate(Screen.Notifications.route)
+                                }
+                            }
+                            cleanType == "FARM_APPLICATION" || cleanType == "MODERATION" || cleanType == "REPORT" -> {
+                                if (role == UserRole.SUPER_ADMIN) {
+                                    navController.navigate(Screen.SuperAdmin.route)
+                                } else if (role == UserRole.FARM_ADMIN) {
+                                    navController.navigate(Screen.FarmAdmin.route)
+                                } else {
+                                    navController.navigate(Screen.Notifications.route)
+                                }
+                            }
+                            else -> {
+                                navController.navigate(Screen.Notifications.route)
+                            }
+                        }
+                    }
+
+                    // Handle cold-start and warm-start push notification clicks after auth readiness
+                    LaunchedEffect(pendingNotificationIntent.value, authUiState.isAuthenticated, authUiState.isLoading) {
+                        val activeIntent = pendingNotificationIntent.value
+                        if (activeIntent != null && authUiState.isAuthenticated && !authUiState.isLoading && authUiState.currentUser != null) {
+                            val notifId = activeIntent.getStringExtra("extra_notification_id")
+                            val linkType = activeIntent.getStringExtra("extra_link_type")
+                            val linkId = activeIntent.getStringExtra("extra_link_id")
+
+                            if (!notifId.isNullOrBlank()) {
+                                marketplaceViewModel.markNotificationRead(notifId)
+                                marketplaceViewModel.refreshNotifications(authUiState.currentUser!!.id)
+                            }
+
+                            if (!linkType.isNullOrBlank() || !linkId.isNullOrBlank()) {
+                                handleNotificationNavigation(linkType, linkId)
+                            } else if (!notifId.isNullOrBlank()) {
+                                navController.navigate(Screen.Notifications.route)
+                            }
+                            pendingNotificationIntent.value = null
+                        }
+                    }
 
                     fun destinationForRole(role: UserRole): String {
                         return when (role) {
@@ -271,7 +382,10 @@ class MainActivity : ComponentActivity() {
                             NotificationCenterScreen(
                                 marketplaceViewModel = marketplaceViewModel,
                                 currentUser = authUiState.currentUser,
-                                onNavigateBack = { navController.popBackStack() }
+                                onNavigateBack = { navController.popBackStack() },
+                                onNavigateToDestination = { linkType, linkId ->
+                                    handleNotificationNavigation(linkType, linkId)
+                                }
                             )
                         }
 

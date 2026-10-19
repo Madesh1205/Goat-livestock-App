@@ -753,7 +753,7 @@ open class SupabaseMarketplaceRepositoryImpl(
                             }
                         )
                     }
-                    BookingStatus.PENDING -> {
+                    else -> {
                         SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BOOKINGS].update(
                             buildJsonObject {
                                 put("status", "RESERVED")
@@ -767,9 +767,9 @@ open class SupabaseMarketplaceRepositoryImpl(
             }
 
             val nextGoatAvail = when (newStatus) {
-                BookingStatus.COMPLETED -> AvailabilityStatus.SOLD
-                BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.EXPIRED -> AvailabilityStatus.AVAILABLE
-                BookingStatus.CONFIRMED, BookingStatus.APPROVED, BookingStatus.PENDING -> AvailabilityStatus.RESERVED
+                BookingStatus.COMPLETED, AvailabilityStatus.SOLD -> AvailabilityStatus.SOLD
+                BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.EXPIRED, AvailabilityStatus.AVAILABLE -> AvailabilityStatus.AVAILABLE
+                else -> AvailabilityStatus.RESERVED
             }
 
             _bookings.update { list ->
@@ -1462,10 +1462,10 @@ open class SupabaseMarketplaceRepositoryImpl(
         try {
             if (SupabaseConfig.isConfigured) {
                 val dbStatus = when (status) {
-                    AvailabilityStatus.UNAVAILABLE -> "INACTIVE"
+                    AvailabilityStatus.UNAVAILABLE, AvailabilityStatus.CANCELLED, AvailabilityStatus.REJECTED, AvailabilityStatus.EXPIRED -> "INACTIVE"
                     AvailabilityStatus.AVAILABLE -> "AVAILABLE"
-                    AvailabilityStatus.RESERVED -> "RESERVED"
-                    AvailabilityStatus.SOLD -> "SOLD"
+                    AvailabilityStatus.SOLD, AvailabilityStatus.COMPLETED -> "SOLD"
+                    else -> "RESERVED"
                 }
                 SupabaseModule.client.postgrest[SupabaseConfig.TABLE_GOATS].update(
                     buildJsonObject {

@@ -66,7 +66,7 @@ farmId = farm1Id,
 farmName = "Farm One",
 farmLocation = "Salem",
 availabilityStatus = AvailabilityStatus.AVAILABLE,
-approvalStatus = ApprovalStatus.PENDING_APPROVAL,
+approvalStatus = ApprovalStatus.PENDING,
 listingFeePaid = true,
 listingFeeAmount = 0.0
 )
@@ -111,7 +111,7 @@ farmId = farm1Id,
 farmName = "Farm One",
 farmLocation = "Salem",
 availabilityStatus = AvailabilityStatus.AVAILABLE,
-approvalStatus = ApprovalStatus.PENDING_APPROVAL,
+approvalStatus = ApprovalStatus.PENDING,
 listingFeePaid = true,
 listingFeeAmount = 0.0
 )
@@ -143,7 +143,7 @@ val existingGoat = db.getGoat("goat-edit-retain")!!
 val updatedGoat = Goat(
 id = "goat-edit-retain",
 name = "Updated Existing Goat",
-breed = existingGoat.breedName,
+breed = existingGoat.breedName ?: "Sirohi",
 gender = GoatGender.MALE,
 ageMonths = 14,
 weightKg = 40.0,
@@ -230,7 +230,7 @@ farmId = farm1Id,
 farmName = "Farm One",
 farmLocation = "Salem",
 availabilityStatus = AvailabilityStatus.AVAILABLE,
-approvalStatus = ApprovalStatus.PENDING_APPROVAL,
+approvalStatus = ApprovalStatus.PENDING,
 listingFeePaid = true,
 listingFeeAmount = 0.0
 )
@@ -262,7 +262,7 @@ farmId = farm1Id,
 farmName = "Farm One",
 farmLocation = "Salem",
 availabilityStatus = AvailabilityStatus.AVAILABLE,
-approvalStatus = ApprovalStatus.PENDING_APPROVAL,
+approvalStatus = ApprovalStatus.PENDING,
 listingFeePaid = true,
 listingFeeAmount = 0.0
 )
@@ -296,7 +296,7 @@ farmId = farm1Id,
 farmName = "Farm One",
 farmLocation = "Salem",
 availabilityStatus = AvailabilityStatus.AVAILABLE,
-approvalStatus = ApprovalStatus.PENDING_APPROVAL,
+approvalStatus = ApprovalStatus.PENDING,
 listingFeePaid = true,
 listingFeeAmount = 0.0
 )

@@ -50,7 +50,7 @@ isAmmalOwnFarm = false
 )
 // Verify domain model has empty logo
 assertTrue("New farm logoUrl must be empty or blank", newFarm.logoUrl.isBlank())
-assertTrue("New farm bannerUrl must be empty or blank", newFarm.bannerUrl.isBlank())
+assertTrue("New farm bannerUrl must be empty or blank", newFarm.bannerUrl.isNullOrBlank())
 // Verify DTO conversion maps empty logo to null for Supabase PostgreSQL insertion
 val dto = FarmDto.fromDomain(newFarm)
 assertNull("FarmDto.logoUrl must be null when creating a farm without logo", dto.logoUrl)

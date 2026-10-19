@@ -21,4 +21,13 @@ sealed class Screen(val route: String) {
     data object SuperAdmin : Screen("super_admin")
     data object FarmAdmin : Screen("farm_admin")
     data object TermsConditions : Screen("terms")
+    data object Account : Screen("account")
+    data object MyBookings : Screen("my_bookings")
+    data object FarmBookings : Screen("farm_bookings")
+
+    companion object {
+        val Marketplace = MarketplaceHome
+        val FarmDashboard = FarmAdmin
+        val SuperAdminDashboard = SuperAdmin
+    }
 }

@@ -28,6 +28,7 @@ fun NotificationCenterScreen(
     marketplaceViewModel: MarketplaceViewModel? = null,
     currentUser: UserProfile? = null,
     onNavigateBack: () -> Unit,
+    onNavigateToDestination: (linkType: String?, linkId: String?) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val uiState = marketplaceViewModel?.uiState?.collectAsStateWithLifecycle()?.value
@@ -104,6 +105,7 @@ fun NotificationCenterScreen(
                                 if (!item.isRead) {
                                     marketplaceViewModel?.markNotificationRead(item.id)
                                 }
+                                onNavigateToDestination(item.linkType, item.linkId)
                             }
                     ) {
                         Row(

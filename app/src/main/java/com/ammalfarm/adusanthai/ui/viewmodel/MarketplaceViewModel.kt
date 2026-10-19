@@ -612,6 +612,14 @@ class MarketplaceViewModel(
         }
     }
 
+    fun refreshNotifications(userId: String) {
+        if (userId.isNotBlank()) {
+            viewModelScope.launch {
+                repository.refreshNotifications(userId)
+            }
+        }
+    }
+
     fun clearActionMessages() {
         _uiState.update { it.copy(actionSuccessMessage = null, actionErrorMessage = null) }
     }

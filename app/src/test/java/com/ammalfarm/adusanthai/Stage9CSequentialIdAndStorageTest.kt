@@ -202,7 +202,7 @@ resolvedFarmLocation = farmDomain.location,
 resolvedFarmCode = farmDomain.farmCode
 )
 assertEquals("GOAT-007", goatDomain.goatCode)
-assertEquals("FARM-003", goatDomain.farmCode)
+assertEquals("FARM-003", farmDomain.farmCode)
 assertEquals("22222222-2222-2222-2222-222222222222", goatDomain.id)
 assertEquals("11111111-1111-1111-1111-111111111111", goatDomain.farmId)
 }

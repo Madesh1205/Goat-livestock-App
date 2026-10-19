@@ -1,5 +1,6 @@
-import com.ammalfarm.adusanthai.model.BookingStatus
 package com.ammalfarm.adusanthai
+
+import com.ammalfarm.adusanthai.model.BookingStatus
 
 import com.ammalfarm.adusanthai.core.util.PriceUtils
 import com.ammalfarm.adusanthai.model.*
@@ -264,7 +265,7 @@ assertEquals(AvailabilityStatus.AVAILABLE, server.goats[goat.id]?.availabilitySt
 }
 }
 @Test
-fun `Requirement 1 - expire_overdue_bookings does NOT expire BookingStatus.CONFIRMED or BookingStatus.COMPLETED bookings`() {
+fun `Requirement 1 - expire_overdue_bookings does NOT expire CONFIRMED or COMPLETED bookings`() {
 val server = SimulatedDatabaseServer()
 val goat = createTestGoat(id = "goat-confirmed")
 server.addGoat(goat)
