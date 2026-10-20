@@ -1774,13 +1774,27 @@ open class SupabaseMarketplaceRepositoryImpl(
                     if (msg.contains("cannot reduce") || msg.contains("consumed slots")) {
                         throw rpcErr
                     }
-                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                        buildJsonObject {
-                            put("goat_listing_limit", newTotalSlots)
-                            put("updated_at", currentIsoTimestamp())
+                    try {
+                        SupabaseModule.client.postgrest.rpc(
+                            "admin_update_farm_listing_limit",
+                            buildJsonObject {
+                                put("p_farm_id", cleanFarmId)
+                                put("p_limit", newTotalSlots)
+                            }
+                        )
+                    } catch (rpcErr2: Exception) {
+                        val msg2 = (rpcErr2.message ?: "").lowercase()
+                        if (msg2.contains("cannot reduce") || msg2.contains("consumed slots")) {
+                            throw rpcErr2
                         }
-                    ) {
-                        filter { eq("id", cleanFarmId) }
+                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
+                            buildJsonObject {
+                                put("goat_listing_limit", newTotalSlots)
+                                put("updated_at", currentIsoTimestamp())
+                            }
+                        ) {
+                            filter { eq("id", cleanFarmId) }
+                        }
                     }
                 }
             }
