@@ -45,7 +45,7 @@ data class MarketplaceUiState(
     val allUsers: List<UserProfile> = emptyList(),
     val reports: List<ListingReport> = emptyList(),
     val farmReviews: Map<String, List<FarmReview>> = emptyMap(),
-    val availableBreeds: List<String> = listOf("All", "Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black", "Jamunapari", "Sirohi", "Osmanabadi"),
+    val availableBreeds: List<String> = listOf("All"),
     val availableFarms: List<String> = listOf("All"),
     val availableLocations: List<String> = listOf("All")
 ) {
@@ -117,26 +117,38 @@ class MarketplaceViewModel(
                  Quintuple(goats, farms, bookings, wishlists, loading)
             }.collect { (goats, farms, bookings, wishlists, loading) ->
                 _uiState.update { state ->
-                    val dynamicBreeds = (listOf("All") + goats.map { it.breed.trim() }.filter { it.isNotBlank() } +
-                            listOf("Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black", "Jamunapari", "Sirohi", "Osmanabadi"))
-                        .distinct()
-                    val verifiedFarms = farms.filter { it.verificationStatus.isApprovedOrVerified || it.isAmmalOwnFarm }
-                    val dynamicFarms = (listOf("All") +
-                            verifiedFarms.map { it.name.trim() }.filter { it.isNotBlank() } +
-                            goats.map { it.farmName.trim() }.filter { it.isNotBlank() })
-                        .distinct()
-                    val farmDistricts = farms.flatMap { farm ->
+                    val eligibleGoats = goats.filter { goat ->
+                        goat.approvalStatus == ApprovalStatus.APPROVED &&
+                        goat.isActive &&
+                        goat.availabilityStatus != AvailabilityStatus.UNAVAILABLE
+                    }
+                    val farmsById = farms.associateBy { it.id }
+
+                    val dynamicBreeds = if (eligibleGoats.isNotEmpty()) {
+                        (listOf("All") + eligibleGoats.map { it.breed.trim() }.filter { it.isNotBlank() }.distinct().sorted())
+                    } else {
+                        state.availableBreeds.ifEmpty { listOf("All") }
+                    }
+
+                    val activeFarms = eligibleGoats.mapNotNull { g ->
+                        val f = farmsById[g.farmId]
+                        g.farmName.trim().ifBlank { f?.name?.trim().orEmpty() }.takeIf { it.isNotBlank() }
+                    }.distinct().sorted()
+                    val dynamicFarms = listOf("All") + activeFarms
+
+                    val activeDistricts = eligibleGoats.flatMap { g ->
+                        val f = farmsById[g.farmId]
                         listOfNotNull(
-                            farm.district.trim().takeIf { it.isNotBlank() },
-                            farm.location.substringBefore(",").trim().takeIf { it.isNotBlank() }
+                            f?.district?.trim()?.takeIf { it.isNotBlank() },
+                            g.farmLocation.substringBefore(",").trim().takeIf { it.isNotBlank() },
+                            f?.location?.substringBefore(",")?.trim()?.takeIf { it.isNotBlank() }
                         )
-                    }
-                    val goatDistricts = goats.mapNotNull { g ->
-                        g.farmLocation.substringBefore(",").trim().takeIf { it.isNotBlank() }
-                    }
-                    val dynamicLocations = (listOf("All") + farmDistricts + goatDistricts +
-                            com.ammalfarm.adusanthai.core.util.FarmLocations.TAMIL_NADU_DISTRICTS)
-                        .distinct()
+                    }.filter { it.isNotBlank() }.distinct().sorted()
+                    val dynamicLocations = listOf("All") + activeDistricts
+
+                    val nextBreed = if (dynamicBreeds.contains(state.selectedBreed)) state.selectedBreed else "All"
+                    val nextDistrict = if (dynamicLocations.contains(state.selectedDistrict)) state.selectedDistrict else "All"
+                    val nextFarm = if (dynamicFarms.contains(state.selectedFarm)) state.selectedFarm else "All"
 
                     val updated = state.copy(
                         isLoading = loading,
@@ -144,6 +156,9 @@ class MarketplaceViewModel(
                         farms = farms,
                         bookings = bookings,
                         wishlistedIds = wishlists,
+                        selectedBreed = nextBreed,
+                        selectedDistrict = nextDistrict,
+                        selectedFarm = nextFarm,
                         availableBreeds = dynamicBreeds,
                         availableFarms = dynamicFarms,
                         availableLocations = dynamicLocations
@@ -160,14 +175,17 @@ class MarketplaceViewModel(
         }
 
         viewModelScope.launch {
-            repository.breeds.collect { repoBreeds ->
-                if (repoBreeds.isNotEmpty()) {
-                    _uiState.update { state ->
-                        val combined = (listOf("All") + repoBreeds + state.allGoats.map { it.breed.trim() }.filter { it.isNotBlank() })
-                            .distinct()
-                        val next = state.copy(availableBreeds = combined)
-                        next.copy(filteredGoats = applyCustomerFilters(next))
+            repository.breeds.collect { _ ->
+                _uiState.update { state ->
+                    val eligibleGoats = state.allGoats.filter { goat ->
+                        goat.approvalStatus == ApprovalStatus.APPROVED &&
+                        goat.isActive &&
+                        goat.availabilityStatus != AvailabilityStatus.UNAVAILABLE
                     }
+                    val existingBreeds = eligibleGoats.map { it.breed.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+                    val dynamicBreeds = if (existingBreeds.isNotEmpty()) listOf("All") + existingBreeds else listOf("All")
+                    val next = state.copy(availableBreeds = dynamicBreeds)
+                    next.copy(filteredGoats = applyCustomerFilters(next))
                 }
             }
         }
@@ -565,6 +583,33 @@ class MarketplaceViewModel(
             val result = repository.increaseFarmListingLimit(farmId, slots)
             result.onSuccess {
                 _uiState.update { it.copy(actionSuccessMessage = "Added $slots listing slots to farm.") }
+                refreshAdminData()
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(actionErrorMessage = err.message) }
+            }
+        }
+    }
+
+    fun updateFarmSlots(farmId: String, newTotalSlots: Int, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            val result = repository.updateFarmListingLimit(farmId, newTotalSlots)
+            result.onSuccess {
+                _uiState.update { it.copy(actionSuccessMessage = "Farm listing limit updated to $newTotalSlots slots.") }
+                refreshAdminData()
+                onSuccess()
+            }.onFailure { err ->
+                _uiState.update { it.copy(actionErrorMessage = err.message) }
+            }
+        }
+    }
+
+    fun deleteUserAccountByAdmin(userId: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            val result = repository.deleteUserAccountByAdmin(userId)
+            result.onSuccess {
+                _uiState.update { it.copy(actionSuccessMessage = "User account deleted. Farm suspended and records preserved.") }
+                refreshAdminData()
                 onSuccess()
             }.onFailure { err ->
                 _uiState.update { it.copy(actionErrorMessage = err.message) }

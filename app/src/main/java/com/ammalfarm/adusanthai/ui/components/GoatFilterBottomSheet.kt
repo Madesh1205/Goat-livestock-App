@@ -35,8 +35,8 @@ fun GoatFilterBottomSheet(
     maxWeightInput: String = "",
     onlyAvailable: Boolean = false,
     selectedSort: SortOption = SortOption.NEWEST,
-    availableBreeds: List<String> = listOf("All", "Tellicherry", "Boer", "Kanni Adu", "Kodi Adu", "Salem Black"),
-    availableDistricts: List<String> = listOf("All") + FarmLocations.TAMIL_NADU_DISTRICTS,
+    availableBreeds: List<String> = listOf("All"),
+    availableDistricts: List<String> = listOf("All"),
     availableFarms: List<String> = listOf("All"),
     onApply: (
         breed: String,

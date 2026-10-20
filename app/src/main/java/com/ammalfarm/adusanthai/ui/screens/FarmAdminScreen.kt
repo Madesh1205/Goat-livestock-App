@@ -117,12 +117,18 @@ fun FarmAdminScreen(
     val consumedSlots = maxOf(activeFarm?.consumedListingSlots ?: 0, activeGoatCount)
     val totalSlots = activeFarm?.goatListingLimit ?: 2
 
+    val isFarmSuspended = activeFarm?.verificationStatus == VerificationStatus.SUSPENDED
+
     val handleOpenAddGoat: () -> Unit = {
         if (activeFarm == null) {
             coroutineScope.launch {
                 snackbarHostState.showSnackbar("Loading your farm profile. Please wait or check Farm Info tab.")
             }
             marketplaceViewModel?.refreshMarketplace()
+        } else if (isFarmSuspended) {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("Your farm is currently suspended. Creating new goat listings is disabled.")
+            }
         } else {
             editingGoat = null
             showAddEditGoatDialog = true
@@ -208,12 +214,34 @@ fun FarmAdminScreen(
         },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (selectedTab) {
+            if (isFarmSuspended) {
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                        Text(
+                            text = "Farm Suspended: This farm account is suspended. Creating new goat listings and farm profile edits are disabled. Contact Super Admin for assistance.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                when (selectedTab) {
                 0 -> FarmOverviewTab(
                     farm = activeFarm,
                     farmGoats = farmGoats,
@@ -255,6 +283,7 @@ fun FarmAdminScreen(
                 )
             }
         }
+    }
     }
 
     if (showAddEditGoatDialog && activeFarm != null && marketplaceViewModel != null) {

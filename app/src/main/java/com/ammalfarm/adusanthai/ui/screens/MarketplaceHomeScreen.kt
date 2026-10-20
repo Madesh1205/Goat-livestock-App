@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,6 +29,7 @@ import com.ammalfarm.adusanthai.ui.components.AduSanthaiLogo
 import com.ammalfarm.adusanthai.ui.components.GoatCard
 import com.ammalfarm.adusanthai.ui.components.GoatFilterBottomSheet
 import com.ammalfarm.adusanthai.ui.viewmodel.MarketplaceViewModel
+import com.ammalfarm.adusanthai.ui.viewmodel.SortOption
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -155,37 +157,104 @@ fun MarketplaceHomeScreen(
                         }
                     }
 
-                    // Search Bar + Filter Button
+                    // Search Bar
+                    OutlinedTextField(
+                        value = uiState.searchQuery,
+                        onValueChange = { marketplaceViewModel.updateSearchQuery(it) },
+                        placeholder = { Text("Search breed, farm, district, location...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (uiState.searchQuery.isNotBlank()) {
+                                IconButton(onClick = { marketplaceViewModel.updateSearchQuery("") }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("search_marketplace_input")
+                    )
+
+                    // Requirement 2: Location Selector directly below the search bar
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedTextField(
-                            value = uiState.searchQuery,
-                            onValueChange = { marketplaceViewModel.updateSearchQuery(it) },
-                            placeholder = { Text("Search breed, farm, district, location...") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            trailingIcon = {
-                                if (uiState.searchQuery.isNotBlank()) {
-                                    IconButton(onClick = { marketplaceViewModel.updateSearchQuery("") }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Clear search")
-                                    }
-                                }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(12.dp),
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = "Location",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Location",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        Row(
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("search_marketplace_input")
-                        )
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            uiState.availableLocations.forEach { loc ->
+                                val isSelected = (loc == "All" && uiState.selectedDistrict == "All") ||
+                                    loc.equals(uiState.selectedDistrict, ignoreCase = true)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { marketplaceViewModel.updateFilters(district = loc) },
+                                    label = {
+                                        Text(
+                                            text = if (loc == "All") "All Locations" else loc,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = if (isSelected) {
+                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                                    } else null,
+                                    modifier = Modifier.testTag("chip_location_${loc.replace(" ", "_")}")
+                                )
+                            }
+                        }
+                    }
 
-                        FilledTonalIconButton(
+                    // Requirement 4: Separate Sort and Filter controls
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Filter Control with Funnel Icon
+                        OutlinedButton(
                             onClick = { showFilterSheet = true },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = if (uiState.activeFilterCount > 0) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.surface
+                            ),
                             modifier = Modifier
-                                .size(52.dp)
-                                .testTag("btn_open_filters"),
-                            shape = RoundedCornerShape(12.dp)
+                                .weight(1f)
+                                .testTag("btn_open_filters")
                         ) {
                             BadgedBox(
                                 badge = {
@@ -194,33 +263,112 @@ fun MarketplaceHomeScreen(
                                     }
                                 }
                             ) {
-                                Icon(Icons.Default.Tune, contentDescription = "Filters and Sort")
+                                Icon(
+                                    imageVector = Icons.Default.FilterList, // Funnel icon for Filter
+                                    contentDescription = "Filter"
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Filter", fontWeight = FontWeight.Bold)
+                        }
+
+                        // Sort Control with Up/Down Arrows Icon
+                        var showSortMenu by remember { mutableStateOf(false) }
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = { showSortMenu = true },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_open_sort")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SwapVert, // Up/down arrows icon for Sort
+                                    contentDescription = "Sort"
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Sort: ${uiState.sortOption.label.substringBefore(":")}",
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false },
+                                modifier = Modifier.testTag("menu_sort_options")
+                            ) {
+                                Text(
+                                    text = "Sort Goats By",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
+                                HorizontalDivider()
+                                SortOption.entries.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = option.label,
+                                                    fontWeight = if (uiState.sortOption == option) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (uiState.sortOption == option) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                                )
+                                                if (uiState.sortOption == option) {
+                                                    Icon(
+                                                        Icons.Default.Check,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            marketplaceViewModel.updateFilters(sortOption = option)
+                                            showSortMenu = false
+                                        },
+                                        modifier = Modifier.testTag("sort_item_${option.name}")
+                                    )
+                                }
                             }
                         }
                     }
 
-                    // Horizontal Breed Category Chips
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        uiState.availableBreeds.forEach { breed ->
-                            val isSelected = uiState.selectedBreed.equals(breed, ignoreCase = true)
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { marketplaceViewModel.selectBreed(breed) },
-                                label = {
-                                    Text(
-                                        text = breed,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                },
-                                leadingIcon = if (isSelected) {
-                                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                } else null
-                            )
+                    // Requirement 3: Dynamic Breed Category Chips
+                    if (uiState.availableBreeds.size > 1) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            uiState.availableBreeds.forEach { breed ->
+                                val isSelected = uiState.selectedBreed.equals(breed, ignoreCase = true)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = { marketplaceViewModel.selectBreed(breed) },
+                                    label = {
+                                        Text(
+                                            text = breed,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    leadingIcon = if (isSelected) {
+                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                                    } else null,
+                                    modifier = Modifier.testTag("chip_breed_${breed.replace(" ", "_")}")
+                                )
+                            }
                         }
                     }
                 }

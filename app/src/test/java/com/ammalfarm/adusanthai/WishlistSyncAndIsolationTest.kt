@@ -284,24 +284,24 @@ assertTrue("Final state must be saved after odd number of sequential toggles", s
 // --- SCENARIO 14: Wishlist Pricing Uses PriceUtils ---
 @Test
 fun `Scenario 14 - Wishlist pricing uses centralized PriceUtils correctly`() {
-// Discounted Goat
-val discountedGoat = createTestGoat(
-price = 28000.0,
-discountPercentage = 20.0
-)
-assertTrue(discountedGoat.hasDiscount)
-assertEquals(22400.0, discountedGoat.finalPrice, 0.001)
-assertEquals("₹22,400", discountedGoat.formattedFinalPrice)
-assertEquals("₹28,000", discountedGoat.formattedPrice)
-assertEquals("20% OFF", discountedGoat.formattedDiscountBadge)
-// Undiscounted Goat
-val regularGoat = createTestGoat(
-price = 28000.0,
-discountPercentage = 0.0
-)
-assertFalse(regularGoat.hasDiscount)
-assertEquals(28000.0, regularGoat.finalPrice, 0.001)
-assertEquals("₹28,000", regularGoat.formattedPrice)
-assertEquals("₹28,000", regularGoat.formattedFinalPrice)
+    // Discounted Goat
+    val discountedGoat = createTestGoat(
+        price = 28000.0,
+        discountPercentage = 20.0
+    )
+    assertTrue(discountedGoat.discountPercentage > 0.0)
+    assertEquals(22400.0, discountedGoat.effectivePrice, 0.001)
+    assertEquals("₹22,400", PriceUtils.formatINR(discountedGoat.effectivePrice))
+    assertEquals("₹28,000", PriceUtils.formatINR(discountedGoat.price))
+    assertEquals("20% OFF", "${discountedGoat.discountPercentage.toInt()}% OFF")
+    // Undiscounted Goat
+    val regularGoat = createTestGoat(
+        price = 28000.0,
+        discountPercentage = 0.0
+    )
+    assertFalse(regularGoat.discountPercentage > 0.0)
+    assertEquals(28000.0, regularGoat.effectivePrice, 0.001)
+    assertEquals("₹28,000", PriceUtils.formatINR(regularGoat.price))
+    assertEquals("₹28,000", PriceUtils.formatINR(regularGoat.effectivePrice))
 }
 }

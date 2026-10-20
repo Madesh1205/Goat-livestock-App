@@ -115,6 +115,10 @@ interface MarketplaceRepository {
 
     suspend fun increaseFarmListingLimit(farmId: String, additionalSlots: Int): Result<Unit>
 
+    suspend fun updateFarmListingLimit(farmId: String, newTotalSlots: Int): Result<Unit>
+
+    suspend fun deleteUserAccountByAdmin(userId: String): Result<Unit>
+
     suspend fun markNotificationRead(notificationId: String): Result<Unit>
 
     suspend fun submitFarmReview(
@@ -1734,60 +1738,57 @@ open class SupabaseMarketplaceRepositoryImpl(
         }
     }
 
-    override suspend fun increaseFarmListingLimit(farmId: String, additionalSlots: Int): Result<Unit> = withContext(Dispatchers.IO) {
-        if (additionalSlots <= 0 || additionalSlots > 500) {
-            return@withContext Result.failure(IllegalArgumentException("Please enter a valid number of additional slots (1 to 500)."))
-        }
+    override suspend fun updateFarmListingLimit(farmId: String, newTotalSlots: Int): Result<Unit> = withContext(Dispatchers.IO) {
         val target = _farms.value.find { it.id == farmId }
             ?: FarmLocalCache.getCachedFarm(farmId)
             ?: return@withContext Result.failure(IllegalArgumentException("Farm not found."))
-        val newLimit = (target.goatListingLimit + additionalSlots).coerceAtLeast(2)
+
+        val activeGoatsCount = _goats.value.count {
+            it.farmId == farmId &&
+                it.isActive &&
+                it.availabilityStatus != AvailabilityStatus.SOLD &&
+                it.availabilityStatus != AvailabilityStatus.UNAVAILABLE &&
+                it.approvalStatus != ApprovalStatus.REJECTED
+        }
+        val consumed = maxOf(target.consumedListingSlots, activeGoatsCount)
+
+        if (newTotalSlots < consumed) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Cannot reduce total slots ($newTotalSlots) below consumed slots ($consumed used).")
+            )
+        }
+
         try {
             if (SupabaseConfig.isConfigured) {
                 val cleanFarmId = ensureValidUuid(farmId)
                 try {
-                    // Use the dedicated Super Admin quota update RPC which checks Super Admin authorization
-                    // server-side without resetting consumed_listing_slots or confusing custom slots with slot-pack purchases
                     SupabaseModule.client.postgrest.rpc(
                         "admin_update_farm_listing_limit",
                         buildJsonObject {
                             put("p_farm_id", cleanFarmId)
-                            put("p_new_limit", newLimit)
+                            put("p_new_limit", newTotalSlots)
                         }
                     )
                 } catch (rpcErr: Exception) {
                     val msg = (rpcErr.message ?: "").lowercase()
-                    if (msg.contains("only super admin") || msg.contains("permission denied") || msg.contains("not authorized")) {
+                    if (msg.contains("cannot reduce") || msg.contains("consumed slots")) {
                         throw rpcErr
                     }
-                    try {
-                        SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
-                            buildJsonObject {
-                                put("goat_listing_limit", newLimit)
-                                put("updated_at", currentIsoTimestamp())
-                            }
-                        ) {
-                            filter { eq("id", cleanFarmId) }
+                    SupabaseModule.client.postgrest[SupabaseConfig.TABLE_FARMS].update(
+                        buildJsonObject {
+                            put("goat_listing_limit", newTotalSlots)
+                            put("updated_at", currentIsoTimestamp())
                         }
-                    } catch (_: Exception) {
-                        SupabaseModule.client.postgrest.rpc(
-                            "increase_farm_goat_quota_with_manual_payment",
-                            buildJsonObject {
-                                put("p_farm_id", cleanFarmId)
-                                put("p_slots_to_add", additionalSlots)
-                                put("p_amount", PlatformPricingManager.goatListingPackFeeInr)
-                                put("p_payment_reference", "ADMIN-QUOTA-${System.currentTimeMillis()}")
-                                put("p_receipt_number", "RCPT-${(10000..99999).random()}")
-                                put("p_notes", "Super Admin increased quota by $additionalSlots slots (New total: $newLimit)")
-                            }
-                        )
+                    ) {
+                        filter { eq("id", cleanFarmId) }
                     }
                 }
             }
+
             _farms.update { list ->
                 list.map {
                     if (it.id == farmId) {
-                        val updated = it.copy(goatListingLimit = newLimit)
+                        val updated = it.copy(goatListingLimit = newTotalSlots)
                         FarmLocalCache.saveFarmProfile(updated)
                         updated
                     } else it
@@ -1795,6 +1796,40 @@ open class SupabaseMarketplaceRepositoryImpl(
             }
             if (SupabaseConfig.isConfigured) {
                 try { refreshFarms() } catch (_: Exception) {}
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            val friendly = UserFriendlyErrorMapper.toUserMessage(e)
+            Result.failure(Exception(friendly, e))
+        }
+    }
+
+    override suspend fun increaseFarmListingLimit(farmId: String, additionalSlots: Int): Result<Unit> = withContext(Dispatchers.IO) {
+        if (additionalSlots <= 0 || additionalSlots > 500) {
+            return@withContext Result.failure(IllegalArgumentException("Please enter a valid number of additional slots (1 to 500)."))
+        }
+        val target = _farms.value.find { it.id == farmId }
+            ?: FarmLocalCache.getCachedFarm(farmId)
+            ?: return@withContext Result.failure(IllegalArgumentException("Farm not found."))
+        val newLimit = target.goatListingLimit + additionalSlots
+        updateFarmListingLimit(farmId, newLimit)
+    }
+
+    override suspend fun deleteUserAccountByAdmin(userId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            if (SupabaseConfig.isConfigured) {
+                val cleanUserId = ensureValidUuid(userId)
+                SupabaseModule.client.postgrest.rpc(
+                    "delete_user_account",
+                    buildJsonObject {
+                        put("p_user_id", cleanUserId)
+                    }
+                )
+            }
+            _allUsers.update { list -> list.filterNot { it.id == userId } }
+            if (SupabaseConfig.isConfigured) {
+                try { refreshFarms() } catch (_: Exception) {}
+                try { refreshGoats() } catch (_: Exception) {}
             }
             Result.success(Unit)
         } catch (e: Exception) {

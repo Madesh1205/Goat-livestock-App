@@ -53,12 +53,6 @@ fun FarmDetailScreen(
             it.availabilityStatus != AvailabilityStatus.UNAVAILABLE
         }.orEmpty()
     }
-    val reviews = uiState?.farmReviews?.get(farmId).orEmpty()
-    var showReviewDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(farmId) {
-        marketplaceViewModel?.loadFarmReviews(farmId)
-    }
 
     Scaffold(
         topBar = {
@@ -210,36 +204,20 @@ fun FarmDetailScreen(
                                     )
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    if (!farm?.contactNumber.isNullOrBlank()) {
-                                        Button(
-                                            onClick = {
-                                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${farm!!.contactNumber}"))
-                                                context.startActivity(intent)
-                                            },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        ) {
-                                            Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Call Farm")
-                                        }
-                                    }
-                                    if (currentUser != null && marketplaceViewModel != null) {
-                                        OutlinedButton(
-                                            onClick = { showReviewDialog = true },
-                                            modifier = Modifier.weight(1f),
-                                            shape = RoundedCornerShape(10.dp)
-                                        ) {
-                                            Icon(Icons.Default.StarRate, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Write Review")
-                                        }
-                                    }
-                                }
+                                 if (!farm?.contactNumber.isNullOrBlank()) {
+                                     Button(
+                                         onClick = {
+                                             val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${farm!!.contactNumber}"))
+                                             context.startActivity(intent)
+                                         },
+                                         modifier = Modifier.fillMaxWidth(),
+                                         shape = RoundedCornerShape(10.dp)
+                                     ) {
+                                         Icon(Icons.Default.Call, contentDescription = null, modifier = Modifier.size(16.dp))
+                                         Spacer(modifier = Modifier.width(6.dp))
+                                         Text("Call Farm")
+                                     }
+                                 }
                             }
                         }
                     }
@@ -294,84 +272,7 @@ fun FarmDetailScreen(
                         }
                     }
                 }
-
-            if (reviews.isNotEmpty()) {
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Customer Reviews (${reviews.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                items(reviews, key = { it.id }) { review ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(review.customerName.ifBlank { "Customer" }, fontWeight = FontWeight.Bold)
-                                Text("★".repeat(review.rating.coerceIn(1, 5)), color = Color(0xFFFFA000), fontWeight = FontWeight.Bold)
-                            }
-                            if (review.comment.isNotBlank()) {
-                                Text(review.comment, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                }
             }
         }
-    }
-    }
-
-    if (showReviewDialog && currentUser != null && marketplaceViewModel != null) {
-        var rating by remember { mutableIntStateOf(5) }
-        var comment by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showReviewDialog = false },
-            title = { Text("Rate & Review Farm", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        (1..5).forEach { star ->
-                            IconButton(onClick = { rating = star }) {
-                                Icon(
-                                    imageVector = if (star <= rating) Icons.Default.Star else Icons.Default.StarBorder,
-                                    contentDescription = "$star Stars",
-                                    tint = Color(0xFFFFA000)
-                                )
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = comment,
-                        onValueChange = { comment = it },
-                        label = { Text("Your Review") },
-                        placeholder = { Text("Share your experience with this farm...") },
-                        minLines = 3,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        marketplaceViewModel.submitFarmReview(farmId, currentUser, rating, comment)
-                        showReviewDialog = false
-                    }
-                ) {
-                    Text("Submit Review")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showReviewDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
     }
 }

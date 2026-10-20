@@ -200,11 +200,15 @@ fun SuperAdminScreen(
                 1 -> SuperAdminFarmsTab(
                     farms = uiState?.farms.orEmpty(),
                     allGoats = uiState?.allGoats.orEmpty(),
+                    allUsers = uiState?.allUsers.orEmpty(),
                     onVerifyFarm = { farmId, status ->
                         marketplaceViewModel?.moderateFarm(farmId, status)
                     },
-                    onAddSlots = { farmId, slots ->
-                        marketplaceViewModel?.increaseFarmSlots(farmId, slots)
+                    onEditSlots = { farmId, newTotalSlots ->
+                        marketplaceViewModel?.updateFarmSlots(farmId, newTotalSlots)
+                    },
+                    onDeleteFarmAdminAccount = { userId ->
+                        marketplaceViewModel?.deleteUserAccountByAdmin(userId)
                     }
                 )
 
@@ -416,129 +420,223 @@ private fun SuperAdminStatsTab(
 private fun SuperAdminFarmsTab(
     farms: List<Farm>,
     allGoats: List<Goat>,
+    allUsers: List<UserProfile>,
     onVerifyFarm: (String, VerificationStatus) -> Unit,
-    onAddSlots: (String, Int) -> Unit
+    onEditSlots: (String, Int) -> Unit,
+    onDeleteFarmAdminAccount: (String) -> Unit
 ) {
-    var selectedFarmForQuota by remember { mutableStateOf<Farm?>(null) }
+    var filterStatus by remember { mutableStateOf("ALL") }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFarmForSlots by remember { mutableStateOf<Farm?>(null) }
+    var farmToDeleteAccount by remember { mutableStateOf<Farm?>(null) }
 
-    if (farms.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text("No farms registered in database.")
+    val filteredFarms = remember(farms, filterStatus, searchQuery) {
+        farms.filter { farm ->
+            val matchesStatus = when (filterStatus) {
+                "VERIFIED" -> farm.verificationStatus.isApprovedOrVerified
+                "PENDING" -> farm.verificationStatus == VerificationStatus.PENDING
+                "SUSPENDED" -> farm.verificationStatus == VerificationStatus.SUSPENDED
+                else -> true
+            }
+            val q = searchQuery.trim().lowercase()
+            val matchesSearch = if (q.isBlank()) true else {
+                farm.name.lowercase().contains(q) ||
+                farm.ownerName.lowercase().contains(q) ||
+                farm.location.lowercase().contains(q) ||
+                farm.district.lowercase().contains(q) ||
+                farm.contactNumber.lowercase().contains(q)
+            }
+            matchesStatus && matchesSearch
         }
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(farms, key = { it.id }) { farm ->
-                val usedCount = remember(allGoats, farm.id) {
-                    allGoats.count {
-                        it.farmId == farm.id &&
-                            it.isActive &&
-                            it.availabilityStatus != AvailabilityStatus.SOLD &&
-                            it.availabilityStatus != AvailabilityStatus.UNAVAILABLE &&
-                            it.approvalStatus != ApprovalStatus.REJECTED
-                    }
-                }
+    }
 
-                ElevatedCard(
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Search & Filter Header
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search farm, owner, location, phone...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("input_search_farms_admin")
+            )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("ALL", "VERIFIED", "PENDING", "SUSPENDED").forEach { tab ->
+                    FilterChip(
+                        selected = filterStatus == tab,
+                        onClick = { filterStatus = tab },
+                        label = { Text(tab) }
+                    )
+                }
+            }
+        }
+
+        if (filteredFarms.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("No partner farms match current search/filter.")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(filteredFarms, key = { it.id }) { farm ->
+                    val usedCount = remember(allGoats, farm.id) {
+                        allGoats.count {
+                            it.farmId.equals(farm.id, ignoreCase = true) &&
+                                it.isActive &&
+                                it.availabilityStatus != AvailabilityStatus.SOLD &&
+                                it.availabilityStatus != AvailabilityStatus.UNAVAILABLE &&
+                                it.approvalStatus != ApprovalStatus.REJECTED
+                        }
+                    }
+
+                    ElevatedCard(
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Row(
-                                modifier = Modifier.weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    modifier = Modifier.size(44.dp)
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (farm.logoUrl.isNotBlank()) {
-                                        AsyncImage(
-                                            model = farm.logoUrl,
-                                            contentDescription = farm.name,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.Agriculture,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        if (farm.logoUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = farm.logoUrl,
+                                                contentDescription = farm.name,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clip(CircleShape),
+                                                contentScale = ContentScale.Crop
                                             )
+                                        } else {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Agriculture,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
                                         }
                                     }
+                                    Column {
+                                        Text(farm.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text("${farm.ownerName.ifBlank { "Unassigned / Suspended Account" }} • ${farm.location.ifBlank { "Tamil Nadu" }}", style = MaterialTheme.typography.bodySmall)
+                                        Text(
+                                            text = "Phone: ${farm.contactNumber.ifBlank { "N/A" }} • Active Usage: $usedCount / ${farm.goatListingLimit} Slots",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
-                                Column {
-                                    Text(farm.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                    Text("${farm.ownerName.ifBlank { "Partner" }} • ${farm.location}", style = MaterialTheme.typography.bodySmall)
+                                Surface(
+                                    color = when {
+                                        farm.verificationStatus == VerificationStatus.SUSPENDED -> MaterialTheme.colorScheme.errorContainer
+                                        farm.verificationStatus.isApprovedOrVerified -> MaterialTheme.colorScheme.primaryContainer
+                                        else -> MaterialTheme.colorScheme.tertiaryContainer
+                                    },
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
                                     Text(
-                                        text = "Phone: ${farm.contactNumber.ifBlank { "N/A" }} • Active Usage: $usedCount / ${farm.goatListingLimit} Slots",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.SemiBold
+                                        text = farm.verificationStatus.name,
+                                        color = when {
+                                            farm.verificationStatus == VerificationStatus.SUSPENDED -> MaterialTheme.colorScheme.onErrorContainer
+                                            farm.verificationStatus.isApprovedOrVerified -> MaterialTheme.colorScheme.onPrimaryContainer
+                                            else -> MaterialTheme.colorScheme.onTertiaryContainer
+                                        },
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
                             }
-                            Surface(
-                                color = if (farm.verificationStatus.isApprovedOrVerified) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.tertiaryContainer,
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = farm.verificationStatus.name,
-                                    color = if (farm.verificationStatus.isApprovedOrVerified) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
 
-                        if (!farm.isAmmalOwnFarm) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (!farm.verificationStatus.isApprovedOrVerified) {
-                                    Button(
-                                        onClick = { onVerifyFarm(farm.id, VerificationStatus.VERIFIED) },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Verify & Approve")
-                                    }
-                                }
-                                OutlinedButton(
-                                    onClick = { selectedFarmForQuota = farm },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("btn_manage_slots_${farm.id}")
+                            if (!farm.isAmmalOwnFarm) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(Icons.Default.AddChart, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Increase Slots")
-                                }
-                                if (farm.verificationStatus != VerificationStatus.SUSPENDED) {
+                                    if (!farm.verificationStatus.isApprovedOrVerified && farm.verificationStatus != VerificationStatus.SUSPENDED) {
+                                        Button(
+                                            onClick = { onVerifyFarm(farm.id, VerificationStatus.VERIFIED) },
+                                            modifier = Modifier.testTag("btn_verify_farm_${farm.id}")
+                                        ) {
+                                            Text("Approve & Verify")
+                                        }
+                                    }
+
                                     OutlinedButton(
-                                        onClick = { onVerifyFarm(farm.id, VerificationStatus.SUSPENDED) },
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                        onClick = { selectedFarmForSlots = farm },
+                                        modifier = Modifier.testTag("btn_edit_slots_${farm.id}")
                                     ) {
-                                        Text("Suspend")
+                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Edit Total Slots")
+                                    }
+
+                                    if (farm.verificationStatus != VerificationStatus.SUSPENDED) {
+                                        OutlinedButton(
+                                            onClick = { onVerifyFarm(farm.id, VerificationStatus.SUSPENDED) },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                            modifier = Modifier.testTag("btn_suspend_farm_${farm.id}")
+                                        ) {
+                                            Text("Suspend")
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { onVerifyFarm(farm.id, VerificationStatus.VERIFIED) },
+                                            modifier = Modifier.testTag("btn_unsuspend_farm_${farm.id}")
+                                        ) {
+                                            Text("Unsuspend & Activate")
+                                        }
+                                    }
+
+                                    if (farm.ownerId.isNotBlank()) {
+                                        IconButton(
+                                            onClick = { farmToDeleteAccount = farm },
+                                            modifier = Modifier.testTag("btn_delete_farm_account_${farm.id}")
+                                        ) {
+                                            Icon(Icons.Default.PersonRemove, contentDescription = "Delete Farm Admin Account", tint = MaterialTheme.colorScheme.error)
+                                        }
                                     }
                                 }
                             }
@@ -549,23 +647,54 @@ private fun SuperAdminFarmsTab(
         }
     }
 
-    selectedFarmForQuota?.let { targetFarm ->
-        // Keep latest farm snapshot from list if updated
+    selectedFarmForSlots?.let { targetFarm ->
         val currentFarm = farms.find { it.id == targetFarm.id } ?: targetFarm
         val currentUsed = allGoats.count {
-            it.farmId == currentFarm.id &&
+            it.farmId.equals(currentFarm.id, ignoreCase = true) &&
                 it.isActive &&
                 it.availabilityStatus != AvailabilityStatus.SOLD &&
                 it.availabilityStatus != AvailabilityStatus.UNAVAILABLE &&
                 it.approvalStatus != ApprovalStatus.REJECTED
         }
-        CustomListingSlotIncreaseDialog(
+        EditFarmListingSlotsDialog(
             farm = currentFarm,
             currentUsedSlots = currentUsed,
-            onDismiss = { selectedFarmForQuota = null },
-            onConfirmAdditionalSlots = { additionalSlots ->
-                onAddSlots(currentFarm.id, additionalSlots)
-                selectedFarmForQuota = null
+            onDismiss = { selectedFarmForSlots = null },
+            onConfirmSlots = { newTotalSlots ->
+                onEditSlots(currentFarm.id, newTotalSlots)
+                selectedFarmForSlots = null
+            }
+        )
+    }
+
+    farmToDeleteAccount?.let { farm ->
+        AlertDialog(
+            onDismissRequest = { farmToDeleteAccount = null },
+            title = { Text("Delete Farm Admin Account?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "Deleting the Farm Admin account for '${farm.name}' will suspend the farm and prevent new listings or farm-management actions. All existing farm listings, bookings, and historical records will be safely preserved."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val ownerId = farm.ownerId
+                        if (ownerId.isNotBlank()) {
+                            onDeleteFarmAdminAccount(ownerId)
+                        }
+                        farmToDeleteAccount = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("btn_confirm_delete_farm_admin")
+                ) {
+                    Text("Delete Account & Suspend Farm")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { farmToDeleteAccount = null }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -573,36 +702,44 @@ private fun SuperAdminFarmsTab(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CustomListingSlotIncreaseDialog(
+private fun EditFarmListingSlotsDialog(
     farm: Farm,
     currentUsedSlots: Int,
     onDismiss: () -> Unit,
-    onConfirmAdditionalSlots: (Int) -> Unit
+    onConfirmSlots: (Int) -> Unit
 ) {
-    var additionalSlotsInput by remember { mutableStateOf("5") }
+    var totalSlotsInput by remember(farm) { mutableStateOf(farm.goatListingLimit.toString()) }
     var validationError by remember { mutableStateOf<String?>(null) }
 
     val currentQuota = farm.goatListingLimit.coerceAtLeast(0)
-    val parsedAdditional = additionalSlotsInput.trim().toIntOrNull()
-    val newQuota = if (parsedAdditional != null && parsedAdditional > 0) currentQuota + parsedAdditional else null
+    val parsedNewTotal = totalSlotsInput.trim().toIntOrNull()
+
+    val validate: (Int?) -> String? = { valVal ->
+        when {
+            valVal == null || valVal < 0 -> "Please enter a valid non-negative slot limit."
+            valVal < currentUsedSlots -> "Cannot reduce total slots ($valVal) below the $currentUsedSlots slots currently consumed by active listings."
+            valVal > 10000 -> "Total farm quota cannot exceed 10,000 listing slots."
+            else -> null
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "Increase Listing Quota",
+                text = "Edit Total Listing Slots",
                 fontWeight = FontWeight.Bold
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Grant custom additional listing slots to ${farm.name}. This directly increases the farm's listing quota in Supabase without resetting existing usage or charging a slot-pack fee.",
+                    text = "Edit total listing slots allocated to ${farm.name}. The system enforces that total slots can never be reduced below the number of slots already consumed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // Current vs New Quota Summary Card
+                // Current Usage Summary Card
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
@@ -617,40 +754,22 @@ private fun CustomListingSlotIncreaseDialog(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Active Used Listings:", style = MaterialTheme.typography.bodySmall)
-                            Text("$currentUsedSlots used", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                            Text("Active Consumed Slots:", style = MaterialTheme.typography.bodySmall)
+                            Text("$currentUsedSlots slots used", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Current Listing Quota:", style = MaterialTheme.typography.bodyMedium)
+                            Text("Current Total Quota:", style = MaterialTheme.typography.bodyMedium)
                             Text("$currentQuota slots", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "New Total Quota:",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (newQuota != null) "$newQuota slots (+$parsedAdditional)" else "Enter valid slots",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (newQuota != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                            )
                         }
                     }
                 }
 
                 // Quick Preset Chips
                 Text(
-                    text = "Quick Select Additional Slots",
+                    text = "Quick Presets",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -658,32 +777,42 @@ private fun CustomListingSlotIncreaseDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf(1, 3, 5, 10, 20, 50).forEach { preset ->
+                    val presets = listOf(
+                        currentUsedSlots,
+                        currentQuota,
+                        currentQuota + 5,
+                        currentQuota + 10,
+                        20,
+                        50
+                    ).distinct().sorted()
+
+                    presets.forEach { preset ->
                         FilterChip(
-                            selected = parsedAdditional == preset,
+                            selected = parsedNewTotal == preset,
                             onClick = {
-                                additionalSlotsInput = preset.toString()
-                                validationError = null
+                                totalSlotsInput = preset.toString()
+                                validationError = validate(preset)
                             },
-                            label = { Text("+$preset Slots") }
+                            label = { Text("$preset Slots") }
                         )
                     }
                 }
 
                 OutlinedTextField(
-                    value = additionalSlotsInput,
-                    onValueChange = {
-                        additionalSlotsInput = it.filter { ch -> ch.isDigit() }
-                        validationError = null
+                    value = totalSlotsInput,
+                    onValueChange = { input ->
+                        val cleaned = input.filter { ch -> ch.isDigit() }
+                        totalSlotsInput = cleaned
+                        validationError = validate(cleaned.toIntOrNull())
                     },
-                    label = { Text("Additional Slots to Grant *") },
-                    placeholder = { Text("e.g. 5") },
+                    label = { Text("New Total Listing Limit *") },
+                    placeholder = { Text("e.g. 10") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     isError = validationError != null,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .testTag("input_custom_additional_slots")
+                        .testTag("input_edit_total_slots")
                 )
 
                 if (validationError != null) {
@@ -699,25 +828,18 @@ private fun CustomListingSlotIncreaseDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val slots = additionalSlotsInput.trim().toIntOrNull()
-                    when {
-                        slots == null || slots <= 0 -> {
-                            validationError = "Please enter a positive number of additional slots (at least 1)."
-                        }
-                        slots > 1000 -> {
-                            validationError = "Cannot add more than 1,000 slots in a single update."
-                        }
-                        currentQuota + slots > 10000 -> {
-                            validationError = "Total farm quota cannot exceed 10,000 listing slots."
-                        }
-                        else -> {
-                            onConfirmAdditionalSlots(slots)
-                        }
+                    val slots = totalSlotsInput.trim().toIntOrNull()
+                    val err = validate(slots)
+                    if (err != null) {
+                        validationError = err
+                    } else if (slots != null) {
+                        onConfirmSlots(slots)
                     }
                 },
-                modifier = Modifier.testTag("btn_confirm_custom_slots")
+                enabled = parsedNewTotal != null && validate(parsedNewTotal) == null,
+                modifier = Modifier.testTag("btn_confirm_edit_slots")
             ) {
-                Text("Save New Quota")
+                Text("Save Total Slots")
             }
         },
         dismissButton = {
