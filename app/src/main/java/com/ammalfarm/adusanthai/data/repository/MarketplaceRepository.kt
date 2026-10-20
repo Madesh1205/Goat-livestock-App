@@ -17,7 +17,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -40,12 +43,14 @@ interface MarketplaceRepository {
     val allUsers: StateFlow<List<UserProfile>>
     val reports: StateFlow<List<ListingReport>>
     val farmReviews: StateFlow<Map<String, List<FarmReview>>>
+    val breeds: StateFlow<List<String>>
     val isLoading: StateFlow<Boolean>
     val errorMessage: StateFlow<String?>
 
     suspend fun refreshAll(): Result<Unit>
     suspend fun refreshGoats(): Result<List<Goat>>
     suspend fun refreshFarms(): Result<List<Farm>>
+    suspend fun refreshBreeds(): Result<List<String>>
     suspend fun refreshBookings(userId: String? = null, farmId: String? = null, isSuperAdmin: Boolean = false): Result<List<Booking>>
     suspend fun refreshWishlist(userId: String): Result<Set<String>>
     suspend fun refreshNotifications(userId: String): Result<List<AppNotification>>
@@ -174,6 +179,18 @@ open class SupabaseMarketplaceRepositoryImpl(
     private val _farmReviews = MutableStateFlow<Map<String, List<FarmReview>>>(emptyMap())
     override val farmReviews: StateFlow<Map<String, List<FarmReview>>> = _farmReviews.asStateFlow()
 
+    private val _breeds = MutableStateFlow<List<String>>(
+        listOf(
+            "Jamunapari", "Boer", "Sirohi", "Barbari", "Tellicherry (Malabari)",
+            "Beetal", "Black Bengal", "Kanni Aadu", "Salem Black", "Kodi Aadu",
+            "Tellicherry", "Kanni Adu", "Kodi Adu", "Osmanabadi"
+        )
+    )
+    override val breeds: StateFlow<List<String>> = _breeds.asStateFlow()
+
+    private val goatSaveMutex = Mutex()
+    private val recentGoatSubmissions = ConcurrentHashMap<String, Long>()
+
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -186,6 +203,9 @@ open class SupabaseMarketplaceRepositoryImpl(
         try {
             val farmsRes = refreshFarms()
             val goatsRes = refreshGoats()
+            try {
+                refreshBreeds()
+            } catch (_: Exception) {}
             try {
                 val settingsRows = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_PLATFORM_SETTINGS]
                     .select()
@@ -325,6 +345,29 @@ open class SupabaseMarketplaceRepositoryImpl(
         } catch (e: Exception) {
             Log.w(TAG, "Error loading farms: ${e.message}")
             Result.failure(e)
+        }
+    }
+
+    override suspend fun refreshBreeds(): Result<List<String>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(_breeds.value)
+        try {
+            val dtos = SupabaseModule.client.postgrest[SupabaseConfig.TABLE_BREEDS]
+                .select {
+                    filter { eq("is_active", true) }
+                    order("name", Order.ASCENDING)
+                }
+                .decodeList<BreedDto>()
+            val breedNames = dtos.map { it.name.trim() }.filter { it.isNotBlank() }
+            if (breedNames.isNotEmpty()) {
+                val combined = (breedNames + _breeds.value).distinct()
+                _breeds.value = combined
+                Result.success(combined)
+            } else {
+                Result.success(_breeds.value)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice fetching breeds: ${e.message}")
+            Result.success(_breeds.value)
         }
     }
 
@@ -1139,11 +1182,25 @@ open class SupabaseMarketplaceRepositoryImpl(
             }
         }
 
-        try {
-            val cleanGoatId = ensureValidUuid(goat.id.ifBlank { UUID.randomUUID().toString() })
-            val cleanFarmId = ensureValidUuid(effectiveFarmId)
+        val cleanGoatId = ensureValidUuid(goat.id.ifBlank { UUID.randomUUID().toString() })
+        val cleanFarmId = ensureValidUuid(effectiveFarmId)
 
-            val uploadedUrls = mutableListOf<String>()
+        // Duplicate submission prevention at repository level
+        val submissionFingerprint = "${cleanFarmId}_${goat.name.trim().lowercase()}_${goat.breed.trim().lowercase()}_${goat.price}"
+        if (!isExisting) {
+            val lastSeen = recentGoatSubmissions[submissionFingerprint]
+            val currentTime = System.currentTimeMillis()
+            if (lastSeen != null && (currentTime - lastSeen) < 10000) {
+                return@withContext Result.failure(
+                    IllegalStateException("A listing for this goat is already being submitted. Please wait a moment to avoid duplicate listings.")
+                )
+            }
+            recentGoatSubmissions[submissionFingerprint] = currentTime
+        }
+
+        try {
+            goatSaveMutex.withLock {
+                val uploadedUrls = mutableListOf<String>()
             if (isRemoteBackendEnabled && imageBytesList.isNotEmpty()) {
                 val bucket = SupabaseModule.storage.from(SupabaseConfig.BUCKET_GOAT_IMAGES)
                 imageBytesList.forEachIndexed { index, bytes ->
@@ -1368,7 +1425,8 @@ open class SupabaseMarketplaceRepositoryImpl(
                     }
                 }
             }
-            Result.success(updatedGoat)
+                Result.success(updatedGoat)
+            }
         } catch (e: Exception) {
             Log.e(
                 TAG,

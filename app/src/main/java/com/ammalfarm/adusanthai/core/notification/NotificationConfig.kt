@@ -27,6 +27,9 @@ object NotificationConfig {
     var isInitialized: Boolean = false
         private set
 
+    @Volatile
+    var activeUserId: String? = null
+
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -37,10 +40,11 @@ object NotificationConfig {
     }
 
     fun getActiveUserId(context: Context): String? {
-        return getPrefs(context).getString(KEY_ACTIVE_USER_ID, null)
+        return activeUserId ?: getPrefs(context).getString(KEY_ACTIVE_USER_ID, null)
     }
 
     fun setActiveUser(context: Context, userId: String?) {
+        activeUserId = userId
         val editor = getPrefs(context).edit()
         if (userId.isNullOrBlank()) {
             editor.remove(KEY_ACTIVE_USER_ID)

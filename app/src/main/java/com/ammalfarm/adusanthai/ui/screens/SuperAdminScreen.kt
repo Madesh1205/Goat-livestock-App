@@ -47,6 +47,7 @@ fun SuperAdminScreen(
     var selectedSection by remember { mutableIntStateOf(0) }
     // 0: Overview & Stats, 1: Farm Verification, 2: Goat Moderation, 3: Global Bookings, 4: Users & Reports
     var showAddAmmalGoatDialog by remember { mutableStateOf(false) }
+    var editingGoat by remember { mutableStateOf<Goat?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(Unit) {
@@ -214,6 +215,9 @@ fun SuperAdminScreen(
                     },
                     onDeleteGoat = { goatId ->
                         marketplaceViewModel?.deleteGoat(goatId)
+                    },
+                    onEditGoat = { goat ->
+                        editingGoat = goat
                     }
                 )
 
@@ -238,18 +242,40 @@ fun SuperAdminScreen(
         }
     }
 
-    if (showAddAmmalGoatDialog && marketplaceViewModel != null) {
+    val editingTargetFarm = remember(editingGoat, uiState?.farms, ammalFarm) {
+        if (editingGoat != null) {
+            uiState?.farms?.find { it.id.equals(editingGoat!!.farmId, ignoreCase = true) }
+                ?: Farm(
+                    id = editingGoat!!.farmId.ifBlank { ammalFarm.id },
+                    name = editingGoat!!.farmName.ifBlank { "Partner Farm" },
+                    location = editingGoat!!.farmLocation.ifBlank { "Tamil Nadu" },
+                    contactNumber = editingGoat!!.farmContact
+                )
+        } else ammalFarm
+    }
+
+    if ((showAddAmmalGoatDialog || editingGoat != null) && marketplaceViewModel != null) {
         AddEditGoatDialog(
-            initialGoat = null,
-            farm = ammalFarm,
+            initialGoat = editingGoat,
+            farm = editingTargetFarm,
             isSuperAdmin = true,
-            onDismiss = { showAddAmmalGoatDialog = false },
+            availableBreeds = uiState?.availableBreeds.orEmpty(),
+            isSaving = uiState?.isLoading == true,
+            onDismiss = {
+                showAddAmmalGoatDialog = false
+                editingGoat = null
+            },
             onSave = { goat, imageBytes ->
                 marketplaceViewModel.saveGoat(
                     goat = goat,
                     imageBytesList = imageBytes,
                     isSuperAdmin = true,
-                    onSuccess = { showAddAmmalGoatDialog = false }
+                    actorUserId = currentUser?.id,
+                    actorFarmId = goat.farmId.ifBlank { editingTargetFarm.id },
+                    onSuccess = {
+                        showAddAmmalGoatDialog = false
+                        editingGoat = null
+                    }
                 )
             }
         )
@@ -706,7 +732,8 @@ private fun CustomListingSlotIncreaseDialog(
 private fun SuperAdminGoatsModerationTab(
     goats: List<Goat>,
     onModerateGoat: (String, ApprovalStatus, String?) -> Unit,
-    onDeleteGoat: (String) -> Unit
+    onDeleteGoat: (String) -> Unit,
+    onEditGoat: (Goat) -> Unit
 ) {
     var filterStatus by remember { mutableStateOf("ALL") }
     val displayed = remember(goats, filterStatus) {
@@ -793,8 +820,17 @@ private fun SuperAdminGoatsModerationTab(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            OutlinedButton(
+                                onClick = { onEditGoat(goat) },
+                                modifier = Modifier.testTag("btn_edit_goat_${goat.id}")
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Edit")
+                            }
                             if (goat.approvalStatus != ApprovalStatus.APPROVED) {
                                 Button(
                                     onClick = { onModerateGoat(goat.id, ApprovalStatus.APPROVED, null) },

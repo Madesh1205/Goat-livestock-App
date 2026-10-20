@@ -22,6 +22,19 @@ fun ensureValidUuid(input: String): String {
 }
 
 @Serializable
+data class BreedDto(
+    val id: String = "",
+    val name: String = "",
+    val origin: String? = null,
+    @SerialName("primary_purpose") val primaryPurpose: String? = null,
+    val description: String? = null,
+    @SerialName("avg_weight_kg") val avgWeightKg: Double? = null,
+    @SerialName("is_active") val isActive: Boolean = true,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
+)
+
+@Serializable
 data class ProfileDto(
     val id: String = "",
     val email: String? = null,

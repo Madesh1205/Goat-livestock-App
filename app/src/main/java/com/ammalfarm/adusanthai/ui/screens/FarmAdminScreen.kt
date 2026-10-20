@@ -1,11 +1,16 @@
 package com.ammalfarm.adusanthai.ui.screens
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -257,6 +262,8 @@ fun FarmAdminScreen(
             initialGoat = editingGoat,
             farm = activeFarm,
             isSuperAdmin = currentUser?.role == UserRole.SUPER_ADMIN,
+            availableBreeds = uiState?.availableBreeds.orEmpty(),
+            isSaving = uiState?.isLoading == true,
             onDismiss = { showAddEditGoatDialog = false },
             onSave = { goat, imageBytes ->
                 marketplaceViewModel.saveGoat(
@@ -1011,12 +1018,37 @@ fun AddEditGoatDialog(
     initialGoat: Goat?,
     farm: Farm,
     isSuperAdmin: Boolean,
+    availableBreeds: List<String> = emptyList(),
+    isSaving: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (Goat, List<ByteArray>) -> Unit
 ) {
     val context = LocalContext.current
     var name by remember(initialGoat) { mutableStateOf(initialGoat?.name ?: "") }
-    var breed by remember(initialGoat) { mutableStateOf(initialGoat?.breed?.ifBlank { "Tellicherry" } ?: "Tellicherry") }
+
+    val standardBreeds = remember(availableBreeds) {
+        val fromState = availableBreeds.filter { it.isNotBlank() && !it.equals("All", ignoreCase = true) }
+        val defaults = listOf(
+            "Jamunapari", "Boer", "Sirohi", "Barbari", "Tellicherry (Malabari)",
+            "Beetal", "Black Bengal", "Kanni Aadu", "Salem Black", "Kodi Aadu",
+            "Tellicherry", "Kanni Adu", "Kodi Adu", "Osmanabadi"
+        )
+        (fromState + defaults).distinct().sorted()
+    }
+
+    val initialBreedValue = remember(initialGoat) {
+        initialGoat?.breed?.ifBlank { "Tellicherry" } ?: "Tellicherry"
+    }
+    var breed by remember(initialBreedValue) { mutableStateOf(initialBreedValue) }
+    val isInitialCustom = remember(initialBreedValue, standardBreeds) {
+        initialBreedValue.isNotBlank() && !standardBreeds.any { it.equals(initialBreedValue, ignoreCase = true) }
+    }
+    var isCustomBreed by remember(isInitialCustom) { mutableStateOf(isInitialCustom) }
+    var customBreedName by remember(initialBreedValue, isInitialCustom) {
+        mutableStateOf(if (isInitialCustom) initialBreedValue else "")
+    }
+    var breedDropdownExpanded by remember { mutableStateOf(false) }
+
     var gender by remember(initialGoat) { mutableStateOf(initialGoat?.gender?.ifBlank { "Male" } ?: "Male") }
     var ageStr by remember(initialGoat) { mutableStateOf((initialGoat?.ageMonths ?: 12).toString()) }
     var weightStr by remember(initialGoat) { mutableStateOf((initialGoat?.weightKg ?: 28.0).toString()) }
@@ -1024,7 +1056,7 @@ fun AddEditGoatDialog(
     var discountStr by remember(initialGoat) { mutableStateOf((initialGoat?.discountPercentage ?: 0.0).toInt().toString()) }
     var description by remember(initialGoat) { mutableStateOf(initialGoat?.description ?: "") }
 
-    // Existing uploaded photos (for editing) and newly selected gallery photos (before upload)
+    // Existing uploaded photos (for editing) and newly selected photos (before upload)
     var existingImageUrls by remember(initialGoat) {
         val urls = ((initialGoat?.imageUrls ?: emptyList()) + listOfNotNull(initialGoat?.imageUrl?.takeIf { it.isNotBlank() }))
             .distinct()
@@ -1033,6 +1065,7 @@ fun AddEditGoatDialog(
     }
     var selectedImageBytes by remember(initialGoat) { mutableStateOf<List<ByteArray>>(emptyList()) }
     var validationError by remember { mutableStateOf<String?>(null) }
+    var isSubmittingLocal by remember { mutableStateOf(false) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5)
@@ -1061,8 +1094,46 @@ fun AddEditGoatDialog(
         }
     }
 
+    var cameraPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success && cameraPhotoUri != null) {
+            val bytes = try {
+                context.contentResolver.openInputStream(cameraPhotoUri!!)?.use { it.readBytes() }
+            } catch (_: Exception) { null }
+            if (bytes != null && bytes.isNotEmpty()) {
+                selectedImageBytes = (selectedImageBytes + listOf(bytes)).take(6)
+                validationError = null
+            }
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            try {
+                val photoFile = File.createTempFile("goat_cam_", ".jpg", context.cacheDir)
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    photoFile
+                )
+                cameraPhotoUri = uri
+                cameraLauncher.launch(uri)
+            } catch (e: Exception) {
+                validationError = "Could not start camera: ${e.message}"
+            }
+        } else {
+            validationError = "Camera permission is required to capture goat photos."
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (!isSubmittingLocal && !isSaving) onDismiss()
+        },
         title = {
             Text(
                 text = if (initialGoat == null) "Add Goat Listing" else "Edit Goat Listing",
@@ -1091,17 +1162,73 @@ fun AddEditGoatDialog(
                     label = { Text("Goat Name / Title *") },
                     placeholder = { Text("e.g. Prime Tellicherry Buck") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("input_goat_name")
                 )
 
-                OutlinedTextField(
-                    value = breed,
-                    onValueChange = { breed = it },
-                    label = { Text("Breed *") },
-                    placeholder = { Text("e.g. Tellicherry, Boer, Kanni Adu") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // Breed selection: dropdown populated from existing breeds table + option to enter custom breed
+                ExposedDropdownMenuBox(
+                    expanded = breedDropdownExpanded,
+                    onExpandedChange = { breedDropdownExpanded = it },
+                    modifier = Modifier.fillMaxWidth().testTag("dropdown_goat_breed")
+                ) {
+                    OutlinedTextField(
+                        value = if (isCustomBreed) "Other (Custom Breed)" else breed,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Breed *") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = breedDropdownExpanded) },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = breedDropdownExpanded,
+                        onDismissRequest = { breedDropdownExpanded = false }
+                    ) {
+                        standardBreeds.forEach { standardBreed ->
+                            DropdownMenuItem(
+                                text = { Text(standardBreed) },
+                                onClick = {
+                                    breed = standardBreed
+                                    isCustomBreed = false
+                                    breedDropdownExpanded = false
+                                },
+                                modifier = Modifier.testTag("menu_item_breed_${standardBreed.replace(" ", "_")}")
+                            )
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Other (Enter Custom Breed)...",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            },
+                            onClick = {
+                                isCustomBreed = true
+                                if (customBreedName.isNotBlank()) {
+                                    breed = customBreedName
+                                }
+                                breedDropdownExpanded = false
+                            },
+                            modifier = Modifier.testTag("menu_item_breed_custom")
+                        )
+                    }
+                }
+
+                if (isCustomBreed) {
+                    OutlinedTextField(
+                        value = customBreedName,
+                        onValueChange = {
+                            customBreedName = it
+                            breed = it
+                        },
+                        label = { Text("Enter Custom Breed Name *") },
+                        placeholder = { Text("e.g. Attappady Black, Crossbred") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("input_custom_breed")
+                    )
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     FilterChip(
@@ -1125,7 +1252,7 @@ fun AddEditGoatDialog(
                         label = { Text("Age (Months) *") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).testTag("input_goat_age")
                     )
                     OutlinedTextField(
                         value = weightStr,
@@ -1133,7 +1260,7 @@ fun AddEditGoatDialog(
                         label = { Text("Weight (kg) *") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).testTag("input_goat_weight")
                     )
                 }
 
@@ -1144,7 +1271,7 @@ fun AddEditGoatDialog(
                         label = { Text("Price (INR) *") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).testTag("input_goat_price")
                     )
                     OutlinedTextField(
                         value = discountStr,
@@ -1152,7 +1279,7 @@ fun AddEditGoatDialog(
                         label = { Text("Discount %") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).testTag("input_goat_discount")
                     )
                 }
 
@@ -1162,10 +1289,10 @@ fun AddEditGoatDialog(
                     label = { Text("Description") },
                     placeholder = { Text("Additional details about this goat...") },
                     minLines = 2,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("input_goat_description")
                 )
 
-                // Gallery Image Selection & Preview Section
+                // Photos Section: Take Photo (Camera) + Gallery Selection
                 Text(
                     text = "Goat Photos",
                     style = MaterialTheme.typography.labelLarge,
@@ -1266,37 +1393,77 @@ fun AddEditGoatDialog(
                     }
                 }
 
-                OutlinedButton(
-                    onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("btn_pick_goat_photos")
+                // Dual Options: Take Photo via Camera & Pick from Gallery
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    val totalPhotos = existingImageUrls.size + selectedImageBytes.size
-                    Text(
-                        if (totalPhotos == 0) "Select Goat Photos from Gallery"
-                        else "Add More Photos ($totalPhotos Selected)"
-                    )
+                    OutlinedButton(
+                        onClick = {
+                            val hasCameraPerm = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.CAMERA
+                            ) == PackageManager.PERMISSION_GRANTED
+
+                            if (hasCameraPerm) {
+                                try {
+                                    val photoFile = File.createTempFile("goat_cam_", ".jpg", context.cacheDir)
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        photoFile
+                                    )
+                                    cameraPhotoUri = uri
+                                    cameraLauncher.launch(uri)
+                                } catch (e: Exception) {
+                                    validationError = "Could not start camera: ${e.message}"
+                                }
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("btn_take_goat_photo_camera")
+                    ) {
+                        Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Take Photo")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("btn_pick_goat_photos")
+                    ) {
+                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val totalPhotos = existingImageUrls.size + selectedImageBytes.size
+                        Text(if (totalPhotos == 0) "Gallery" else "Gallery ($totalPhotos)")
+                    }
                 }
             }
         },
         confirmButton = {
+            val isBusy = isSubmittingLocal || isSaving
             Button(
                 onClick = {
+                    if (isBusy) return@Button
+
                     val age = ageStr.toIntOrNull() ?: 0
                     val weight = weightStr.toDoubleOrNull() ?: 0.0
                     val price = priceStr.toDoubleOrNull() ?: 0.0
                     val discount = (discountStr.toDoubleOrNull() ?: 0.0).coerceIn(0.0, 90.0)
 
+                    val resolvedBreed = if (isCustomBreed) customBreedName.trim() else breed.trim()
                     val isValid = GoatFormValidator.isValid(
                         name = name,
-                        breed = breed,
+                        breed = resolvedBreed,
                         price = price,
                         weight = weight,
                         age = age
@@ -1306,11 +1473,12 @@ fun AddEditGoatDialog(
                         return@Button
                     }
 
+                    isSubmittingLocal = true
                     val baseGoat = initialGoat ?: Goat()
                     val preservedFarmId = initialGoat?.farmId?.takeIf { it.isNotBlank() } ?: farm.id
                     val goat = baseGoat.copy(
                         name = name.trim(),
-                        breed = breed.trim(),
+                        breed = resolvedBreed,
                         gender = gender.trim(),
                         ageMonths = age,
                         weightKg = weight,
@@ -1324,17 +1492,33 @@ fun AddEditGoatDialog(
                         farmName = initialGoat?.farmName?.takeIf { it.isNotBlank() } ?: farm.name,
                         farmLocation = initialGoat?.farmLocation?.takeIf { it.isNotBlank() } ?: farm.location,
                         farmContact = initialGoat?.farmContact?.takeIf { it.isNotBlank() } ?: farm.contactNumber,
-                        approvalStatus = if (isSuperAdmin) ApprovalStatus.APPROVED else (initialGoat?.approvalStatus ?: ApprovalStatus.PENDING)
+                        approvalStatus = initialGoat?.approvalStatus ?: (if (isSuperAdmin) ApprovalStatus.APPROVED else ApprovalStatus.PENDING)
                     )
                     onSave(goat, selectedImageBytes)
                 },
+                enabled = !isBusy,
                 modifier = Modifier.testTag("btn_save_goat_listing")
             ) {
-                Text("Save Listing")
+                if (isBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Saving...")
+                } else {
+                    Text("Save Listing")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = {
+                    if (!isSubmittingLocal && !isSaving) onDismiss()
+                },
+                enabled = !isSubmittingLocal && !isSaving
+            ) {
                 Text("Cancel")
             }
         }

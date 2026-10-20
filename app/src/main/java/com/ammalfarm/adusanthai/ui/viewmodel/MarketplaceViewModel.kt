@@ -82,6 +82,15 @@ data class MarketplaceUiState(
             totalUsers = allUsers.size,
             openReports = reports.count { it.status.equals("OPEN", ignoreCase = true) }
         )
+
+    val goats: List<Goat>
+        get() = filteredGoats
+
+    val approvedFarms: List<Farm>
+        get() = farms.filter { it.verificationStatus == VerificationStatus.APPROVED || it.verificationStatus == VerificationStatus.VERIFIED || it.isAmmalOwnFarm }
+
+    val filterCriteria: MarketplaceUiState
+        get() = this
 }
 
 class MarketplaceViewModel(
@@ -147,6 +156,19 @@ class MarketplaceViewModel(
         viewModelScope.launch {
             repository.errorMessage.collect { err ->
                 _uiState.update { it.copy(errorMessage = err) }
+            }
+        }
+
+        viewModelScope.launch {
+            repository.breeds.collect { repoBreeds ->
+                if (repoBreeds.isNotEmpty()) {
+                    _uiState.update { state ->
+                        val combined = (listOf("All") + repoBreeds + state.allGoats.map { it.breed.trim() }.filter { it.isNotBlank() })
+                            .distinct()
+                        val next = state.copy(availableBreeds = combined)
+                        next.copy(filteredGoats = applyCustomerFilters(next))
+                    }
+                }
             }
         }
 
@@ -305,6 +327,9 @@ class MarketplaceViewModel(
         }
     }
 
+    fun setSearchQuery(query: String) = updateSearchQuery(query)
+    fun removeSearchFilter() = updateSearchQuery("")
+
     fun selectBreed(breed: String) {
         _uiState.update { state ->
             val next = state.copy(selectedBreed = breed)
@@ -435,6 +460,10 @@ class MarketplaceViewModel(
         actorFarmId: String? = null,
         onSuccess: () -> Unit = {}
     ) {
+        if (_uiState.value.isLoading) {
+            Log.w("MarketplaceViewModel", "saveGoat ignored: another save operation is already in progress.")
+            return
+        }
         viewModelScope.launch {
             val isEditing = goat.id.isNotBlank() && _uiState.value.allGoats.any { it.id.equals(goat.id, ignoreCase = true) }
             _uiState.update { it.copy(isLoading = true, actionErrorMessage = null, actionSuccessMessage = null) }

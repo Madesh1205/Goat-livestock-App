@@ -38,6 +38,7 @@ object SupabaseConfig {
     const val BUCKET_GOAT_IMAGES = "goat-images"
     const val TABLE_PROFILES = "profiles"
     const val TABLE_FARMS = "farms"
+    const val TABLE_BREEDS = "breeds"
     const val TABLE_GOATS = "goats"
     const val TABLE_GOAT_IMAGES = "goat_images"
     const val TABLE_BOOKINGS = "bookings"

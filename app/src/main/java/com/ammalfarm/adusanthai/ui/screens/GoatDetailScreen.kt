@@ -7,6 +7,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,10 +25,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -60,6 +71,9 @@ fun GoatDetailScreen(
     var showBookingDialog by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var selectedImageIndex by remember { mutableIntStateOf(0) }
+    var showFullScreenViewer by remember { mutableStateOf(false) }
+    var fullScreenInitialPage by remember { mutableIntStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState?.actionSuccessMessage, uiState?.actionErrorMessage) {
@@ -196,10 +210,13 @@ fun GoatDetailScreen(
             }
         } else {
             val allImages = remember(goat) {
-                (listOf(goat.imageUrl) + goat.imageUrls)
+                (listOfNotNull(goat.imageUrl.takeIf { it.isNotBlank() }) + goat.imageUrls)
                     .map { it.trim() }
                     .filter { it.isNotBlank() }
                     .distinct()
+            }
+            val heroPagerState = rememberPagerState(initialPage = 0) {
+                allImages.size.coerceAtLeast(1)
             }
 
             Column(
@@ -209,28 +226,69 @@ fun GoatDetailScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Hero Image Gallery
+                // Hero Image Gallery with Horizontal Swiping (Requirement 7) and Tap to View Full Screen (Requirement 6)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(280.dp)
                         .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                 ) {
-                    val activeUrl = allImages.getOrNull(selectedImageIndex) ?: goat.imageUrl
-                    if (activeUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = activeUrl,
-                            contentDescription = goat.name,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
+                    if (allImages.isNotEmpty()) {
+                        HorizontalPager(
+                            state = heroPagerState,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("pager_goat_photos")
+                        ) { page ->
+                            val imageUrl = allImages.getOrNull(page) ?: ""
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clickable {
+                                        fullScreenInitialPage = page
+                                        showFullScreenViewer = true
+                                    }
+                            ) {
+                                if (imageUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = imageUrl,
+                                        contentDescription = "${goat.name} photo ${page + 1}",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
                     } else {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable {
+                                    if (goat.imageUrl.isNotBlank()) {
+                                        fullScreenInitialPage = 0
+                                        showFullScreenViewer = true
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (goat.imageUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = goat.imageUrl,
+                                    contentDescription = goat.name,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
 
-                    // Availability & Photo Counter Badges (Tag ID removed per Requirement 5)
+                    // Availability & Photo Counter Badges
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -259,15 +317,58 @@ fun GoatDetailScreen(
                         if (allImages.size > 1) {
                             Surface(
                                 color = Color.Black.copy(alpha = 0.65f),
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    fullScreenInitialPage = heroPagerState.currentPage
+                                    showFullScreenViewer = true
+                                }
                             ) {
-                                Text(
-                                    text = "${selectedImageIndex + 1} / ${allImages.size}",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                )
+                                ) {
+                                    Icon(
+                                        Icons.Default.ZoomIn,
+                                        contentDescription = "Tap to enlarge photo",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${heroPagerState.currentPage + 1} / ${allImages.size}",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        } else if (allImages.size == 1) {
+                            Surface(
+                                color = Color.Black.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    fullScreenInitialPage = 0
+                                    showFullScreenViewer = true
+                                }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.ZoomIn,
+                                        contentDescription = "Tap to enlarge photo",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "View",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -283,14 +384,19 @@ fun GoatDetailScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         allImages.forEachIndexed { idx, imgUrl ->
+                            val isSelected = heroPagerState.currentPage == idx
                             Surface(
                                 modifier = Modifier
                                     .size(64.dp)
-                                    .clickable { selectedImageIndex = idx },
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            heroPagerState.animateScrollToPage(idx)
+                                        }
+                                    },
                                 shape = RoundedCornerShape(10.dp),
                                 border = BorderStroke(
-                                    width = if (selectedImageIndex == idx) 2.5.dp else 1.dp,
-                                    color = if (selectedImageIndex == idx) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                                 )
                             ) {
                                 AsyncImage(
@@ -364,8 +470,8 @@ fun GoatDetailScreen(
                         }
                     }
 
-                    // Description & General Health Notes (unrelated health info preserved)
-                    if (goat.description.isNotBlank() || goat.healthNotes.isNotBlank()) {
+                    // Description (Requirement 5: Healthcare Notes removed from goat details page)
+                    if (goat.description.isNotBlank()) {
                         Card(
                             shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -376,15 +482,8 @@ fun GoatDetailScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                if (goat.description.isNotBlank()) {
-                                    Text("About This Goat", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                    Text(goat.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                if (goat.healthNotes.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("Health & Care Notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                    Text(goat.healthNotes, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                                Text("About This Goat", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                Text(goat.description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -580,6 +679,21 @@ fun GoatDetailScreen(
             }
         )
     }
+
+    if (showFullScreenViewer && goat != null) {
+        val allImages = (listOfNotNull(goat.imageUrl.takeIf { it.isNotBlank() }) + goat.imageUrls)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        if (allImages.isNotEmpty()) {
+            FullScreenImageViewerDialog(
+                images = allImages,
+                initialPage = fullScreenInitialPage.coerceIn(0, allImages.size - 1),
+                goatName = goat.name.ifBlank { "Goat Photo" },
+                onDismiss = { showFullScreenViewer = false }
+            )
+        }
+    }
 }
 
 @Composable
@@ -719,4 +833,163 @@ private fun CreateBookingDialog(
             }
         }
     )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun FullScreenImageViewerDialog(
+    images: List<String>,
+    initialPage: Int,
+    goatName: String,
+    onDismiss: () -> Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialPage.coerceIn(0, (images.size - 1).coerceAtLeast(0))) {
+        images.size.coerceAtLeast(1)
+    }
+    var isCurrentZoomed by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .testTag("fullscreen_image_viewer")
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                userScrollEnabled = !isCurrentZoomed
+            ) { page ->
+                val imageUrl = images.getOrNull(page) ?: ""
+                ZoomableImageView(
+                    imageUrl = imageUrl,
+                    contentDescription = "$goatName photo ${page + 1}",
+                    onZoomChanged = { zoomed ->
+                        if (pagerState.currentPage == page) {
+                            isCurrentZoomed = zoomed
+                        }
+                    }
+                )
+            }
+
+            // Top Bar Overlay
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag("btn_close_fullscreen_viewer")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close full screen image viewer",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+
+                if (images.size > 1) {
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Text(
+                            text = "${pagerState.currentPage + 1} / ${images.size}",
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.size(48.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZoomableImageView(
+    imageUrl: String,
+    contentDescription: String,
+    onZoomChanged: (Boolean) -> Unit = {}
+) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        if (scale > 1.05f) {
+                            scale = 1f
+                            offsetX = 0f
+                            offsetY = 0f
+                            onZoomChanged(false)
+                        } else {
+                            scale = 2.5f
+                            onZoomChanged(true)
+                        }
+                    }
+                )
+            }
+            .pointerInput(Unit) {
+                detectTransformGestures { _, pan, zoom, _ ->
+                    val newScale = (scale * zoom).coerceIn(1f, 5f)
+                    scale = newScale
+                    val isZoomed = newScale > 1.05f
+                    onZoomChanged(isZoomed)
+                    if (isZoomed) {
+                        val maxOffsetX = (size.width * (newScale - 1f)) / 2f
+                        val maxOffsetY = (size.height * (newScale - 1f)) / 2f
+                        offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
+                        offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+                    } else {
+                        offsetX = 0f
+                        offsetY = 0f
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        if (imageUrl.isNotBlank()) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    }
+            )
+        } else {
+            Icon(
+                Icons.Default.Pets,
+                contentDescription = null,
+                tint = Color.Gray,
+                modifier = Modifier.size(96.dp)
+            )
+        }
+    }
 }
