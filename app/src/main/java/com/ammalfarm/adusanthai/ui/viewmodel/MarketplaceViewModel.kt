@@ -321,7 +321,11 @@ class MarketplaceViewModel(
     }
 
     fun loadUserSpecificData(user: UserProfile?) {
-        if (user == null) return
+        if (user == null) {
+            repository.stopNotificationSubscription()
+            return
+        }
+        repository.startNotificationSubscription(user.id)
         viewModelScope.launch {
             repository.refreshAll()
             repository.refreshWishlist(user.id)
@@ -692,6 +696,33 @@ class MarketplaceViewModel(
                 repository.refreshNotifications(userId)
             }
         }
+    }
+
+    fun startNotificationSubscription(userId: String) {
+        if (userId.isNotBlank()) {
+            repository.startNotificationSubscription(userId)
+        }
+    }
+
+    fun stopNotificationSubscription() {
+        repository.stopNotificationSubscription()
+    }
+
+    fun clearUserSession() {
+        repository.clearUserSession()
+    }
+
+    fun markAllNotificationsRead(userId: String) {
+        if (userId.isNotBlank()) {
+            viewModelScope.launch {
+                repository.markAllNotificationsRead(userId)
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        repository.stopNotificationSubscription()
     }
 
     fun clearActionMessages() {

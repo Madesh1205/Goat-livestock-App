@@ -111,10 +111,12 @@ data class GoatFilterCriteria(
     val maxAgeMonths: Int? = null,
     val minWeightKg: Double? = null,
     val maxWeightKg: Double? = null,
-    val onlyAvailable: Boolean = false
+    val onlyAvailable: Boolean = false,
+    val availability: AvailabilityStatus? = null
 ) {
     fun matches(goat: Goat): Boolean {
         if (onlyAvailable && goat.availabilityStatus != AvailabilityStatus.AVAILABLE) return false
+        if (availability != null && goat.availabilityStatus != availability) return false
         if (searchQuery.isNotBlank()) {
             val q = searchQuery.trim().lowercase()
             val matchesQuery = goat.name.lowercase().contains(q) ||
@@ -165,6 +167,7 @@ data class Goat(
     val healthNotes: String = "",
     val isVaccinated: Boolean = true,
     val isVerified: Boolean = false,
+    val isFeatured: Boolean = false,
     val imageUrl: String = "",
     val imageUrls: List<String> = emptyList(),
     val photos: List<String> = emptyList(),

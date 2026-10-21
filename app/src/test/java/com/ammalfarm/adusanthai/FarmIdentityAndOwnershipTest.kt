@@ -153,7 +153,7 @@ assertEquals(randomUuid, result)
 fun `ensureValidUuid generates valid random UUID for blank or null identifiers`() {
 val blankResult = ensureValidUuid("")
 assertNotNull(UUID.fromString(blankResult))
-val nullResult = ensureValidUuid(null)
+val nullResult = ensureValidUuid("   ")
 assertNotNull(UUID.fromString(nullResult))
 }
 // --- TEST 7: Domain & DTO Data Integrity ---

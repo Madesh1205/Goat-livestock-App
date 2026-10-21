@@ -12,11 +12,22 @@ import com.ammalfarm.adusanthai.model.*
 import com.ammalfarm.adusanthai.util.UserFriendlyErrorMapper
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
+import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.RealtimeChannel
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.decodeOldRecordOrNull
+import io.github.jan.supabase.realtime.decodeRecordOrNull
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -119,7 +130,12 @@ interface MarketplaceRepository {
 
     suspend fun deleteUserAccountByAdmin(userId: String): Result<Unit>
 
+    fun startNotificationSubscription(userId: String) {}
+    fun stopNotificationSubscription() {}
+    fun clearUserSession() {}
+
     suspend fun markNotificationRead(notificationId: String): Result<Unit>
+    suspend fun markAllNotificationsRead(userId: String): Result<Unit> = Result.success(Unit)
 
     suspend fun submitFarmReview(
         farmId: String,
@@ -194,6 +210,14 @@ open class SupabaseMarketplaceRepositoryImpl(
 
     private val goatSaveMutex = Mutex()
     private val recentGoatSubmissions = ConcurrentHashMap<String, Long>()
+
+    private var notificationJob: Job? = null
+    private var notificationChannelStatusJob: Job? = null
+    private var realtimeStatusJob: Job? = null
+    private var activeNotificationChannel: RealtimeChannel? = null
+    private val notificationSubscriptionMutex = Mutex()
+    @Volatile
+    private var activeSubscribedUserId: String? = null
 
     private val _isLoading = MutableStateFlow(false)
     override val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -478,11 +502,240 @@ open class SupabaseMarketplaceRepositoryImpl(
                 }
                 .decodeList<NotificationDto>()
             val list = dtos.map { it.toDomain() }
+                .distinctBy { it.id }
+                .sortedWith(
+                    compareByDescending<AppNotification> { it.createdAt.ifBlank { "0" } }
+                        .thenByDescending { it.timestamp }
+                )
             _notifications.value = list
             Result.success(list)
         } catch (e: Exception) {
             Log.w(TAG, "Notifications fetch notice: ${e.message}")
             Result.success(_notifications.value)
+        }
+    }
+
+    override fun startNotificationSubscription(userId: String) {
+        if (!SupabaseConfig.isConfigured || userId.isBlank()) return
+        val cleanUserId = ensureValidUuid(userId)
+
+        // Avoid re-subscribing if already active for the same user
+        if (activeSubscribedUserId == cleanUserId && notificationJob?.isActive == true && activeNotificationChannel != null) {
+            Log.d(TAG, "Notification subscription already active for user: $cleanUserId")
+            return
+        }
+
+        scope.launch {
+            notificationSubscriptionMutex.withLock {
+                if (activeSubscribedUserId == cleanUserId && notificationJob?.isActive == true && activeNotificationChannel != null) {
+                    return@withLock
+                }
+
+                // Cleanly stop any existing subscription first to prevent duplicates/leaks
+                stopSubscriptionInternal()
+
+                activeSubscribedUserId = cleanUserId
+                Log.i(TAG, "Starting live notification subscription for user: $cleanUserId")
+
+                // Immediately perform initial fetch
+                refreshNotifications(cleanUserId)
+
+                try {
+                    val channelName = "notifications-$cleanUserId"
+                    val channel = SupabaseModule.client.channel(channelName)
+                    activeNotificationChannel = channel
+
+                    val changeFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+                        table = SupabaseConfig.TABLE_NOTIFICATIONS
+                        filter("user_id", FilterOperator.EQ, cleanUserId)
+                    }
+
+                    notificationJob = scope.launch {
+                        try {
+                            changeFlow.collect { action ->
+                                handleRealtimeNotificationAction(action, cleanUserId)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error in notification change flow collector: ${e.message}")
+                        }
+                    }
+
+                    notificationChannelStatusJob = scope.launch {
+                        try {
+                            channel.status.collect { status ->
+                                Log.d(TAG, "Realtime channel $channelName status: $status")
+                                if (status == RealtimeChannel.Status.SUBSCRIBED && activeSubscribedUserId == cleanUserId) {
+                                    // Targeted refresh on subscribe/re-subscribe to catch any missed events
+                                    refreshNotifications(cleanUserId)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error in notification channel status collector: ${e.message}")
+                        }
+                    }
+
+                    realtimeStatusJob = scope.launch {
+                        try {
+                            SupabaseModule.client.realtime.status.collect { rtStatus ->
+                                Log.d(TAG, "Supabase Realtime status: $rtStatus")
+                                if (rtStatus == Realtime.Status.CONNECTED && activeSubscribedUserId == cleanUserId) {
+                                    // Targeted refresh on connection/reconnection
+                                    refreshNotifications(cleanUserId)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error in realtime client status collector: ${e.message}")
+                        }
+                    }
+
+                    try {
+                        SupabaseModule.client.realtime.connect()
+                        channel.subscribe(blockUntilSubscribed = false)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Notice initiating realtime channel subscription: ${e.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to start notification subscription: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    private suspend fun stopSubscriptionInternal() {
+        notificationJob?.cancel()
+        notificationJob = null
+        notificationChannelStatusJob?.cancel()
+        notificationChannelStatusJob = null
+        realtimeStatusJob?.cancel()
+        realtimeStatusJob = null
+        val ch = activeNotificationChannel
+        activeNotificationChannel = null
+        if (ch != null) {
+            try {
+                ch.unsubscribe()
+                SupabaseModule.client.realtime.removeChannel(ch)
+            } catch (e: Exception) {
+                Log.w(TAG, "Notice unsubscribing realtime channel: ${e.message}")
+            }
+        }
+    }
+
+    override fun stopNotificationSubscription() {
+        activeSubscribedUserId = null
+        scope.launch {
+            notificationSubscriptionMutex.withLock {
+                stopSubscriptionInternal()
+            }
+        }
+    }
+
+    override fun clearUserSession() {
+        stopNotificationSubscription()
+        _notifications.value = emptyList()
+        _wishlistedGoatIds.value = emptySet()
+        _bookings.value = emptyList()
+    }
+
+    private fun handleRealtimeNotificationAction(action: PostgresAction, expectedUserId: String) {
+        try {
+            when (action) {
+                is PostgresAction.Insert -> {
+                    val dto = try {
+                        action.decodeRecordOrNull<NotificationDto>()
+                    } catch (_: Exception) {
+                        try {
+                            SupabaseModule.jsonSerializer.decodeFromJsonElement<NotificationDto>(action.record)
+                        } catch (_: Exception) { null }
+                    }
+
+                    if (dto != null) {
+                        val item = dto.toDomain()
+                        // Ensure strict user isolation
+                        if (item.userId.equals(expectedUserId, ignoreCase = true) ||
+                            item.recipientUserId.equals(expectedUserId, ignoreCase = true)
+                        ) {
+                            addOrUpdateNotificationInMemory(item)
+                        }
+                    } else {
+                        // Resync if record payload could not be decoded
+                        scope.launch { refreshNotifications(expectedUserId) }
+                    }
+                }
+                is PostgresAction.Update -> {
+                    val dto = try {
+                        action.decodeRecordOrNull<NotificationDto>()
+                    } catch (_: Exception) {
+                        try {
+                            SupabaseModule.jsonSerializer.decodeFromJsonElement<NotificationDto>(action.record)
+                        } catch (_: Exception) { null }
+                    }
+
+                    if (dto != null) {
+                        val item = dto.toDomain()
+                        if (item.userId.equals(expectedUserId, ignoreCase = true) ||
+                            item.recipientUserId.equals(expectedUserId, ignoreCase = true)
+                        ) {
+                            addOrUpdateNotificationInMemory(item)
+                        }
+                    } else {
+                        scope.launch { refreshNotifications(expectedUserId) }
+                    }
+                }
+                is PostgresAction.Delete -> {
+                    val oldDto = try {
+                        action.decodeOldRecordOrNull<NotificationDto>()
+                    } catch (_: Exception) {
+                        try {
+                            SupabaseModule.jsonSerializer.decodeFromJsonElement<NotificationDto>(action.oldRecord)
+                        } catch (_: Exception) { null }
+                    }
+                    val deletedId = oldDto?.id
+                    if (!deletedId.isNullOrBlank()) {
+                        _notifications.update { list -> list.filterNot { it.id == deletedId } }
+                    } else {
+                        scope.launch { refreshNotifications(expectedUserId) }
+                    }
+                }
+                else -> {}
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error handling realtime notification action: ${e.message}")
+            scope.launch { refreshNotifications(expectedUserId) }
+        }
+    }
+
+    private fun addOrUpdateNotificationInMemory(item: AppNotification) {
+        _notifications.update { list ->
+            val exists = list.any { it.id == item.id }
+            val updated = if (exists) {
+                list.map { if (it.id == item.id) item else it }
+            } else {
+                listOf(item) + list
+            }
+            updated.distinctBy { it.id }.sortedWith(
+                compareByDescending<AppNotification> { it.createdAt.ifBlank { "0" } }
+                    .thenByDescending { it.timestamp }
+            )
+        }
+    }
+
+    override suspend fun markAllNotificationsRead(userId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanUserId = ensureValidUuid(userId)
+        _notifications.update { list ->
+            list.map { if (it.userId == cleanUserId || it.recipientUserId == cleanUserId) it.copy(isRead = true) else it }
+        }
+        if (!SupabaseConfig.isConfigured) return@withContext Result.success(Unit)
+        try {
+            SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].update(
+                buildJsonObject { put("is_read", true) }
+            ) {
+                filter { eq("user_id", cleanUserId) }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice marking all notifications read: ${e.message}")
+            refreshNotifications(cleanUserId)
+            Result.success(Unit)
         }
     }
 
@@ -1858,13 +2111,16 @@ open class SupabaseMarketplaceRepositoryImpl(
         }
         if (!SupabaseConfig.isConfigured) return@withContext Result.success(Unit)
         try {
+            val cleanId = ensureValidUuid(notificationId)
             SupabaseModule.client.postgrest[SupabaseConfig.TABLE_NOTIFICATIONS].update(
                 buildJsonObject { put("is_read", true) }
             ) {
-                filter { eq("id", ensureValidUuid(notificationId)) }
+                filter { eq("id", cleanId) }
             }
             Result.success(Unit)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Notice persisting notification read state: ${e.message}")
+            activeSubscribedUserId?.let { uid -> refreshNotifications(uid) }
             Result.success(Unit)
         }
     }

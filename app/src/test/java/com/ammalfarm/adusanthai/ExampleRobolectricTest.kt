@@ -85,7 +85,12 @@ assertTrue(newInstance.hasAcceptedPolicies())
             advanceAmount = 1800.0,
             customerNotes = "Visiting at 10 AM"
         )
-        val domain = dto.toDomain(matchedGoat = goat)
+        val domain = dto.toDomain(
+            resolvedGoatName = goat.name,
+            resolvedGoatBreed = goat.breed,
+            resolvedGoatPhoto = goat.imageUrl,
+            resolvedFarmName = "Kovai Heritage Farm"
+        )
         assertEquals(com.ammalfarm.adusanthai.model.BookingStatus.CONFIRMED, domain.status)
         assertEquals("44444444-4444-4444-4444-444444444444", domain.customerId)
         assertEquals("Salem Black Buck", domain.goatName)
@@ -98,7 +103,7 @@ assertTrue(newInstance.hasAcceptedPolicies())
         val farmDto = com.ammalfarm.adusanthai.data.dto.FarmDto(
             id = "22222222-2222-2222-2222-222222222222",
             ownerId = "55555555-5555-5555-5555-555555555555",
-            farmName = "Kovai Heritage Farm",
+            name = "Kovai Heritage Farm",
             location = "Coimbatore, Tamil Nadu",
             district = "Coimbatore",
             verificationStatus = "VERIFIED",
@@ -127,7 +132,12 @@ assertTrue(newInstance.hasAcceptedPolicies())
             approvalStatus = "APPROVED",
             isApprovedByAdmin = true
         )
-        val goat = goatDto.toDomain(matchedFarm = farm)
+        val goat = goatDto.toDomain(
+            resolvedFarmName = farm.name,
+            resolvedFarmLocation = farm.location,
+            resolvedFarmContact = farm.contactNumber,
+            resolvedFarmCode = farm.farmCode
+        )
         assertEquals("https://example.com/main.jpg", goat.imageUrl)
         assertEquals(3, goat.imageUrls.size)
         assertEquals("Kovai Heritage Farm", goat.farmName)

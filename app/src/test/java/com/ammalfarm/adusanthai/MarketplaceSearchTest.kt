@@ -171,99 +171,23 @@ email = "rejected@example.com",
 description = "Rejected private farm",
 verificationStatus = VerificationStatus.REJECTED
 )
-private class MockMarketplaceSearchRepository(
-val initialGoats: List<Goat> = emptyList(),
-val initialFarms: List<Farm> = emptyList()
-) : MarketplaceRepository {
-val goatList = CopyOnWriteArrayList(initialGoats)
-val farmList = CopyOnWriteArrayList(initialFarms)
-private val currentUserFlow = MutableStateFlow<UserProfile?>(null)
-override fun getCurrentUser(): Flow<UserProfile?> = currentUserFlow.asStateFlow()
-override suspend fun registerUser(name: String, email: String, phone: String, role: UserRole, farmName: String?): Result<UserProfile> =
-Result.success(UserProfile("u1", email, name, phone, role))
-override suspend fun login(email: String): Result<UserProfile> =
-Result.success(UserProfile("u1", email, "Test User", role = UserRole.CUSTOMER))
-override suspend fun logout() {}
-override fun getApprovedGoats(): Flow<List<Goat>> =
-flowOf(goatList.filter { it.approvalStatus == ApprovalStatus.APPROVED && it.availabilityStatus == AvailabilityStatus.AVAILABLE })
-override fun searchAndFilterGoats(criteria: GoatFilterCriteria): Flow<List<Goat>> {
-val approvedGoats = goatList.filter { it.approvalStatus == ApprovalStatus.APPROVED }
-val filtered = approvedGoats.filter { criteria.matches(it) }
-return flowOf(filtered)
-}
-override fun getGoatById(id: String): Flow<Goat?> = flowOf(goatList.find { it.id == id })
-override fun getGoatsByFarm(farmId: String): Flow<List<Goat>> = flowOf(goatList.filter { it.farmId == farmId })
-override fun getAllGoatsForAdmin(): Flow<List<Goat>> = flowOf(goatList)
-override fun getAvailableBreeds(): Flow<List<String>> = flowOf(goatList.map { it.breed }.filter { it.isNotBlank() }.distinct().sorted())
-override suspend fun addGoatListing(goat: Goat): Result<Goat> {
-goatList.add(goat)
-return Result.success(goat)
-}
-override suspend fun updateGoatListing(goat: Goat): Result<Goat> {
-val idx = goatList.indexOfFirst { it.id == goat.id }
-if (idx >= 0) goatList[idx] = goat
-return Result.success(goat)
-}
-override suspend fun deleteGoatListing(goatId: String): Result<Unit> {
-goatList.removeIf { it.id == goatId }
-return Result.success(Unit)
-}
-override suspend fun updateGoatApprovalStatus(goatId: String, status: ApprovalStatus): Result<Unit> {
-val idx = goatList.indexOfFirst { it.id == goatId }
-if (idx >= 0) goatList[idx] = goatList[idx].copy(approvalStatus = status)
-return Result.success(Unit)
-}
-override fun invalidateCache() {}
-override fun getCustomerBookings(customerId: String): Flow<List<Booking>> = flowOf(emptyList())
-override fun getFarmBookings(farmId: String): Flow<List<Booking>> = flowOf(emptyList())
-override fun getAllBookings(): Flow<List<Booking>> = flowOf(emptyList())
-override suspend fun createBooking(goatId: String, notes: String): Result<Booking> = Result.failure(NotImplementedError())
-override suspend fun updateBookingStatus(bookingId: String, status: AvailabilityStatus, reason: String?): Result<Unit> = Result.success(Unit)
-override suspend fun confirmBooking(bookingId: String): Result<Unit> = Result.success(Unit)
-override suspend fun cancelBooking(bookingId: String, reason: String): Result<Unit> = Result.success(Unit)
-override suspend fun completeBooking(bookingId: String): Result<Unit> = Result.success(Unit)
-override fun getAllFarms(): Flow<List<Farm>> = flowOf(farmList)
-override fun getFarmById(farmId: String): Flow<Farm?> = flowOf(null)
-override suspend fun registerFarm(farm: Farm): Result<Farm> = Result.success(farm)
-override suspend fun updateFarmProfile(farm: Farm): Result<Farm> = Result.success(farm)
-override suspend fun updateFarmLogo(farmId: String, logoUrl: String): Result<String> = Result.success(logoUrl)
-override suspend fun updateFarmVerification(farmId: String, status: VerificationStatus): Result<Unit> = Result.success(Unit)
-override suspend fun updateFarmListingLimit(farmId: String, limit: Int): Result<Unit> = Result.success(Unit)
-override suspend fun deleteFarm(farmId: String): Result<Unit> = Result.success(Unit)
-override fun getAllReports(): Flow<List<PlatformReport>> = flowOf(emptyList())
-override suspend fun submitReport(report: PlatformReport): Result<PlatformReport> = Result.success(report)
-override suspend fun updateReportStatus(reportId: String, status: ReportStatus, resolutionNotes: String?): Result<Unit> = Result.success(Unit)
-override suspend fun resolveReportWithAction(reportId: String, removeListingId: String?, suspendFarmId: String?, resolutionNotes: String): Result<Unit> = Result.success(Unit)
-override fun getAllCustomers(): Flow<List<UserProfile>> = flowOf(emptyList())
-override suspend fun updateUserSuspension(userId: String, isSuspended: Boolean): Result<Unit> = Result.success(Unit)
-override suspend fun suspendGoatListing(goatId: String): Result<Unit> = Result.success(Unit)
-override suspend fun restoreGoatListing(goatId: String): Result<Unit> = Result.success(Unit)
-override fun getNotificationsForUser(userId: String): Flow<List<AppNotification>> = flowOf(emptyList())
-override fun getNotificationsForRole(role: UserRole): Flow<List<AppNotification>> = flowOf(emptyList())
-override fun getAllNotifications(): Flow<List<AppNotification>> = flowOf(emptyList())
-override suspend fun sendNotification(notification: AppNotification): Result<Unit> = Result.success(Unit)
-override suspend fun markNotificationAsRead(notificationId: String): Result<Unit> = Result.success(Unit)
-override suspend fun markAllNotificationsAsRead(userId: String, role: UserRole): Result<Unit> = Result.success(Unit)
-override suspend fun deleteNotification(notificationId: String): Result<Unit> = Result.success(Unit)
-override suspend fun clearAllNotifications(userId: String, role: UserRole): Result<Unit> = Result.success(Unit)
-override suspend fun triggerSampleNotification(type: NotificationType): Result<Unit> = Result.success(Unit)
-override fun getWishlistForUser(userId: String): Flow<List<WishlistItem>> = flowOf(emptyList())
-override fun isGoatInWishlist(userId: String, goatId: String): Flow<Boolean> = flowOf(false)
-override suspend fun addToWishlist(userId: String, goatId: String): Result<WishlistItem> = Result.failure(NotImplementedError())
-override suspend fun removeFromWishlist(userId: String, goatId: String): Result<Unit> = Result.success(Unit)
-override suspend fun toggleWishlist(userId: String, goatId: String): Result<Boolean> = Result.success(true)
-override fun getListingPaymentsForFarm(farmId: String): Flow<List<ListingPayment>> = flowOf(emptyList())
-override fun getAllListingPayments(): Flow<List<ListingPayment>> = flowOf(emptyList())
-override suspend fun initiateListingPayment(goatId: String): Result<ListingPaymentInitiation> = Result.failure(NotImplementedError())
-override suspend fun verifyListingPayment(goatId: String, orderId: String, paymentId: String, signature: String, amount: Double): Result<PaymentVerificationResult> = Result.failure(NotImplementedError())
-override suspend fun recordPaymentFailure(goatId: String, orderId: String?, error: String): Result<Unit> = Result.success(Unit)
-override suspend fun recordPaymentCancellation(goatId: String, orderId: String?): Result<Unit> = Result.success(Unit)
-override suspend fun recordFarmApprovalPayment(farmId: String, amount: Double, paymentRef: String?, receiptNumber: String?, notes: String?): Result<ListingPayment> = Result.failure(NotImplementedError())
-override suspend fun recordQuotaIncreasePayment(farmId: String, slotsToAdd: Int, amount: Double, paymentRef: String?, receiptNumber: String?, notes: String?): Result<Int> = Result.failure(NotImplementedError())
-override fun getPlatformPricing(): Flow<PlatformPricing> = flowOf(PlatformPricing())
-override suspend fun updatePlatformPricing(approvalPrice: Double, slotPrice: Double, defaultInitialSlots: Int): Result<PlatformPricing> = Result.success(PlatformPricing(approvalPrice, slotPrice, defaultInitialSlots))
-override fun getPlatformStats(): Flow<PlatformStats> = flowOf(PlatformStats())
-}
+    private class MockMarketplaceSearchRepository(
+        val initialGoats: List<Goat> = emptyList(),
+        val initialFarms: List<Farm> = emptyList()
+    ) : com.ammalfarm.adusanthai.data.repository.SupabaseMarketplaceRepositoryImpl(
+        context = null,
+        initialFarms = initialFarms,
+        initialGoats = initialGoats
+    ) {
+        val goatList = CopyOnWriteArrayList(initialGoats)
+        val farmList = CopyOnWriteArrayList(initialFarms)
+
+        fun searchAndFilterGoats(criteria: GoatFilterCriteria): Flow<List<Goat>> {
+            val approvedGoats = goatList.filter { it.approvalStatus == ApprovalStatus.APPROVED }
+            val filtered = approvedGoats.filter { criteria.matches(it) }
+            return flowOf(filtered)
+        }
+    }
 @Before
 fun setUp() {
 Dispatchers.setMain(testDispatcher)

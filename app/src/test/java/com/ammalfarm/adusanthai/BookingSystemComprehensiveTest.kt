@@ -300,7 +300,7 @@ assertTrue(customer2Result.isSuccess)
 }
 // --- SCENARIO 8: Confirmed booking prevents other bookings ---
 @Test
-fun `Scenario 8 - Confirmed booking updates goat to BookingStatus.CONFIRMED and blocks other bookings`() {
+fun `Scenario 8 - Confirmed booking updates goat to BookingStatus CONFIRMED and blocks other bookings`() {
 val engine = TestBookingEngine()
 val goat = createTestGoat()
 engine.addGoat(goat)

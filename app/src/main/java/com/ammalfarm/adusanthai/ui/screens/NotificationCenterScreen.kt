@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsNone
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +48,25 @@ fun NotificationCenterScreen(
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    val hasUnread = notifications.any { !it.isRead }
+                    if (hasUnread && currentUser != null) {
+                        TextButton(
+                            onClick = {
+                                marketplaceViewModel?.markAllNotificationsRead(currentUser.id)
+                            }
+                        ) {
+                            Text("Mark All Read")
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            currentUser?.id?.let { marketplaceViewModel?.refreshNotifications(it) }
+                        }
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh Notifications")
                     }
                 }
             )

@@ -30,7 +30,7 @@ override suspend fun updateGoatListing(goat: Goat): Result<Goat> = Result.succes
 override suspend fun deleteGoatListing(goatId: String): Result<Unit> = Result.success(Unit)
 override suspend fun updateGoatApprovalStatus(goatId: String, status: ApprovalStatus): Result<Unit> = Result.success(Unit)
 override fun getAvailableBreeds(): Flow<List<String>> = flowOf(emptyList())
-override suspend fun getGoatsCount(): Result<Int> = Result.success(0)
+override fun getGoatsCount(): Int = 0
 override fun invalidateCache() {}
 }
 @Test

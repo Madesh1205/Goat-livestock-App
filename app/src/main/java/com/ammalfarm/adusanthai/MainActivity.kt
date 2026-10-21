@@ -180,6 +180,16 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    // Keep user-specific data and live notification subscription synchronized with auth state
+                    LaunchedEffect(authUiState.currentUser?.id) {
+                        val user = authUiState.currentUser
+                        if (user != null) {
+                            marketplaceViewModel.loadUserSpecificData(user)
+                        } else {
+                            marketplaceViewModel.clearUserSession()
+                        }
+                    }
+
                     fun destinationForRole(role: UserRole): String {
                         return when (role) {
                             UserRole.SUPER_ADMIN -> Screen.SuperAdmin.route

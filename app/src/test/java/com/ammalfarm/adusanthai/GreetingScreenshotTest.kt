@@ -1,11 +1,9 @@
 package com.ammalfarm.adusanthai
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import com.ammalfarm.adusanthai.model.ApprovalStatus
-import com.ammalfarm.adusanthai.model.AvailabilityStatus
-import com.ammalfarm.adusanthai.ui.theme.MyApplicationTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
@@ -19,10 +17,11 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = RobolectricDeviceQualifiers.Pixel8, sdk = [36])
 class GreetingScreenshotTest {
-@get:Rule val composeTestRule = createComposeRule()
-@Test
-fun greeting_screenshot() {
-composeTestRule.setContent { MyApplicationTheme { Text("Ammal Farm Marketplace") } }
-composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
-}
+    @get:Rule val composeTestRule = createComposeRule()
+
+    @Test
+    fun greeting_screenshot() {
+        composeTestRule.setContent { MaterialTheme { Text("Ammal Farm Marketplace") } }
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
+    }
 }
