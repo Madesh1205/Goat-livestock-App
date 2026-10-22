@@ -19,7 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AddGoatFormValidationTest {
-private open class TestGoatRepository : GoatRepository {
+private open class TestGoatRepository : GoatRepository() {
 override fun getApprovedGoats(): Flow<List<Goat>> = flowOf(emptyList())
 override fun searchAndFilterGoats(criteria: GoatFilterCriteria): Flow<List<Goat>> = flowOf(emptyList())
 override fun getGoatById(id: String): Flow<Goat?> = flowOf(null)

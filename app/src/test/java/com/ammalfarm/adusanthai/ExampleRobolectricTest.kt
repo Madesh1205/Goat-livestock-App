@@ -121,18 +121,19 @@ assertTrue(newInstance.hasAcceptedPolicies())
             id = "11111111-1111-1111-1111-111111111111",
             farmId = farm.id,
             name = "Kanni Buck",
-            breed = "Kanni Adu",
+            breedName = "Kanni Adu",
             gender = "Male",
             ageMonths = 14,
             weightKg = 32.5,
             price = 22000.0,
             imageUrl = "https://example.com/main.jpg",
-            additionalImages = listOf("https://example.com/side.jpg", "https://example.com/back.jpg"),
+            imageUrls = listOf("https://example.com/side.jpg", "https://example.com/back.jpg"),
             status = "AVAILABLE",
             approvalStatus = "APPROVED",
             isApprovedByAdmin = true
         )
         val goat = goatDto.toDomain(
+            resolvedPhotos = listOf("https://example.com/main.jpg", "https://example.com/side.jpg"),
             resolvedFarmName = farm.name,
             resolvedFarmLocation = farm.location,
             resolvedFarmContact = farm.contactNumber,
