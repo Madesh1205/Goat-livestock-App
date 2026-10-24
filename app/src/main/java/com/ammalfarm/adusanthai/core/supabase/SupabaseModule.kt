@@ -29,7 +29,10 @@ object SupabaseModule {
         supabaseKey = SupabaseConfig.SUPABASE_KEY
     ) {
         defaultSerializer = KotlinXSerializer(jsonSerializer)
-        install(Auth)
+        install(Auth) {
+            sessionManager = io.github.jan.supabase.auth.MemorySessionManager()
+            codeVerifierCache = io.github.jan.supabase.auth.MemoryCodeVerifierCache()
+        }
         install(Postgrest)
         install(Realtime)
         install(Storage)

@@ -231,13 +231,23 @@ class CompleteFcmNotificationSystemRegressionTest {
         assertEquals(0, unreadFinal)
     }
 
+    private fun getProjectFile(relativePath: String): File {
+        val direct = File(relativePath)
+        if (direct.exists()) return direct
+        val parent = File("..", relativePath)
+        if (parent.exists()) return parent
+        val userDir = File(System.getProperty("user.dir") ?: ".")
+        val root = if (userDir.name == "app") userDir.parentFile else userDir
+        return File(root, relativePath)
+    }
+
     // -------------------------------------------------------------------------
     // 6. SERVER-SIDE MIGRATION & EDGE FUNCTION AUDIT
     // -------------------------------------------------------------------------
 
     @Test
     fun testMigrationContainsAllRequiredTablesAndTriggers() {
-        val migrationFile = File("supabase/migrations/20261019000000_fcm_notification_system_production_fix.sql")
+        val migrationFile = getProjectFile("supabase/migrations/20261019000000_fcm_notification_system_production_fix.sql")
         assertTrue("FCM production migration file must exist", migrationFile.exists())
         val sql = migrationFile.readText()
 
@@ -253,7 +263,7 @@ class CompleteFcmNotificationSystemRegressionTest {
 
     @Test
     fun testEdgeFunctionCodeAudit() {
-        val edgeFunction = File("supabase/functions/send-fcm-notification/index.ts")
+        val edgeFunction = getProjectFile("supabase/functions/send-fcm-notification/index.ts")
         assertTrue("send-fcm-notification edge function must exist", edgeFunction.exists())
         val ts = edgeFunction.readText()
 
@@ -262,5 +272,64 @@ class CompleteFcmNotificationSystemRegressionTest {
         assertTrue("Must handle deadToken cleanup", ts.contains("deadToken"))
         assertTrue("Must mask tokens in logs", ts.contains("maskToken"))
         assertTrue("Must support X-Webhook-Secret or service_role", ts.contains("x-webhook-secret") || ts.contains("service_role"))
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. NEW FCM MIGRATION & HTTP V1 PAYLOAD AUDIT
+    // -------------------------------------------------------------------------
+    @Test
+    fun testHardenedFcmMigrationContainsEnhancedRpcAndTrigger() {
+        val migrationFile = getProjectFile("supabase/migrations/20261024000000_fix_fcm_push_notification_delivery_and_token_rpc.sql")
+        assertTrue("Hardened FCM migration file must exist", migrationFile.exists())
+        val sql = migrationFile.readText()
+        assertTrue("Must support p_user_id parameter in register_fcm_device_token", sql.contains("p_user_id UUID DEFAULT NULL"))
+        assertTrue("Must resolve user with COALESCE(auth.uid(), p_user_id)", sql.contains("COALESCE(auth.uid(), p_user_id)"))
+        assertTrue("Must prevent user ID mismatch when authenticated", sql.contains("User ID mismatch"))
+        assertTrue("Must verify target user exists in profiles", sql.contains("User profile not found"))
+        assertTrue("Must support p_user_id parameter in remove_fcm_device_token", sql.contains("remove_fcm_device_token"))
+        assertTrue("Must supply apikey and Authorization header in net.http_post trigger", sql.contains("'apikey'") && sql.contains("'Authorization'"))
+        assertTrue("Must maintain tr_send_fcm_on_notification_insert trigger", sql.contains("tr_send_fcm_on_notification_insert"))
+    }
+
+    @Test
+    fun testEdgeFunctionHttpV1StructureAndSecurity() {
+        val edgeFunction = getProjectFile("supabase/functions/send-fcm-notification/index.ts")
+        assertTrue(edgeFunction.exists())
+        val code = edgeFunction.readText()
+        // Must send both notification and data payloads for FCM HTTP v1
+        assertTrue("Must contain notification payload with title and body", code.contains("notification: {") && code.contains("title,") && code.contains("body,"))
+        assertTrue("Must contain data payload with all required navigation attributes", code.contains("notification_id:") && code.contains("link_type:") && code.contains("recipient_user_id:"))
+        // Android specific HTTP v1 attributes
+        assertTrue("Must specify Android priority HIGH", code.contains("priority: \"HIGH\""))
+        assertTrue("Must configure channel_id", code.contains("channel_id: targetChannel"))
+        assertTrue("Must set default_sound and default_vibrate_timings", code.contains("default_sound: true") && code.contains("default_vibrate_timings: true"))
+        assertTrue("Must configure small icon and color", code.contains("icon: \"ic_notification_small\"") && code.contains("color: \"#2E7D32\""))
+        assertFalse("Must not force notification_count to 0 which breaks OEM badges", code.contains("notification_count: 0"))
+        // Must not contain hardcoded fallback secret
+        assertFalse("Must not contain hardcoded fallback secret string", code.contains("\"fcm-webhook-secret-v1\""))
+    }
+
+    @Test
+    fun testBackgroundNotificationIntentExtraction() {
+        val intent = android.content.Intent().apply {
+            putExtra("notification_id", "test-notif-uuid-123")
+            putExtra("link_type", "BOOKING")
+            putExtra("reference_id", "booking-ref-456")
+        }
+        val notifId = intent.getStringExtra("extra_notification_id") ?: intent.getStringExtra("notification_id")
+        val linkType = intent.getStringExtra("extra_link_type") ?: intent.getStringExtra("link_type")
+        val linkId = intent.getStringExtra("extra_link_id") ?: intent.getStringExtra("reference_id") ?: intent.getStringExtra("link_id")
+
+        assertEquals("test-notif-uuid-123", notifId)
+        assertEquals("BOOKING", linkType)
+        assertEquals("booking-ref-456", linkId)
+    }
+
+    @Test
+    fun testConfigTomlConfiguredForWebhook() {
+        val configFile = getProjectFile("supabase/config.toml")
+        assertTrue("supabase/config.toml must exist", configFile.exists())
+        val configText = configFile.readText()
+        assertTrue("Must disable JWT verification for send-fcm-notification", configText.contains("verify_jwt = false"))
     }
 }

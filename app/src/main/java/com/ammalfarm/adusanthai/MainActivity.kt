@@ -163,8 +163,12 @@ class MainActivity : ComponentActivity() {
                         val activeIntent = pendingNotificationIntent.value
                         if (activeIntent != null && authUiState.isAuthenticated && !authUiState.isLoading && authUiState.currentUser != null) {
                             val notifId = activeIntent.getStringExtra("extra_notification_id")
+                                ?: activeIntent.getStringExtra("notification_id")
                             val linkType = activeIntent.getStringExtra("extra_link_type")
+                                ?: activeIntent.getStringExtra("link_type")
                             val linkId = activeIntent.getStringExtra("extra_link_id")
+                                ?: activeIntent.getStringExtra("reference_id")
+                                ?: activeIntent.getStringExtra("link_id")
 
                             if (!notifId.isNullOrBlank()) {
                                 marketplaceViewModel.markNotificationRead(notifId)

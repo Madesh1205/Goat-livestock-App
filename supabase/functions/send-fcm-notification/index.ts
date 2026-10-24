@@ -63,6 +63,7 @@ async function googleToken(email: string, pem: string) {
         exp: n + 3600,
       })
     );
+
   const k = await crypto.subtle.importKey(
     "pkcs8",
     pemBytes(pem),
@@ -70,9 +71,11 @@ async function googleToken(email: string, pem: string) {
     false,
     ["sign"]
   );
+
   const sig = new Uint8Array(
     await crypto.subtle.sign("RSASSA-PKCS1-v1_5", k, new TextEncoder().encode(u))
   );
+
   const r = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -81,26 +84,35 @@ async function googleToken(email: string, pem: string) {
       assertion: u + "." + b64u(sig),
     }),
   });
+
   if (!r.ok) {
-    console.error("Google OAuth token request failed with status:", r.status);
-    throw new Error("Google OAuth failed");
+    console.error("Google OAuth token request failed with HTTP status:", r.status);
+    throw new Error("Google OAuth token exchange failed");
   }
+
   const d = await r.json();
   if (!d.access_token) throw new Error("Google OAuth returned no access token");
   return d.access_token as string;
 }
 
-function channel(t: string) {
-  const x = t.toUpperCase();
-  if (x.includes("BOOKING") || x.includes("HOLD") || x.includes("RESERVATION")) {
+function channel(t: string): string {
+  const x = (t ?? "").toUpperCase().trim();
+  if (
+    x.includes("BOOKING") ||
+    x.includes("HOLD") ||
+    x.includes("RESERVATION") ||
+    x.includes("ORDER")
+  ) {
     return "ammal_channel_bookings";
   }
   if (
     x.includes("ADMIN") ||
-    x.includes("FARM_APPLICATION") ||
+    x.includes("FARM") ||
+    x.includes("GOAT") ||
     x.includes("MODERATION") ||
     x.includes("REPORT") ||
-    x.includes("PAYMENT")
+    x.includes("PAYMENT") ||
+    x.includes("APPLICATION")
   ) {
     return "ammal_channel_admin";
   }
@@ -137,20 +149,25 @@ function deadToken(status: number, text: string, j: any): boolean {
 const maskToken = (t: string) =>
   t.length > 10 ? `${t.slice(0, 6)}...${t.slice(-4)}` : "***";
 
+const maskId = (id: string) =>
+  id.length > 8 ? `${id.slice(0, 8)}...` : id;
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST required" }, 405);
 
   // Authorization: accept verified service_role JWT or trusted X-Webhook-Secret
-  const expectedSecret =
-    Deno.env.get("FCM_WEBHOOK_SECRET") ?? "fcm-webhook-secret-v1";
+  const expectedSecret = Deno.env.get("FCM_WEBHOOK_SECRET");
   const providedSecret = req.headers.get("x-webhook-secret");
   const role = roleFromGatewayVerifiedJwt(req.headers.get("authorization"));
 
   const isAuthorized =
     role === "service_role" ||
-    (providedSecret !== null && providedSecret === expectedSecret);
+    (Boolean(expectedSecret) && providedSecret === expectedSecret);
 
   if (!isAuthorized) {
+    console.warn(
+      `[FCM] Unauthorized dispatch attempt. Role: ${role ?? "none"}, Secret match: ${Boolean(expectedSecret && providedSecret === expectedSecret)}`
+    );
     return json({ error: "Unauthorized or Forbidden" }, 403);
   }
 
@@ -166,7 +183,9 @@ Deno.serve(async (req: Request) => {
     Deno.env.get("FCM_PRIVATE_KEY") ?? Deno.env.get("FIREBASE_PRIVATE_KEY");
 
   if (!url || !sk || !pid || !email || !pk) {
-    console.error("Missing required Supabase or Firebase FCM configuration secrets");
+    console.error(
+      "[FCM] Missing required Supabase or Firebase FCM configuration secrets in Edge Function environment"
+    );
     return json({ error: "Server configuration incomplete" }, 500);
   }
 
@@ -185,7 +204,7 @@ Deno.serve(async (req: Request) => {
   ) {
     return json({
       ignored: true,
-      reason: "Expected public.notifications INSERT webhook",
+      reason: "Expected public.notifications INSERT webhook payload",
     });
   }
 
@@ -200,7 +219,7 @@ Deno.serve(async (req: Request) => {
   const li = typeof row.link_id === "string" ? row.link_id : "";
 
   if (!uid || !title || !body || !nid) {
-    return json({ error: "Missing required notification fields" }, 400);
+    return json({ error: "Missing required notification fields (user_id, title, body, id)" }, 400);
   }
 
   // Deduplication guard: check if already sent via FCM
@@ -212,6 +231,10 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  console.log(
+    `[FCM] Processing notification ${maskId(nid)} for recipient ${maskId(uid)}, type: ${lt}`
+  );
+
   const db = createClient(url, sk, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -222,7 +245,7 @@ Deno.serve(async (req: Request) => {
     .eq("user_id", uid);
 
   if (error) {
-    console.error("FCM device token lookup failed:", error.message);
+    console.error(`[FCM] Failed to query device tokens for recipient ${maskId(uid)}:`, error.message);
     return json({ error: "Failed to query device tokens" }, 500);
   }
 
@@ -236,6 +259,19 @@ Deno.serve(async (req: Request) => {
 
   // Distinguish unavailable-device case from successful delivery
   if (!tokens.length) {
+    console.log(`[FCM] No registered active FCM device tokens found for recipient ${maskId(uid)}`);
+    try {
+      await db
+        .from("notifications")
+        .update({
+          fcm_status: "NO_TOKENS",
+          fcm_sent_at: new Date().toISOString(),
+        })
+        .eq("id", nid);
+    } catch (_e) {
+      // Non-fatal
+    }
+
     return json(
       {
         status: "NO_ACTIVE_DEVICES",
@@ -255,7 +291,7 @@ Deno.serve(async (req: Request) => {
     access = await googleToken(email, pk);
   } catch (e) {
     console.error(
-      "FCM OAuth authentication failed:",
+      "[FCM] Google OAuth authentication failed:",
       e instanceof Error ? e.message : "Unknown error"
     );
     return json({ error: "FCM authentication failed" }, 502);
@@ -268,24 +304,36 @@ Deno.serve(async (req: Request) => {
     pid
   )}/messages:send`;
 
+  const targetChannel = channel(lt);
+
   for (const token of tokens) {
     const msg = {
       message: {
         token,
-        notification: { title, body },
+        notification: {
+          title,
+          body,
+        },
         data: {
           notification_id: nid,
           title,
+          body,
           message: body,
           recipient_user_id: uid,
           link_type: lt,
+          link_id: li,
           reference_id: li,
         },
         android: {
           priority: "HIGH",
           notification: {
-            channel_id: channel(lt),
-            notification_count: 0,
+            channel_id: targetChannel,
+            icon: "ic_notification_small",
+            color: "#2E7D32",
+            default_sound: true,
+            default_vibrate_timings: true,
+            visibility: "PUBLIC",
+            tag: nid,
           },
         },
       },
@@ -303,6 +351,7 @@ Deno.serve(async (req: Request) => {
 
       if (r.ok) {
         sent++;
+        console.log(`[FCM] Successfully delivered message to token ${maskToken(token)}`);
       } else {
         failed++;
         const text = await r.text();
@@ -310,10 +359,12 @@ Deno.serve(async (req: Request) => {
         try {
           j = JSON.parse(text);
         } catch {}
+
         console.error(
-          `FCM send failed for token ${maskToken(token)}: HTTP ${r.status}`,
+          `[FCM] Send failed for token ${maskToken(token)}: HTTP ${r.status}`,
           j?.error?.status ?? "FCM_ERROR"
         );
+
         if (deadToken(r.status, text, j)) {
           invalid.push(token);
         }
@@ -321,7 +372,7 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       failed++;
       console.error(
-        `FCM request failed for token ${maskToken(token)}:`,
+        `[FCM] Network request failed for token ${maskToken(token)}:`,
         e instanceof Error ? e.message : "Network error"
       );
     }
@@ -333,19 +384,27 @@ Deno.serve(async (req: Request) => {
       .from("fcm_device_tokens")
       .delete()
       .in("token", invalid);
+
     if (e) {
-      console.error("Invalid-token cleanup notice:", e.message);
+      console.error("[FCM] Invalid-token cleanup notice:", e.message);
     } else {
-      console.log(`Cleaned ${invalid.length} expired or invalid FCM device tokens`);
+      console.log(`[FCM] Cleaned ${invalid.length} expired or invalid FCM device tokens`);
     }
   }
 
   // Update notification delivery status for duplicate prevention
+  const deliveryStatus =
+    sent > 0 && failed === 0
+      ? "SENT"
+      : sent > 0
+      ? "PARTIALLY_SENT"
+      : "FAILED";
+
   try {
     await db
       .from("notifications")
       .update({
-        fcm_status: sent > 0 ? "SENT" : "FAILED",
+        fcm_status: deliveryStatus,
         fcm_sent_at: new Date().toISOString(),
       })
       .eq("id", nid);
@@ -361,6 +420,10 @@ Deno.serve(async (req: Request) => {
       : "FAILED";
 
   const httpCode = sent > 0 ? 200 : 502;
+
+  console.log(
+    `[FCM] Finished notification ${maskId(nid)}: status=${responseStatus}, sent=${sent}, failed=${failed}, totalTokens=${tokens.length}`
+  );
 
   return json(
     {
